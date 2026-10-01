@@ -1,0 +1,28 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Build output
+build/
+target/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+CMakeUserPresets.json
+
+# Android / Gradle
+.gradle/
+.cxx/
+local.properties
+
+# IDE files
+.idea/
+*.iml
+.vs/
+
+# Operating system files
+.DS_Store
+Thumbs.db
