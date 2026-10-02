@@ -15,7 +15,7 @@ classDiagram
     class EnrollmentToken
     class SecurityEvent
 
-    Company -- User : agrupa
+    Company "1" -- "1..*" User : agrupa
     Company -- License : contiene
     Company -- Policy : define
     Company -- Device : registra
@@ -28,3 +28,5 @@ classDiagram
     License -- EnrollmentToken : autoriza
 
     Device "1" -- "0..*" SecurityEvent : genera
+
+    note for Company "Debe conservar al menos un User con rol ADMIN"

@@ -10,9 +10,11 @@ Este documento recoge las entidades y reglas acordadas para el MVP.
 
 [Fuente editable del diagrama (Mermaid)](../../diagrams/domain-model.mmd).
 
-El diagrama resume las asociaciones del MVP. La relación entre Device
-y SecurityEvent incluye las cardinalidades acordadas. Las cardinalidades
-completas de las demás asociaciones se concretarán al detallar el dominio.
+El diagrama resume las asociaciones del MVP. Las relaciones Company–User
+y Device–SecurityEvent incluyen las cardinalidades acordadas. La nota
+de Company recoge la obligación de conservar al menos un ADMIN.
+Las cardinalidades completas de las demás asociaciones se concretarán
+al detallar el dominio.
 
 ## Entidades
 
@@ -28,6 +30,9 @@ completas de las demás asociaciones se concretarán al detallar el dominio.
 
 ## Usuarios y administración
 
+- Cada Company tiene uno o muchos Users y se crea con su primer ADMIN.
+- Cada Company debe conservar al menos un User con el rol ADMIN.
+- Se impide eliminar o cambiar a USER el rol del último ADMIN de una Company.
 - El inicio de sesión utiliza email y contraseña.
 - Las contraseñas se almacenan mediante BCrypt.
 - Cada ADMIN administra únicamente su propia Company.
