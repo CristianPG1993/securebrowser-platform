@@ -30,3 +30,17 @@ y documentación técnica.
 - [Arquitectura general](docs/architecture/overview.md).
 - [Modelo de dominio del MVP](docs/architecture/domain-model.md).
 - [Decisiones arquitectónicas (ADR)](docs/adr/).
+
+## Derechos de uso
+
+Todos los derechos reservados sobre el código y la documentación originales
+de SecureBrowser Platform.
+
+No se concede una licencia general para utilizar, modificar, redistribuir
+o incorporar este material en otros proyectos sin autorización expresa
+del titular de los derechos.
+
+Este aviso no limita los usos permitidos por la legislación aplicable
+ni los permisos concedidos mediante las condiciones de servicio de GitHub.
+
+Las dependencias y los materiales de terceros se rigen por sus propias licencias.
