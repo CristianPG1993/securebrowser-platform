@@ -14,7 +14,7 @@ Este documento recoge las entidades y reglas acordadas para el MVP.
 | EnrollmentToken | Se asocia a una License y a un User para autorizar el enrollment. |
 | Device | Representa una instalación, pertenece a una Company y a un User, utiliza una License y siempre tiene una Policy. |
 | Policy | Pertenece a una Company y puede asignarse a varios Devices. |
-| SecurityEvent | Registra sucesos de seguridad y permite su sincronización tras trabajar offline. |
+| SecurityEvent | Pertenece a un único Device. Su Company se obtiene a través de ese Device. Registra sucesos de seguridad y permite su sincronización tras trabajar offline. |
 
 ## Usuarios y administración
 
@@ -56,6 +56,10 @@ Cada funcionalidad de una Policy tiene una propiedad `enabled`.
 - Los archivos sin extensión se bloquean en el MVP.
 
 ## Eventos de seguridad
+
+
+Un Device puede tener cero o muchos SecurityEvents. Cada evento corresponde
+a una única instalación.
 
 Los tipos previstos son:
 
