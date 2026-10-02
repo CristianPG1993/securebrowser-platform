@@ -9,7 +9,9 @@ La documentación se redacta en español.
 
 ## Rama principal
 
-`main` contiene los cambios integrados del proyecto.
+
+`main` debe permanecer estable. Contiene los cambios terminados,
+revisados e integrados del proyecto.
 
 Los cambios se realizan en ramas de trabajo y se incorporan a `main`
 mediante Pull Requests. No se hacen commits ni pushes directos a `main`.
@@ -23,7 +25,7 @@ Cada tarea utiliza una rama creada desde `main` actualizado.
 El nombre debe describir el propósito del cambio. Ejemplos:
 
 - `docs/branch-pr-workflow`: documentación.
-- `feat/device-enrollment`: nueva funcionalidad.
+- `feature/device-enrollment`: nueva funcionalidad.
 - `fix/event-deduplication`: corrección de un error.
 - `test/license-capacity`: pruebas.
 
@@ -75,6 +77,13 @@ cambio. Si participan otros colaboradores, también pueden revisarlo.
 Para documentación, comprobar el contenido, los enlaces y la
 visualización de los diagramas afectados. Para código, ejecutar las
 pruebas y comprobaciones correspondientes.
+
+Cuando una Pull Request ejecute workflows de GitHub Actions,
+sus comprobaciones deben finalizar correctamente antes del merge.
+No se fusiona mientras haya comprobaciones pendientes o fallidas.
+
+Mientras no existan workflows configurados, documentar las
+comprobaciones manuales realizadas en la Pull Request.
 
 Fusionar mediante GitHub cuando el cambio esté terminado y revisado.
 
