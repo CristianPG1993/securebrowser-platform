@@ -24,3 +24,9 @@ usuarios, licencias, dispositivos, políticas y eventos de seguridad.
 
 El proyecto se encuentra en la fase de configuración inicial del repositorio
 y documentación técnica.
+
+## Documentación
+
+- [Arquitectura general](docs/architecture/overview.md).
+- [Modelo de dominio del MVP](docs/architecture/domain-model.md).
+- [Decisiones arquitectónicas (ADR)](docs/adr/).
