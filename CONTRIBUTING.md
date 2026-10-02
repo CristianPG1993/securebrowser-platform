@@ -18,6 +18,43 @@ mediante Pull Requests. No se hacen commits ni pushes directos a `main`.
 
 La protección de `main` se configura por separado en GitHub.
 
+## Protección de main
+
+La rama `main` está protegida mediante el ruleset `protect-main`,
+configurado en GitHub.
+
+| Configuración | Valor |
+|---|---|
+| Estado | Active |
+| Rama de destino | main |
+| Lista de bypass | Vacía |
+| Require a pull request before merging | Activado |
+| Required approvals | 0 |
+| Require conversation resolution before merging | Activado |
+| Restrict deletions | Activado |
+| Block force pushes | Activado |
+| Require status checks to pass before merging | Pendiente de configurar al incorporar CI |
+
+La lista de bypass vacía hace que el workflow mediante Pull Requests
+también se aplique al administrador del repositorio.
+
+No se exigen aprobaciones externas porque SBP se desarrolla como
+proyecto individual. El autor revisa el diff y realiza las comprobaciones
+correspondientes antes de fusionar. Las conversaciones de revisión
+deben estar resueltas.
+
+Actualmente no hay workflows de CI configurados. Cuando se incorporen,
+se añadirán sus checks obligatorios al ruleset. Mientras tanto,
+las comprobaciones manuales se documentan en cada Pull Request.
+
+[Configuración del ruleset protect-main](<https://github.com/CristianPG1993/securebrowser-platform/settings/rules/24382571>).
+
+Para comprobar la configuración, abrir el ruleset en GitHub y verificar
+su estado Active, el destino main, la lista de bypass vacía y las reglas
+indicadas en esta tabla.
+
+Esto deja registrada la configuración y distingue las reglas activas de los checks que añadiremos cuando exista CI.
+
 ## Ramas de trabajo
 
 Cada tarea utiliza una rama creada desde `main` actualizado.
