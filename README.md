@@ -30,6 +30,7 @@ y documentación técnica.
 - [Arquitectura general](docs/architecture/overview.md).
 - [Modelo de dominio del MVP](docs/architecture/domain-model.md).
 - [Decisiones arquitectónicas (ADR)](docs/adr/).
+- [Convenciones del proyecto](docs/architecture/conventions.md).
 
 ## Derechos de uso
 
