@@ -1,0 +1,11 @@
+flowchart LR
+    Desktop["Desktop<br/>C++ y CEF"]
+    Android["Android<br/>Kotlin y Jetpack Compose"]
+    Backend["Backend<br/>Java y Spring Boot"]
+    LocalDb[("SQLite<br/>Persistencia local y eventos pendientes")]
+    CentralDb[("PostgreSQL<br/>securebrowser_db")]
+
+    Desktop <-->|API| Backend
+    Android <-->|API| Backend
+    Desktop <-->|Persistencia local| LocalDb
+    Backend <-->|Persistencia central| CentralDb
