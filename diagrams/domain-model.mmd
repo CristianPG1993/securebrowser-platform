@@ -1,0 +1,30 @@
+---
+config:
+  class:
+    hideEmptyMembersBox: true
+---
+
+classDiagram
+    direction LR
+
+    class Company
+    class User
+    class License
+    class Policy
+    class Device
+    class EnrollmentToken
+    class SecurityEvent
+
+    Company -- User : agrupa
+    Company -- License : contiene
+    Company -- Policy : define
+    Company -- Device : registra
+
+    User -- Device : tiene instalaciones
+    License -- Device : cubre
+    Policy -- Device : se asigna a
+
+    User -- EnrollmentToken : recibe
+    License -- EnrollmentToken : autoriza
+
+    Device "1" -- "0..*" SecurityEvent : genera

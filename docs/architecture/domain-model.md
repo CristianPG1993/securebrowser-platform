@@ -4,6 +4,16 @@
 
 Este documento recoge las entidades y reglas acordadas para el MVP.
 
+## Diagrama conceptual
+
+![Modelo de dominio de SBP](../../diagrams/domain-model.svg)
+
+[Fuente editable del diagrama (Mermaid)](../../diagrams/domain-model.mmd).
+
+El diagrama resume las asociaciones del MVP. La relación entre Device
+y SecurityEvent incluye las cardinalidades acordadas. Las cardinalidades
+completas de las demás asociaciones se concretarán al detallar el dominio.
+
 ## Entidades
 
 | Entidad | Responsabilidad y relaciones |
