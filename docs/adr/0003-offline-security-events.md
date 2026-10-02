@@ -46,6 +46,10 @@ se conservará durante su almacenamiento y sus intentos de sincronización.
 El backend utilizará `event_uuid` para evitar registros duplicados
 cuando reciba varias veces el mismo evento.
 
+El evento `POLICY_UPDATED` se generará en Desktop cuando un dispositivo
+aplique correctamente una actualización de su política. Representará
+la aplicación efectiva del cambio en ese dispositivo.
+
 ## Consecuencias
 
 - El registro de eventos soportará periodos sin conexión.

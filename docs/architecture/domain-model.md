@@ -61,7 +61,8 @@ Los tipos previstos son:
 
 - `URL_BLOCKED`.
 - `DOWNLOAD_BLOCKED`.
-- `POLICY_UPDATED`.
+- `POLICY_UPDATED`: generado por Desktop cuando un dispositivo aplica
+  correctamente una actualización de su política.
 
 El sistema debe soportar funcionamiento offline:
 
