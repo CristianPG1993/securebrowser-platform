@@ -4,6 +4,13 @@
 
 Este documento describe la arquitectura prevista para el MVP del TFG.
 
+## Diagrama general
+
+![Arquitectura general de SBP](../../diagrams/architecture-overview.svg)
+
+[Fuente editable del diagrama (Mermaid)](../../diagrams/architecture-overview.mmd).
+
+
 ## Desktop
 
 Aplicación de navegación en C++ con Chromium Embedded Framework (CEF).
