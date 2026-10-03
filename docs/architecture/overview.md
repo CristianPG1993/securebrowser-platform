@@ -29,6 +29,10 @@ API en Java con Spring Boot y PostgreSQL.
 - Gestiona políticas y eventos de seguridad.
 - Limita la administración de cada ADMIN a su compañía.
 
+La [organización interna del backend](backend-structure.md) define los paquetes
+por funcionalidad, sus responsabilidades y la ubicación de las pruebas, conforme
+al [ADR-0007](../adr/0007-backend-package-organization.md).
+
 ## Android
 
 Aplicación en Kotlin con Jetpack Compose y arquitectura MVVM.
