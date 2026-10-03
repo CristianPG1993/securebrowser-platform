@@ -4,17 +4,22 @@
 
 Este documento recoge las entidades y reglas acordadas para el MVP.
 
+SBP está orientado a empresas. Todo User pertenece a una Company y todas las
+políticas son corporativas: el ADMIN las configura y las asigna a los Devices.
+El MVP no incluye usuarios particulares sin Company ni políticas personales.
+
+Las decisiones de integridad y concurrencia se recogen en el
+[ADR-0006](../adr/0006-domain-integrity-and-enrollment.md).
+
 ## Diagrama conceptual
 
 ![Modelo de dominio de SBP](../../diagrams/domain-model.svg)
 
 [Fuente editable del diagrama (Mermaid)](../../diagrams/domain-model.mmd).
 
-El diagrama resume las asociaciones del MVP. Las relaciones Company–User
-y Device–SecurityEvent incluyen las cardinalidades acordadas. La nota
-de Company recoge la obligación de conservar al menos un ADMIN.
-Las cardinalidades completas de las demás asociaciones se concretarán
-al detallar el dominio.
+El diagrama resume las asociaciones del MVP. La nota de Company recoge
+la obligación de conservar al menos un ADMIN. Las cardinalidades completas
+se detallan en el apartado [Cardinalidades](#cardinalidades).
 
 ## Entidades
 
@@ -23,8 +28,8 @@ al detallar el dominio.
 | Company | Agrupa usuarios, licencias, políticas y dispositivos. |
 | User | Pertenece a una única Company y tiene el rol ADMIN o USER. |
 | License | Pertenece a una Company y limita el número de instalaciones. |
-| EnrollmentToken | Se asocia a una License y a un User para autorizar el enrollment. |
-| Device | Representa una instalación, pertenece a una Company y a un User, utiliza una License y siempre tiene una Policy. |
+| EnrollmentToken | Se asocia a una License, un User y una Policy para reservar un puesto y autorizar el enrollment con su política inicial. |
+| Device | Representa una instalación creada por un EnrollmentToken, pertenece a una Company y a un User, utiliza una License y siempre tiene una Policy. |
 | Policy | Pertenece a una Company y puede asignarse a varios Devices. |
 | SecurityEvent | Pertenece a un único Device. Su Company se obtiene a través de ese Device. Registra sucesos de seguridad y permite su sincronización tras trabajar offline. |
 | UrlRule | Pertenece a una Policy y almacena un dominio normalizado para URL Filtering. |
@@ -51,7 +56,8 @@ En las modificaciones posteriores se conserva `createdAt` y se actualiza `update
 | Atributo | Tipo Java | Obligatorio al persistir | Descripción |
 | --- | --- | --- | --- |
 | `id` | `Long` | Sí | Identificador del usuario, generado por la base de datos. |
-| `name` | `String` | Sí | Nombre del usuario para mostrarlo en la aplicación. |
+| `name` | `String` | Sí | Nombre de pila del usuario. |
+| `lastName` | `String` | Sí | Apellido o apellidos del usuario. |
 | `email` | `String` | Sí | Email utilizado para iniciar sesión. |
 | `passwordHash` | `String` | Sí | Hash de la contraseña generado mediante BCrypt. |
 | `role` | `UserRole` | Sí | Rol del usuario: `ADMIN` o `USER`. |
@@ -97,6 +103,7 @@ En las modificaciones posteriores se conserva `createdAt` y se actualiza `update
 | `id` | `Long` | Sí | Identificador del enrollment, generado por la base de datos. |
 | `license` | `License` | Sí | Licencia cuyo puesto reserva el enrollment. |
 | `user` | `User` | Sí | Usuario al que se entrega el token. |
+| `policy` | `Policy` | Sí | Política inicial seleccionada por el ADMIN al emitir el enrollment. |
 | `tokenHash` | `String` | Sí | Hash del token para almacenarlo de forma segura. |
 | `expiresAt` | `Instant` | Sí | Momento de caducidad del token. |
 | `usedAt` | `Instant` | No | Momento en que se utilizó el token; inicialmente `null`. |
@@ -107,6 +114,8 @@ El identificador puede ser `null` antes de guardar un nuevo EnrollmentToken.
 Una vez persistido, el enrollment debe tener un identificador asignado.
 
 El token original se entrega al usuario. En la base de datos se conserva su hash.
+User, License y Policy deben pertenecer a la misma Company. La política indicada
+por el enrollment se asigna al Device cuando se registra la instalación.
 
 El estado se deriva de las fechas, sin almacenar un enum de estado:
 
@@ -130,6 +139,7 @@ Las fechas utilizan `java.time.Instant`.
 | `user` | `User` | Sí | Usuario al que pertenece la instalación. |
 | `license` | `License` | Sí | Licencia utilizada por la instalación. |
 | `policy` | `Policy` | Sí | Política asignada al dispositivo. |
+| `enrollmentToken` | `EnrollmentToken` | Sí | Enrollment de origen; se conserva para reconocer reintentos del registro. |
 | `active` | `boolean` | Sí | Indica si la instalación está activa. |
 | `createdAt` | `Instant` | Sí | Momento de registro del dispositivo. |
 | `updatedAt` | `Instant` | Sí | Momento de la última modificación del dispositivo. |
@@ -138,6 +148,9 @@ Las fechas utilizan `java.time.Instant`.
 El identificador puede ser `null` antes de guardar un nuevo Device.
 Una vez persistido, el dispositivo debe tener un identificador asignado.
 `deviceIdentifier` identifica la instalación y es distinto del `id` del backend.
+Desktop genera un UUID y conserva su representación canónica en este atributo.
+Cada Device procede de un único enrollment y cada enrollment puede crear como
+máximo un Device. El identificador de instalación no es una credencial.
 
 Al registrar el dispositivo, `active` se inicializa a `true`.
 Un dispositivo desactivado libera un puesto de su licencia.
@@ -240,6 +253,348 @@ Todas las reglas de descargas de una Policy se interpretan según ese mismo modo
 La Company de la regla se obtiene a través de su Policy.
 Los cambios en las reglas de extensiones actualizan `Policy.updatedAt`.
 
+## Cardinalidades
+
+| Relación | Cardinalidad |
+| --- | --- |
+| Company → User | `1 → 1..*` |
+| Company → License | `1 → 0..*` |
+| Company → Policy | `1 → 0..*` |
+| Company → Device | `1 → 0..*` |
+| User → Device | `1 → 0..*` |
+| License → Device | `1 → 0..*` |
+| Policy → Device | `1 → 0..*` |
+| User → EnrollmentToken | `1 → 0..*` |
+| License → EnrollmentToken | `1 → 0..*` |
+| Policy → EnrollmentToken | `1 → 0..*` |
+| EnrollmentToken → Device | `1 → 0..1` |
+| Device → SecurityEvent | `1 → 0..*` |
+| Policy → UrlRule | `1 → 0..*` |
+| Policy → DownloadRule | `1 → 0..*` |
+
+Cada entidad de la derecha pertenece a exactamente una entidad de la izquierda.
+`0..*` permite que la colección comience vacía y tenga varios elementos.
+`1..*` exige al menos un elemento. `0..1` permite que un enrollment aún no haya
+creado un Device, pero impide que cree varias instalaciones.
+
+Company se crea con su primer User ADMIN y debe conservar al menos uno.
+Sus colecciones de licencias, políticas y dispositivos pueden comenzar vacías.
+
+La relación License–Device permite conservar dispositivos desactivados.
+El límite de capacidad se aplica a los dispositivos activos más los enrollments
+pendientes vigentes, en lugar de limitar el número total de registros de Device.
+
+## Restricciones de integridad
+
+### Company
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `name` | Obligatorio, máximo 150 caracteres y con contenido después de quitar los espacios exteriores. |
+| `createdAt` | Obligatorio; lo asigna el backend al crear la compañía y se conserva. |
+| `updatedAt` | Obligatorio; lo asigna y actualiza el backend. |
+
+El nombre puede repetirse entre compañías. El identificador único de Company
+es `id`.
+
+La compañía se crea con su primer User ADMIN y debe conservar al menos uno.
+Las operaciones que afecten a sus ADMIN deben respetar las restricciones de User.
+
+### User
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `name` | Obligatorio, máximo 150 caracteres y con contenido después de quitar los espacios exteriores. Puede repetirse. |
+| `lastName` | Obligatorio, máximo 150 caracteres y con contenido después de quitar los espacios exteriores. Puede repetirse. |
+| `email` | Obligatorio, formato válido y máximo 254 caracteres. Se normaliza sin espacios exteriores y en minúsculas, y tiene una restricción `UNIQUE` global. |
+| `passwordHash` | Obligatorio, generado mediante BCrypt por el backend y máximo 255 caracteres. |
+| `role` | Obligatorio; únicamente `ADMIN` o `USER`. |
+| `company` | Obligatoria; clave foránea `company_id` hacia `Company.id`. |
+| `createdAt` | Obligatorio; lo asigna el backend al crear el usuario y se conserva. |
+| `updatedAt` | Obligatorio; lo asigna y actualiza el backend. |
+
+El email normalizado identifica de forma única al usuario para iniciar sesión,
+independientemente de su Company. La unicidad se garantiza también en la base de
+datos. Las relaciones entre entidades utilizan `User.id`.
+
+Se impide eliminar o cambiar a USER el rol del último ADMIN de una Company,
+también ante peticiones simultáneas. Las operaciones bloquean primero la fila
+de Company y comprueban los ADMIN restantes dentro de la misma transacción.
+
+### License
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `company` | Obligatoria; clave foránea `company_id` hacia `Company.id`. |
+| `maxInstallations` | Obligatorio; número entero mayor o igual que `1`. |
+| `createdAt` | Obligatorio; lo asigna el backend al crear la licencia y se conserva. |
+| `updatedAt` | Obligatorio; lo asigna y actualiza el backend. |
+
+La ocupación de la licencia debe mantenerse dentro de `maxInstallations`.
+Se calcula mediante sus dispositivos activos y sus enrollments pendientes vigentes.
+
+Para reducir `maxInstallations`, el nuevo valor debe ser mayor o igual que la
+ocupación actual. La comprobación y la modificación deben respetar esta regla
+también ante operaciones simultáneas, mediante el bloqueo de License descrito
+en el apartado de garantías transaccionales.
+
+### EnrollmentToken
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `license` | Obligatoria; clave foránea `license_id` hacia `License.id`. |
+| `user` | Obligatorio; clave foránea `user_id` hacia `User.id`. |
+| `policy` | Obligatoria; clave foránea `policy_id` hacia `Policy.id`. |
+| `tokenHash` | Obligatorio; hash SHA-256 de 64 caracteres hexadecimales, con `UNIQUE` global. |
+| `createdAt` | Obligatorio; lo asigna el backend al emitir el token y se conserva. |
+| `expiresAt` | Obligatorio y posterior a `createdAt`. |
+| `usedAt` | Opcional; si existe, debe cumplirse `createdAt <= usedAt < expiresAt`. |
+| `revokedAt` | Opcional; si existe, debe ser mayor o igual que `createdAt`. |
+
+Los valores de `usedAt` y `revokedAt` no pueden estar presentes a la vez.
+Un token utilizado no se revoca y un token revocado no se consume.
+Las restricciones entre fechas y la exclusión entre utilización y revocación
+se expresarán también mediante `CHECK` en PostgreSQL.
+
+Solo el primer consumo de un token pendiente y vigente puede crear un Device.
+La comparación con el instante actual se realiza en el servicio; la caducidad
+no depende de modificar el registro ni de ejecutar una tarea periódica.
+
+### Device
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `deviceIdentifier` | Obligatorio; UUID canónico de 36 caracteres generado por Desktop, con `UNIQUE` global. |
+| `name` | Opcional, máximo 150 caracteres; se quitan los espacios exteriores y un valor vacío se guarda como `null`. |
+| `company` | Obligatoria; clave foránea `company_id` hacia `Company.id`. |
+| `user` | Obligatorio; clave foránea `user_id` hacia `User.id`. |
+| `license` | Obligatoria; clave foránea `license_id` hacia `License.id`. |
+| `policy` | Obligatoria; clave foránea `policy_id` hacia `Policy.id`. |
+| `enrollmentToken` | Obligatorio; clave foránea `enrollment_token_id` hacia `EnrollmentToken.id`, con `UNIQUE`. |
+| `active` | Obligatorio; inicialmente `true`. |
+| `createdAt` | Obligatorio; lo asigna el backend al registrar el Device y se conserva. |
+| `updatedAt` | Obligatorio; lo asigna y actualiza el backend. |
+| `lastSeenAt` | Opcional; lo asigna el backend al recibir una comunicación autenticada del Device. |
+
+El Device se registra para el usuario y la licencia del enrollment, utilizando
+su política inicial. Todas las relaciones corresponden a la misma Company.
+Una política distinta puede asignarse posteriormente dentro de esa Company,
+sin modificar la política de origen conservada en EnrollmentToken.
+
+Un Device inactivo no ocupa un puesto. Reactivarlo exige capacidad disponible
+y repetir un enrollment utilizado nunca lo reactiva automáticamente.
+
+### Policy
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `name` | Obligatorio, máximo 150 caracteres y con contenido después de quitar los espacios exteriores. Puede repetirse. |
+| `company` | Obligatoria; clave foránea `company_id` hacia `Company.id`. |
+| `urlFilteringEnabled`, `downloadControlEnabled` | Obligatorios; inicialmente `true`. |
+| `urlFilteringMode`, `downloadControlMode` | Obligatorios; solo `DENYLIST` o `ALLOWLIST`, incluso con la funcionalidad desactivada. Inicialmente `DENYLIST`. |
+| `urlRules`, `downloadRules` | Colecciones presentes; inicialmente vacías. La pertenencia se persiste mediante la clave foránea de cada regla. |
+| `createdAt` | Obligatorio; lo asigna el backend al crear la política y se conserva. |
+| `updatedAt` | Obligatorio; lo asigna y actualiza el backend, también cuando cambian sus reglas. |
+
+Una DENYLIST vacía no bloquea elementos por pertenecer a la lista. Una ALLOWLIST
+vacía bloquea todos los elementos sometidos a esa funcionalidad. Se mantienen
+las reglas de validación segura de URLs y de archivos sin extensión.
+
+La edición de la política y de sus reglas se confirma en una única transacción.
+Las modificaciones concurrentes de esa configuración se coordinan bloqueando
+la fila de Policy antes de modificarla.
+
+### SecurityEvent
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `eventUuid` | UUID obligatorio, generado por Desktop, con `UNIQUE` global. |
+| `device` | Obligatorio; clave foránea `device_id` hacia `Device.id`. |
+| `type` | Obligatorio; solo `URL_BLOCKED`, `DOWNLOAD_BLOCKED` o `POLICY_UPDATED`. |
+| `details` | Opcional, máximo 2.000 caracteres. |
+| `occurredAt` | Obligatorio; instante registrado por Desktop. |
+| `receivedAt` | Obligatorio; lo asigna el backend al registrar por primera vez el evento. |
+
+No se exige `occurredAt <= receivedAt`, porque el reloj de Desktop puede estar
+desajustado. Las fechas de cliente no determinan la vigencia de los enrollments.
+
+Un reenvío con el mismo UUID, Device, tipo, detalle e instante de ocurrencia
+conserva el registro original y su `receivedAt`. Reutilizar el UUID con un Device
+o contenido diferente se rechaza como conflicto. La restricción de unicidad
+debe garantizar la deduplicación también ante recepciones simultáneas.
+
+Los eventos son inmutables. Un Device desactivado puede sincronizar eventos
+pendientes sin reactivarse ni volver a ocupar un puesto.
+
+### UrlRule
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `policy` | Obligatoria; clave foránea `policy_id` hacia `Policy.id`. |
+| `domain` | Obligatorio; dominio válido normalizado, máximo 253 caracteres en su representación ASCII. |
+
+Se eliminan los espacios exteriores y el punto final del dominio, se utilizan
+minúsculas y los dominios internacionales se convierten a su representación
+ASCII. Se rechazan esquemas, rutas, puertos y comodines.
+
+La restricción `UNIQUE(policy_id, domain)` impide repetir un dominio normalizado
+en una misma Policy. El mismo dominio puede aparecer en políticas diferentes.
+
+### DownloadRule
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `policy` | Obligatoria; clave foránea `policy_id` hacia `Policy.id`. |
+| `extension` | Obligatoria, máximo 20 caracteres; normalizada en minúsculas y sin punto inicial. |
+
+Se rechazan extensiones vacías, espacios, rutas y puntos interiores.
+La restricción `UNIQUE(policy_id, extension)` impide repetir una extensión
+normalizada en una misma Policy. Puede aparecer en políticas diferentes.
+
+## Pertenencia e integridad entre compañías
+
+Se conservan durante toda la vida del registro estas asociaciones:
+
+- User, License y Policy con su Company.
+- Device con su Company, User, License y EnrollmentToken de origen.
+- EnrollmentToken con su User, License y Policy inicial.
+- UrlRule y DownloadRule con su Policy.
+- SecurityEvent con su Device.
+
+La política actual de un Device sí puede cambiar, siempre dentro de su Company.
+El servicio verifica todas las pertenencias antes de persistir las asociaciones.
+
+PostgreSQL garantiza claves primarias, claves foráneas, `NOT NULL`, unicidad y
+las restricciones `CHECK` de cada fila. Las claves foráneas independientes no
+comprueban que las entidades relacionadas pertenezcan a la misma Company:
+esta igualdad y la inmutabilidad de pertenencia se garantizan en los servicios
+transaccionales del MVP, sin añadir triggers ni relaciones compuestas.
+
+User, License, Policy y Device conservan sus referencias explícitas a Company.
+SecurityEvent obtiene su Company a través de Device y las reglas a través de
+Policy, sin duplicar esas referencias.
+
+## Eliminación y desactivación
+
+| Recurso | Comportamiento del MVP |
+| --- | --- |
+| Company | No se elimina. |
+| User | Solo se elimina si no tiene Devices ni enrollments y no es el último ADMIN. |
+| License | Solo se elimina si no tiene Devices ni enrollments asociados. |
+| Policy | Solo se elimina si ningún Device ni enrollment la referencia; sus reglas se eliminan con ella. |
+| Device | Se desactiva; se conserva el registro y su historial. |
+| EnrollmentToken | Se revoca o caduca; se conserva el registro. |
+| SecurityEvent | Se conserva sin edición ni eliminación individual. |
+| UrlRule y DownloadRule | Se pueden eliminar individualmente o junto con su Policy. |
+
+Una referencia histórica impide eliminar el recurso aunque el Device esté
+inactivo o el enrollment haya caducado. Las claves foráneas bloquean esos
+borrados mediante `RESTRICT` o `NO ACTION`. Solo las reglas de Policy utilizan
+cascada de eliminación; no se propaga el borrado a usuarios, licencias,
+dispositivos, enrollments ni eventos.
+
+## Garantías transaccionales
+
+### Capacidad de License
+
+La ocupación es la suma de Devices activos y EnrollmentTokens pendientes
+vigentes asociados a la licencia. No se almacena un contador persistente.
+
+Cada operación que modifica esa ocupación o el límite de capacidad utiliza
+una transacción y bloquea primero la fila de License mediante `SELECT FOR UPDATE`
+o su equivalente JPA. Con el bloqueo adquirido, obtiene el instante actual,
+vuelve a consultar los registros pertinentes, valida la capacidad y aplica
+los cambios antes de confirmar.
+
+Este procedimiento se aplica a:
+
+- Generar, consumir o revocar enrollments.
+- Activar o desactivar Devices.
+- Modificar `maxInstallations`.
+
+Al consumir un token se crea el Device activo y se asigna `usedAt` en la misma
+transacción. La reserva deja de contar al convertirse en instalación, sin sumar
+un segundo puesto. Si la transacción falla, se revierten ambos cambios.
+
+Los tokens caducados y revocados no reservan puestos. Desactivar un Device
+libera su puesto; reactivarlo exige que quede capacidad. Reducir la licencia
+exige que el nuevo límite no sea inferior a su ocupación actual.
+
+### Reintentos de enrollment
+
+Antes del primer consumo se valida que el usuario autenticado sea el destinatario
+y que el token esté pendiente y vigente. El servicio verifica además la Company
+y las asociaciones del enrollment. Desktop no selecciona otra política.
+
+Si el enrollment ya está utilizado, se busca su Device de origen. Una petición
+del mismo usuario con el mismo `deviceIdentifier` devuelve ese Device existente,
+sin modificar `usedAt`, crear otra instalación, cambiar la política actual ni
+reactivar un Device inactivo. La caducidad posterior del token no impide reconocer
+este reintento autenticado del registro ya completado.
+
+Un identificador de instalación diferente se rechaza. Tampoco se permite crear
+otro Device con un `deviceIdentifier` existente utilizando otro enrollment.
+Las restricciones únicas de `enrollment_token_id` y `deviceIdentifier` protegen
+estas reglas también ante peticiones simultáneas.
+
+### Company y último ADMIN
+
+Company y su primer User ADMIN se crean en una misma transacción. Si cualquiera
+de los registros falla, no se conserva una compañía sin ADMIN.
+
+Cambiar roles o eliminar usuarios bloquea primero la fila de Company y comprueba
+la cantidad de ADMIN dentro de esa transacción. Dos peticiones simultáneas no
+pueden eliminar o degradar por separado a los dos últimos administradores.
+
+### Duración y orden de los bloqueos
+
+Las operaciones comparten un orden de adquisición de bloqueos cuando necesitan
+varias filas. La espera es limitada; si no puede obtenerse el bloqueo, se devuelve
+un error controlado y se revierte la transacción. No se realizan envíos de email
+ni otras comunicaciones externas manteniendo esos bloqueos.
+
+## Generación y entrega del token de enrollment
+
+El backend genera 32 bytes mediante `SecureRandom` y los codifica como Base64
+URL-safe. La caducidad inicial es de 24 horas, configurable. Para localizar el
+enrollment se calcula SHA-256 del token recibido y se consulta su hash único.
+
+El token original solo se utiliza para entregarlo por email y para su consumo;
+no se guarda en PostgreSQL ni se registra en logs. SHA-256 se utiliza para este
+secreto aleatorio; las contraseñas de usuario siguen utilizando BCrypt.
+
+Primero se confirma la reserva en PostgreSQL y después se envía el email.
+Si el envío falla y el token no se ha utilizado, se revoca en otra transacción
+siguiendo el bloqueo de License. Si el proceso se interrumpe entre la reserva
+y el envío, el enrollment puede revocarse y, en todo caso, deja de ocupar un
+puesto al caducar. No se promete entrega atómica entre PostgreSQL y el email.
+
+## Convenciones de persistencia
+
+- Identificadores `Long` generados mediante `IDENTITY`.
+- Tablas y columnas en `snake_case`; User utiliza la tabla `users`.
+- Fechas `Instant` representadas como `timestamp with time zone` en PostgreSQL.
+- `eventUuid` representado con el tipo PostgreSQL `uuid`.
+- Enums almacenados como texto con restricciones `CHECK` de valores permitidos.
+- Relaciones cargadas de forma diferida cuando corresponda. No se añaden
+  colecciones inversas a todas las entidades; se mantienen las necesarias,
+  como las reglas de Policy.
+- Fechas de auditoría de creación y modificación mediante Spring Data JPA;
+  los cambios en reglas actualizan expresamente `Policy.updatedAt`.
+- Esquema gestionado mediante migraciones Flyway y validado por Hibernate.
+
+Estas convenciones preparan la futura persistencia; esta tarea no crea clases
+JPA, migraciones ni configuración ejecutable del backend.
+
 ## Usuarios y administración
 
 - Cada Company tiene uno o muchos Users y se crea con su primer ADMIN.
@@ -254,7 +609,8 @@ Los cambios en las reglas de extensiones actualizan `Policy.updatedAt`.
 - Los enrollments pendientes reservan puestos de la License.
 - Los dispositivos desactivados liberan puestos.
 - El backend genera el EnrollmentToken y lo envía por email.
-- El token es de un solo uso, tiene caducidad y puede revocarse.
+- El token autoriza una única instalación, tiene caducidad y puede revocarse
+  mientras no se haya utilizado. Reconocer un reintento no es un nuevo consumo.
 - Se almacena de forma segura, sin guardar el token reutilizable en claro.
 
 ## Dispositivos
@@ -262,6 +618,8 @@ Los cambios en las reglas de extensiones actualizan `Policy.updatedAt`.
 - Cada Device representa una instalación de la aplicación.
 - La aplicación genera su identificador estable.
 - Cada Device debe tener una Policy asignada.
+- La política inicial procede del EnrollmentToken; el ADMIN puede reasignarla
+  posteriormente dentro de la misma Company.
 
 ## Políticas de seguridad
 
@@ -302,23 +660,21 @@ El sistema debe soportar funcionamiento offline:
 - Cada evento lleva un `event_uuid` generado por el cliente.
 - Este identificador permite evitar duplicados durante la sincronización.
 
-## Detalles pendientes
+## Seguimiento por tareas
 
-Los atributos, tipos Java, campos obligatorios y opcionales y enums del MVP
-quedan definidos en este documento. También se recoge el estado derivado de
-EnrollmentToken y el indicador de actividad de Device.
+La tarea #4 define las cardinalidades, claves foráneas, campos obligatorios,
+unicidad, longitudes, integridad entre compañías, eliminación y garantías
+transaccionales de este documento. El diagrama debe reflejar también la política
+inicial del enrollment y la relación con su Device de origen antes de cerrar
+la revisión documental.
 
-El diseño posterior concretará:
+Las siguientes decisiones se documentan en sus propias tareas, ramas y PR:
 
-- Las cardinalidades restantes, claves foráneas, restricciones de unicidad,
-  longitudes y validaciones de los valores.
-- Las reglas de integridad entre Company, User, License, Device y Policy,
-  y el comportamiento ante eliminación o desactivación.
-- La consistencia del ciclo de vida de EnrollmentToken y las garantías
-  transaccionales para reservar, consumir y liberar puestos sin superar la
-  capacidad de la licencia, incluidos los reintentos de enrollment.
-- El mapeo JPA/PostgreSQL, la estrategia de generación de identificadores
-  y el mecanismo de actualización de las fechas de auditoría.
-- La generación y el hash de los tokens de enrollment, y los contratos de la API.
+- #5: organización interna del backend Spring Boot.
+- #6: autenticación JWT.
+- #7: autorización por Company.
+- #8: contratos iniciales de la API REST.
 
-Las decisiones arquitectónicas relevantes se documentarán mediante ADR.
+La aprobación conjunta del diseño no sustituye el trabajo ni las comprobaciones
+de cada tarjeta. La implementación comienza con la estructura mínima del proyecto
+y avanza clase a clase, sin implementar varias capas a la vez.

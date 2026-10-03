@@ -1,5 +1,8 @@
 ---
 config:
+  layout: elk
+  elk:
+    mergeEdges: false
   class:
     hideEmptyMembersBox: true
 ---
@@ -14,19 +17,27 @@ classDiagram
     class Device
     class EnrollmentToken
     class SecurityEvent
+    class UrlRule
+    class DownloadRule
 
     Company "1" -- "1..*" User : agrupa
-    Company -- License : contiene
-    Company -- Policy : define
-    Company -- Device : registra
+    Company "1" -- "0..*" License : contiene
+    Company "1" -- "0..*" Policy : define
+    Company "1" -- "0..*" Device : registra
 
-    User -- Device : tiene instalaciones
-    License -- Device : cubre
-    Policy -- Device : se asigna a
+    User "1" -- "0..*" Device : tiene instalaciones
+    License "1" -- "0..*" Device : cubre
+    Policy "1" -- "0..*" Device : se asigna a
 
-    User -- EnrollmentToken : recibe
-    License -- EnrollmentToken : autoriza
+    User "1" -- "0..*" EnrollmentToken : recibe
+    License "1" -- "0..*" EnrollmentToken : autoriza
+
+    Policy "1" -- "0..*" EnrollmentToken : fija politica inicial
+    EnrollmentToken "1" -- "0..1" Device : registra instalacion
 
     Device "1" -- "0..*" SecurityEvent : genera
+
+    Policy "1" -- "0..*" UrlRule : incluye dominios
+    Policy "1" -- "0..*" DownloadRule : incluye extensiones
 
     note for Company "Debe conservar al menos un User con rol ADMIN"
