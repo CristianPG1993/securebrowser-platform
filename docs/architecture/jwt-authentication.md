@@ -16,8 +16,8 @@ del [modelo de dominio](domain-model.md).
 Esta tarea documenta autenticación y sus casos de prueba. La matriz de permisos
 y pertenencia de recursos se recoge en la
 [autorización por Company](company-authorization.md), correspondiente a la #7;
-los contratos REST completos
-se documentan en la #8. No se crean clases ni configuración ejecutable.
+los [contratos REST](rest-api-contracts.md) corresponden a la #8.
+No se crean clases ni configuración ejecutable.
 
 ## Flujo de login
 
@@ -311,6 +311,7 @@ PostgreSQL real; los mocks no validan los bloqueos ni la confirmación del recha
 - [ADR-0008](../adr/0008-jwt-authentication.md).
 - [Modelo de dominio](domain-model.md).
 - [Autorización por Company](company-authorization.md).
+- [Contratos iniciales de la API REST](rest-api-contracts.md).
 - [Organización del backend](backend-structure.md).
 - [Convenciones y configuración sensible](conventions.md).
 - [JWT en Spring Security](https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html).

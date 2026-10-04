@@ -42,6 +42,10 @@ La [autorización por Company](company-authorization.md) define los permisos de
 ADMIN y USER, la propiedad de los recursos y el aislamiento entre compañías,
 conforme al [ADR-0009](../adr/0009-company-authorization.md).
 
+Los [contratos iniciales de la API REST](rest-api-contracts.md) definen las rutas,
+DTOs, respuestas y errores para Desktop y Android, conforme al
+[ADR-0010](../adr/0010-rest-api-contracts.md).
+
 ## Android
 
 Aplicación en Kotlin con Jetpack Compose y arquitectura MVVM.

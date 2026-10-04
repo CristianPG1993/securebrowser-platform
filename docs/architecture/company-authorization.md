@@ -13,7 +13,8 @@ La creación interna de Company y su primer ADMIN sigue siendo atómica.
 La [autenticación JWT](jwt-authentication.md) proporciona User.id, Company.id
 y el rol actuales desde la base de datos. La autorización utiliza ese contexto,
 sin aceptar identidad, Company o permisos alternativos enviados por el cliente.
-Los endpoints, DTOs y contratos completos de errores corresponden a la #8.
+Los [contratos REST](rest-api-contracts.md) concretan endpoints, DTOs y errores
+en la #8.
 Esta tarea no crea clases, configuración ejecutable ni nuevas entidades.
 
 ## Reglas comunes
@@ -228,6 +229,7 @@ no se han implementado ni ejecutado.
 
 - [ADR-0009](../adr/0009-company-authorization.md).
 - [Autenticación JWT](jwt-authentication.md).
+- [Contratos iniciales de la API REST](rest-api-contracts.md).
 - [Modelo de dominio](domain-model.md).
 - [Organización del backend](backend-structure.md).
 - [Seguridad de métodos de Spring Security](https://docs.spring.io/spring-security/reference/servlet/authorization/method-security.html).
