@@ -14,7 +14,9 @@ Los roles iniciales son ADMIN y USER. El usuario y su Company siguen las reglas
 del [modelo de dominio](domain-model.md).
 
 Esta tarea documenta autenticación y sus casos de prueba. La matriz de permisos
-y pertenencia de recursos se desarrolla en la #7; los contratos REST completos
+y pertenencia de recursos se recoge en la
+[autorización por Company](company-authorization.md), correspondiente a la #7;
+los contratos REST completos
 se documentan en la #8. No se crean clases ni configuración ejecutable.
 
 ## Flujo de login
@@ -249,7 +251,7 @@ usuario actual. No se confía en datos de permisos enviados por el cliente.
 | Entrada de renovación sin refresh token o con estructura inválida | HTTP 400. |
 | Refresh token desconocido, caducado, revocado o cuyo usuario ya no existe | HTTP 401, error genérico de renovación. |
 | Refresh token consumido presentado para renovar | Revocación confirmada del grupo y HTTP 401. |
-| Usuario autenticado sin permiso para una operación | HTTP 403; las reglas de recursos y Company se concretan en la #7. |
+| Usuario autenticado cuyo rol no permite una operación | HTTP 403; un recurso fuera del ámbito autorizado de una operación permitida produce HTTP 404, conforme a la autorización por Company. |
 
 Los errores de autenticación no confirman si existe un email. La respuesta no
 expone contraseñas, tokens, hashes ni excepciones internas. Una indisponibilidad
@@ -308,6 +310,7 @@ PostgreSQL real; los mocks no validan los bloqueos ni la confirmación del recha
 
 - [ADR-0008](../adr/0008-jwt-authentication.md).
 - [Modelo de dominio](domain-model.md).
+- [Autorización por Company](company-authorization.md).
 - [Organización del backend](backend-structure.md).
 - [Convenciones y configuración sensible](conventions.md).
 - [JWT en Spring Security](https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html).
