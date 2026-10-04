@@ -60,7 +60,7 @@ su primera clase. La clase de arranque estará en el paquete base.
 | `device` | Device, política asignada, actividad y datos de la instalación. |
 | `policy` | Policy, FilterMode, UrlRule y DownloadRule, con sus reglas de configuración y normalización. |
 | `securityevent` | SecurityEvent, SecurityEventType, consulta, recepción y deduplicación de eventos. |
-| `auth` | Entrada y coordinación del flujo de autenticación, con su controller, servicio y DTOs cuando se implementen. |
+| `auth` | Entrada y coordinación de login, renovación y logout, con controller, servicio y DTOs, además de RefreshToken y su repositorio cuando se implementen. |
 | `security` | Integración con Spring Security, validación del JWT y representación del usuario autenticado. |
 | `config` | Configuración técnica compartida que no corresponde a una funcionalidad concreta. La configuración de Spring Security se mantiene en `security`. |
 | `exception` | Traducción centralizada de excepciones a respuestas HTTP y excepciones compartidas por varias funcionalidades. |
@@ -68,6 +68,10 @@ su primera clase. La clase de arranque estará en el paquete base.
 UrlRule y DownloadRule pertenecen al paquete `policy`, porque forman parte de
 la configuración de una política. Los enums se ubican junto a su dominio:
 UserRole en `user`, FilterMode en `policy` y SecurityEventType en `securityevent`.
+
+La tarea #6 añade la entidad técnica RefreshToken al paquete `auth`, conforme
+al [ADR-0008](../adr/0008-jwt-authentication.md). La persistencia de los secretos
+de renovación mediante sus hashes forma parte de esa funcionalidad.
 
 Una excepción específica del negocio puede permanecer en su funcionalidad.
 El paquete `exception` reúne el tratamiento HTTP y las excepciones compartidas,

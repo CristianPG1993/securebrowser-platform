@@ -12,6 +12,7 @@ classDiagram
 
     class Company
     class User
+    class RefreshToken
     class License
     class Policy
     class Device
@@ -26,6 +27,7 @@ classDiagram
     Company "1" -- "0..*" Device : registra
 
     User "1" -- "0..*" Device : tiene instalaciones
+    User "1" -- "0..*" RefreshToken : mantiene tokens
     License "1" -- "0..*" Device : cubre
     Policy "1" -- "0..*" Device : se asigna a
 
