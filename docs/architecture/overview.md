@@ -38,6 +38,10 @@ la renovación automática, el tratamiento de contraseñas y la validación de
 peticiones, conforme al
 [ADR-0008](../adr/0008-jwt-authentication.md).
 
+La [autorización por Company](company-authorization.md) define los permisos de
+ADMIN y USER, la propiedad de los recursos y el aislamiento entre compañías,
+conforme al [ADR-0009](../adr/0009-company-authorization.md).
+
 ## Android
 
 Aplicación en Kotlin con Jetpack Compose y arquitectura MVVM.

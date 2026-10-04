@@ -675,6 +675,10 @@ JPA, migraciones ni configuración ejecutable del backend.
 - Las contraseñas se almacenan mediante BCrypt.
 - Cada ADMIN administra únicamente su propia Company.
 
+La [autorización por Company](company-authorization.md) y el
+[ADR-0009](../adr/0009-company-authorization.md) concretan los permisos de ADMIN
+y USER, la propiedad individual y los controles de acceso de la tarea #7.
+
 La autenticación utiliza JWT de duración máxima inicial de 15 minutos y
 refresh tokens de 7 días, con duraciones configurables. La renovación automática
 conserva la caducidad original y permite seguir trabajando sin repetir el login
