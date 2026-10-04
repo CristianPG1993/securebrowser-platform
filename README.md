@@ -22,8 +22,12 @@ usuarios, licencias, dispositivos, políticas y eventos de seguridad.
 
 ## Estado actual
 
-El proyecto se encuentra en la fase de configuración inicial del repositorio
-y documentación técnica.
+El modelo de dominio y las decisiones iniciales de arquitectura están
+documentados. El backend dispone de una estructura mínima con Spring Boot,
+Maven Wrapper y compilación, empaquetado y arranque verificados.
+
+Los requisitos y comandos de ejecución están disponibles en el
+[README del backend](backend/README.md).
 
 ## Documentación
 

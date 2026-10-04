@@ -7,7 +7,7 @@ del código antes de crear el proyecto Spring Boot. La decisión se recoge en el
 [ADR-0007](../adr/0007-backend-package-organization.md).
 
 El backend utiliza Java, Spring Boot, Spring Web, Spring Security, Spring Data JPA,
-Hibernate y PostgreSQL. Para las pruebas se prevén JUnit 5, Mockito y MockMvc.
+Hibernate y PostgreSQL. Para las pruebas se prevén JUnit 6, Mockito y MockMvc.
 Los atributos y reglas del dominio están definidos en el
 [modelo de dominio](domain-model.md).
 
@@ -150,9 +150,9 @@ src/test/java/com/securebrowser/platform/
 
 | Tipo de prueba | Qué comprueba | Herramientas previstas |
 | --- | --- | --- |
-| Unidad de servicio | Decisiones de negocio y errores, sustituyendo dependencias externas cuando sea útil. | JUnit 5 y Mockito. |
-| HTTP | Validación de entrada, respuestas, errores y permisos del endpoint según el contrato acordado. | JUnit 5 y MockMvc. |
-| Integración de persistencia y servicios | Consultas, restricciones, transacciones, bloqueos y concurrencia sobre PostgreSQL real. | JUnit 5 y un entorno PostgreSQL de pruebas. |
+| Unidad de servicio | Decisiones de negocio y errores, sustituyendo dependencias externas cuando sea útil. | JUnit 6 y Mockito. |
+| HTTP | Validación de entrada, respuestas, errores y permisos del endpoint según el contrato acordado. | JUnit 6 y MockMvc. |
+| Integración de persistencia y servicios | Consultas, restricciones, transacciones, bloqueos y concurrencia sobre PostgreSQL real. | JUnit 6 y un entorno PostgreSQL de pruebas. |
 
 Los mocks no verifican restricciones ni bloqueos de PostgreSQL. Las garantías de
 capacidad, último ADMIN, deduplicación y reintentos requieren pruebas de integración
