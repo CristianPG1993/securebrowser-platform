@@ -33,6 +33,11 @@ La [organización interna del backend](backend-structure.md) define los paquetes
 por funcionalidad, sus responsabilidades y la ubicación de las pruebas, conforme
 al [ADR-0007](../adr/0007-backend-package-organization.md).
 
+El [diseño de autenticación JWT](jwt-authentication.md) recoge el flujo de login,
+la renovación automática, el tratamiento de contraseñas y la validación de
+peticiones, conforme al
+[ADR-0008](../adr/0008-jwt-authentication.md).
+
 ## Android
 
 Aplicación en Kotlin con Jetpack Compose y arquitectura MVVM.

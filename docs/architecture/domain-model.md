@@ -10,6 +10,8 @@ El MVP no incluye usuarios particulares sin Company ni políticas personales.
 
 Las decisiones de integridad y concurrencia se recogen en el
 [ADR-0006](../adr/0006-domain-integrity-and-enrollment.md).
+La renovación automática y la entidad técnica RefreshToken se definen en el
+[ADR-0008](../adr/0008-jwt-authentication.md), dentro de la tarea #6.
 
 ## Diagrama conceptual
 
@@ -34,6 +36,7 @@ se detallan en el apartado [Cardinalidades](#cardinalidades).
 | SecurityEvent | Pertenece a un único Device. Su Company se obtiene a través de ese Device. Registra sucesos de seguridad y permite su sincronización tras trabajar offline. |
 | UrlRule | Pertenece a una Policy y almacena un dominio normalizado para URL Filtering. |
 | DownloadRule | Pertenece a una Policy y almacena una extensión normalizada para Download Control. |
+| RefreshToken | Pertenece a un User y permite renovar su autenticación. Sus registros se agrupan por login mediante familyId, con rotación y revocación. |
 
 ### Atributos de Company
 
@@ -253,6 +256,31 @@ Todas las reglas de descargas de una Policy se interpretan según ese mismo modo
 La Company de la regla se obtiene a través de su Policy.
 Los cambios en las reglas de extensiones actualizan `Policy.updatedAt`.
 
+### Atributos de RefreshToken
+
+| Atributo | Tipo Java | Obligatorio al persistir | Descripción |
+| --- | --- | --- | --- |
+| `id` | `Long` | Sí | Identificador interno generado por la base de datos. |
+| `user` | `User` | Sí | Usuario propietario de la renovación. |
+| `tokenHash` | `String` | Sí | SHA-256 del secreto de renovación, sin guardar el token original. |
+| `familyId` | `UUID` | Sí | Identificador del grupo creado en un login; se conserva en sus renovaciones. |
+| `createdAt` | `Instant` | Sí | Momento de creación de este refresh token. |
+| `expiresAt` | `Instant` | Sí | Caducidad del grupo, conservada al rotar. |
+| `usedAt` | `Instant` | No | Momento de consumo durante una renovación; inicialmente null. |
+| `revokedAt` | `Instant` | No | Momento de revocación; inicialmente null. |
+
+Es una entidad técnica de autenticación añadida en la tarea #6. No reserva
+puestos de License ni sustituye a EnrollmentToken. Su Company se obtiene
+a través de User y no exige una relación con Device.
+
+Cada login genera un familyId nuevo y una caducidad inicial de 7 días,
+configurable. Los tokens sucesivos del grupo conservan User, familyId y expiresAt.
+Un token puede renovar cuando usedAt y revokedAt son null y aún no ha caducado.
+
+El estado se deriva de las fechas. Un registro consumido puede ser posteriormente
+revocado junto con su grupo, por lo que usedAt y revokedAt pueden coexistir.
+Los registros consumidos se conservan mientras el grupo pueda seguir vigente.
+
 ## Cardinalidades
 
 | Relación | Cardinalidad |
@@ -271,6 +299,7 @@ Los cambios en las reglas de extensiones actualizan `Policy.updatedAt`.
 | Device → SecurityEvent | `1 → 0..*` |
 | Policy → UrlRule | `1 → 0..*` |
 | Policy → DownloadRule | `1 → 0..*` |
+| User → RefreshToken | `1 → 0..*` |
 
 Cada entidad de la derecha pertenece a exactamente una entidad de la izquierda.
 `0..*` permite que la colección comience vacía y tenga varios elementos.
@@ -460,6 +489,29 @@ Se rechazan extensiones vacías, espacios, rutas y puntos interiores.
 La restricción `UNIQUE(policy_id, extension)` impide repetir una extensión
 normalizada en una misma Policy. Puede aparecer en políticas diferentes.
 
+### RefreshToken
+
+| Atributo | Restricción |
+| --- | --- |
+| `id` | Clave primaria, obligatoria y generada por la base de datos. |
+| `user` | Obligatorio; clave foránea `user_id` hacia `User.id`. |
+| `tokenHash` | Obligatorio; SHA-256 de 64 caracteres hexadecimales, con UNIQUE global. |
+| `familyId` | UUID obligatorio generado por el backend al iniciar el grupo. Se repite en los tokens de ese grupo. |
+| `createdAt` | Obligatorio; lo asigna el backend y se conserva. |
+| `expiresAt` | Obligatorio y posterior a createdAt; se conserva al rotar. |
+| `usedAt` | Opcional; si existe, debe cumplirse createdAt <= usedAt < expiresAt. |
+| `revokedAt` | Opcional; si existe, debe ser mayor o igual que createdAt. |
+
+Las restricciones temporales de cada fila se expresan también mediante CHECK.
+El servicio conserva el mismo usuario y caducidad para todos los tokens de
+un familyId. Al revocar un grupo se revocan sus registros, incluidos los ya
+consumidos; usedAt y revokedAt no son excluyentes en RefreshToken.
+
+La generación utiliza 32 bytes de SecureRandom codificados como Base64 URL-safe.
+El secreto se entrega al cliente; no se guarda en PostgreSQL ni se registra en
+logs. Las reglas de consumo, rotación y revocación se detallan en el
+[diseño de autenticación](jwt-authentication.md).
+
 ## Pertenencia e integridad entre compañías
 
 Se conservan durante toda la vida del registro estas asociaciones:
@@ -469,6 +521,7 @@ Se conservan durante toda la vida del registro estas asociaciones:
 - EnrollmentToken con su User, License y Policy inicial.
 - UrlRule y DownloadRule con su Policy.
 - SecurityEvent con su Device.
+- RefreshToken con su User y el grupo familyId de origen.
 
 La política actual de un Device sí puede cambiar, siempre dentro de su Company.
 El servicio verifica todas las pertenencias antes de persistir las asociaciones.
@@ -482,25 +535,28 @@ transaccionales del MVP, sin añadir triggers ni relaciones compuestas.
 User, License, Policy y Device conservan sus referencias explícitas a Company.
 SecurityEvent obtiene su Company a través de Device y las reglas a través de
 Policy, sin duplicar esas referencias.
+RefreshToken obtiene su Company a través de User; el cliente no selecciona
+otro propietario ni compañía al renovar.
 
 ## Eliminación y desactivación
 
 | Recurso | Comportamiento del MVP |
 | --- | --- |
 | Company | No se elimina. |
-| User | Solo se elimina si no tiene Devices ni enrollments y no es el último ADMIN. |
+| User | Solo se elimina si no tiene Devices ni enrollments y no es el último ADMIN. El borrado permitido elimina en cascada sus RefreshTokens. |
 | License | Solo se elimina si no tiene Devices ni enrollments asociados. |
 | Policy | Solo se elimina si ningún Device ni enrollment la referencia; sus reglas se eliminan con ella. |
 | Device | Se desactiva; se conserva el registro y su historial. |
 | EnrollmentToken | Se revoca o caduca; se conserva el registro. |
 | SecurityEvent | Se conserva sin edición ni eliminación individual. |
 | UrlRule y DownloadRule | Se pueden eliminar individualmente o junto con su Policy. |
+| RefreshToken | Se conserva mientras su grupo pueda seguir vigente; puede eliminarse tras caducar el grupo y se elimina en cascada al borrar su User. |
 
 Una referencia histórica impide eliminar el recurso aunque el Device esté
 inactivo o el enrollment haya caducado. Las claves foráneas bloquean esos
-borrados mediante `RESTRICT` o `NO ACTION`. Solo las reglas de Policy utilizan
-cascada de eliminación; no se propaga el borrado a usuarios, licencias,
-dispositivos, enrollments ni eventos.
+borrados mediante `RESTRICT` o `NO ACTION`. Las reglas de Policy y los tokens
+técnicos de renovación de un User eliminado utilizan cascada de eliminación;
+no se propaga el borrado a usuarios, licencias, dispositivos, enrollments ni eventos.
 
 ## Garantías transaccionales
 
@@ -562,6 +618,21 @@ varias filas. La espera es limitada; si no puede obtenerse el bloqueo, se devuel
 un error controlado y se revierte la transacción. No se realizan envíos de email
 ni otras comunicaciones externas manteniendo esos bloqueos.
 
+### Renovación y revocación de autenticación
+
+Las operaciones que crean, consumen o revocan RefreshTokens bloquean primero
+la fila de su User dentro de la transacción y vuelven a comprobar su estado.
+El cambio de contraseña utiliza ese mismo bloqueo y revoca todos los grupos
+del usuario junto con la modificación de passwordHash.
+
+Consumir un refresh marca usedAt y crea otro registro del mismo grupo con
+el mismo expiresAt, sin ampliar sus 7 días iniciales. Un token consumido
+presentado otra vez para renovar revoca su grupo. La revocación se confirma
+antes de devolver el rechazo y no se revierte por generar la respuesta de error.
+
+La coordinación por User evita carreras entre login, renovación, logout y
+cambio de contraseña. Estas reglas no modifican la capacidad de licencias.
+
 ## Generación y entrega del token de enrollment
 
 El backend genera 32 bytes mediante `SecureRandom` y los codifica como Base64
@@ -583,7 +654,7 @@ puesto al caducar. No se promete entrega atómica entre PostgreSQL y el email.
 - Identificadores `Long` generados mediante `IDENTITY`.
 - Tablas y columnas en `snake_case`; User utiliza la tabla `users`.
 - Fechas `Instant` representadas como `timestamp with time zone` en PostgreSQL.
-- `eventUuid` representado con el tipo PostgreSQL `uuid`.
+- `eventUuid` y `familyId` representados con el tipo PostgreSQL `uuid`.
 - Enums almacenados como texto con restricciones `CHECK` de valores permitidos.
 - Relaciones cargadas de forma diferida cuando corresponda. No se añaden
   colecciones inversas a todas las entidades; se mantienen las necesarias,
@@ -603,6 +674,14 @@ JPA, migraciones ni configuración ejecutable del backend.
 - El inicio de sesión utiliza email y contraseña.
 - Las contraseñas se almacenan mediante BCrypt.
 - Cada ADMIN administra únicamente su propia Company.
+
+La autenticación utiliza JWT de duración máxima inicial de 15 minutos y
+refresh tokens de 7 días, con duraciones configurables. La renovación automática
+conserva la caducidad original y permite seguir trabajando sin repetir el login
+cada vez que caduca el JWT. Logout revoca el grupo de renovación; cambiar la
+contraseña revoca todos los grupos del usuario. Los JWT ya emitidos pueden
+seguir válidos hasta caducar. El detalle se recoge en la
+[autenticación JWT](jwt-authentication.md).
 
 ## Licencias y enrollment
 
@@ -666,7 +745,9 @@ La tarea #4 define las cardinalidades, claves foráneas, campos obligatorios,
 unicidad, longitudes, integridad entre compañías, eliminación y garantías
 transaccionales de este documento. El diagrama debe reflejar también la política
 inicial del enrollment y la relación con su Device de origen antes de cerrar
-la revisión documental.
+la revisión documental de esa tarea. La #6 añade RefreshToken, su relación
+con User y las reglas técnicas de renovación; el diagrama debe recoger
+esa asociación antes de cerrar su revisión.
 
 Las siguientes decisiones se documentan en sus propias tareas, ramas y PR:
 
