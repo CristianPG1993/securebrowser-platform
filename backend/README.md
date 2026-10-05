@@ -7,6 +7,7 @@ Estructura mínima del backend en Java y Spring Boot.
 - JDK 25.
 - Spring Boot 4.1.1, definido en pom.xml.
 - Maven 3.9.12, proporcionado por Maven Wrapper.
+- PostgreSQL 17.
 
 Los comandos siguientes se ejecutan desde la carpeta backend.
 
@@ -17,6 +18,81 @@ Los comandos siguientes se ejecutan desde la carpeta backend.
 ```
 
 Debe mostrar Maven 3.9.12 y Java 25.
+
+## Preparar PostgreSQL
+
+En una instalación nueva, conecta como administrador:
+
+```powershell
+psql -h 127.0.0.1 -p 5432 -U postgres -d postgres
+```
+
+Dentro de `psql`, crea el usuario del backend:
+
+```sql
+CREATE ROLE sbp_app LOGIN;
+```
+
+Configura su contraseña mediante la petición interactiva:
+
+```text
+\password sbp_app
+```
+
+Crea la base de datos con ese usuario como propietario:
+
+```sql
+CREATE DATABASE securebrowser_db OWNER sbp_app;
+```
+
+Para salir de `psql`:
+
+```text
+\q
+```
+
+La conexión del backend debe exigir contraseña. Si `pg_hba.conf`
+contiene reglas locales generales con `trust`, añade antes de ellas:
+
+```text
+# Autenticación con contraseña para el backend de SBP.
+host    securebrowser_db    sbp_app    127.0.0.1/32    scram-sha-256
+host    securebrowser_db    sbp_app    ::1/128         scram-sha-256
+```
+
+En Windows, los cambios de `pg_hba.conf` se aplican a las conexiones
+nuevas al guardar el archivo.
+
+## Configurar la conexión a PostgreSQL
+
+La base de datos de desarrollo es `securebrowser_db`, cuyo propietario
+es el usuario `sbp_app`. Este usuario debe tener permiso de login y una
+contraseña configurada.
+
+Antes de arrancar el backend, define las variables en PowerShell:
+
+```powershell
+$env:SBP_DB_URL = 'jdbc:postgresql://127.0.0.1:5432/securebrowser_db'
+$env:SBP_DB_USERNAME = 'sbp_app'
+```
+
+Introduce la contraseña cuando este comando la solicite:
+
+```powershell
+$sbpDbPassword = Read-Host 'Contraseña de sbp_app' -AsSecureString
+```
+
+Después, asígnala a la variable de entorno:
+
+```powershell
+$env:SBP_DB_PASSWORD = [System.Net.NetworkCredential]::new('', $sbpDbPassword).Password
+```
+
+Arranca la aplicación desde esa misma terminal. Las variables duran
+durante la sesión; deben definirse de nuevo al abrir otra terminal.
+
+Hibernate valida el esquema y Flyway aplica sus migraciones. El aviso
+`No migrations found` es esperado mientras no existan migraciones.
 
 ## Compilar
 
