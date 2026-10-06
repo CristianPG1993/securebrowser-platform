@@ -98,6 +98,13 @@ Hibernate valida el esquema y Flyway aplica las migraciones de
 - `V2__create_users.sql` crea la tabla `users` y su relación con Company.
 - `V3__create_licenses.sql` crea la tabla `licenses`, su relación con Company
   y la restricción de capacidad mínima.
+- `V4__create_policies.sql` crea la configuración base de `policies`,
+  su relación con Company y las restricciones de sus modos.
+
+La configuración base de Policy incluye el nombre, la compañía y los
+indicadores y modos de cada funcionalidad. Sus colecciones de reglas se
+incorporarán con [UrlRule (#26)](https://github.com/CristianPG1993/securebrowser-platform/issues/26)
+y [DownloadRule (#27)](https://github.com/CristianPG1993/securebrowser-platform/issues/27).
 
 ## Compilar
 
@@ -114,12 +121,16 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
   del usuario sin conectar con PostgreSQL.
 - `LicenseTest` comprueba la capacidad mínima, sus modificaciones y la compañía
   obligatoria sin conectar con PostgreSQL.
+- `PolicyTest` comprueba el nombre, los valores iniciales y los cambios
+  independientes de configuración sin conectar con PostgreSQL.
 - `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
   y los nombres repetidos en PostgreSQL.
 - `UserPersistenceTest` comprueba el guardado, la auditoría, la unicidad
   global del email y las restricciones de compañía y rol en PostgreSQL.
 - `LicensePersistenceTest` comprueba el guardado, la auditoría y las restricciones
   de capacidad y compañía en PostgreSQL.
+- `PolicyPersistenceTest` comprueba el guardado, la auditoría, los nombres repetidos
+  y las restricciones de configuración y compañía en PostgreSQL.
 
 Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
 variables `SBP_DB_*` deben estar definidas en la misma terminal:
@@ -134,6 +145,7 @@ Para ejecutar únicamente las pruebas unitarias de una entidad:
 .\mvnw.cmd "-Dtest=CompanyTest" test
 .\mvnw.cmd "-Dtest=UserTest" test
 .\mvnw.cmd "-Dtest=LicenseTest" test
+.\mvnw.cmd "-Dtest=PolicyTest" test
 ```
 
 Para ejecutar únicamente las pruebas de persistencia de una entidad:
@@ -142,6 +154,7 @@ Para ejecutar únicamente las pruebas de persistencia de una entidad:
 .\mvnw.cmd "-Dtest=CompanyPersistenceTest" test
 .\mvnw.cmd "-Dtest=UserPersistenceTest" test
 .\mvnw.cmd "-Dtest=LicensePersistenceTest" test
+.\mvnw.cmd "-Dtest=PolicyPersistenceTest" test
 ```
 
 Las modificaciones de las filas realizadas por las pruebas de persistencia
