@@ -1,9 +1,13 @@
 package com.securebrowser.platform.policy;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import com.securebrowser.platform.company.Company;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
@@ -15,6 +19,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 
 import org.springframework.data.annotation.CreatedDate;
@@ -51,6 +56,10 @@ public class Policy {
     @Enumerated(EnumType.STRING)
     @Column(name = "url_filtering_mode", nullable = false, length = 9)
     private FilterMode urlFilteringMode = FilterMode.DENYLIST;
+
+    // Las reglas se gestionan desde esta política y se eliminan con ella.
+    @OneToMany(mappedBy = "policy", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<UrlRule> urlRules = new ArrayList<>();
 
     // El control de descargas está activado inicialmente.
     @Column(name = "download_control_enabled", nullable = false)
@@ -128,6 +137,40 @@ public class Policy {
     public void configureDownloadControl(boolean enabled, FilterMode mode) {
         this.downloadControlMode = validateMode(mode);
         this.downloadControlEnabled = enabled;
+    }
+
+    /** Añade un dominio único y mantiene los dos lados de la relación. */
+    public UrlRule addUrlRule(String domain) {
+        UrlRule rule = new UrlRule(this, domain);
+        ensureUrlDomainAvailable(rule.getDomain());
+        urlRules.add(rule);
+        markRulesChanged();
+        return rule;
+    }
+
+    /** Retira una regla propia; JPA elimina su fila al sincronizar. */
+    public void removeUrlRule(UrlRule rule) {
+        if (!urlRules.remove(rule)) {
+            throw new IllegalArgumentException("URL rule does not belong to this policy");
+        }
+        markRulesChanged();
+    }
+
+    /** Rechaza dominios repetidos antes de modificar una regla o la colección. */
+    void ensureUrlDomainAvailable(String domain) {
+        if (urlRules.stream().anyMatch(rule -> rule.getDomain().equals(domain))) {
+            throw new IllegalArgumentException("Domain already belongs to this policy");
+        }
+    }
+
+    /** Marca la política como modificada para que la auditoría actúe al guardar. */
+    void markRulesChanged() {
+        updatedAt = Instant.now();
+    }
+
+    /** Devuelve las reglas sin permitir cambios directos en la colección. */
+    public List<UrlRule> getUrlRules() {
+        return Collections.unmodifiableList(urlRules);
     }
 
     /** Devuelve el identificador de la política. */
