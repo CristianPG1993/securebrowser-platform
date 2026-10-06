@@ -91,14 +91,57 @@ $env:SBP_DB_PASSWORD = [System.Net.NetworkCredential]::new('', $sbpDbPassword).P
 Arranca la aplicación desde esa misma terminal. Las variables duran
 durante la sesión; deben definirse de nuevo al abrir otra terminal.
 
-Hibernate valida el esquema y Flyway aplica sus migraciones. El aviso
-`No migrations found` es esperado mientras no existan migraciones.
+Hibernate valida el esquema y Flyway aplica las migraciones de
+`src/main/resources/db/migration`. La migración inicial
+`V1__create_companies.sql` crea la tabla `companies`.
 
 ## Compilar
 
 ```powershell
 .\mvnw.cmd compile
 ```
+
+## Ejecutar las pruebas
+
+Las pruebas utilizan JUnit Jupiter y AssertJ.
+
+- `CompanyTest` comprueba las reglas del nombre sin conectar con PostgreSQL.
+- `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
+  y los nombres repetidos en PostgreSQL.
+
+Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
+variables `SBP_DB_*` deben estar definidas en la misma terminal:
+
+```powershell
+.\mvnw.cmd test
+```
+
+Para ejecutar únicamente las pruebas del nombre:
+
+```powershell
+.\mvnw.cmd "-Dtest=CompanyTest" test
+```
+
+Para ejecutar únicamente las pruebas de persistencia:
+
+```powershell
+.\mvnw.cmd "-Dtest=CompanyPersistenceTest" test
+```
+
+Las modificaciones de las filas realizadas por las pruebas de persistencia
+se revierten al finalizar cada prueba.
+
+La fase `package` también ejecuta todas las pruebas antes de generar el JAR.
+
+### Pruebas desde VS Code
+
+El ejecutor de Java de VS Code utiliza su propia configuración.
+Para proporcionar las variables de conexión, se puede configurar
+`java.test.config.envFile` con la ruta absoluta de un archivo `.env` local.
+
+El archivo `.env` y la carpeta `.vscode` están excluidos de Git.
+El archivo `.env` no se carga automáticamente al ejecutar Maven desde
+PowerShell; en ese caso deben definirse las variables de entorno.
 
 ## Empaquetar
 
