@@ -100,11 +100,27 @@ Hibernate valida el esquema y Flyway aplica las migraciones de
   y la restricción de capacidad mínima.
 - `V4__create_policies.sql` crea la configuración base de `policies`,
   su relación con Company y las restricciones de sus modos.
+- `V5__create_url_rules.sql` crea los dominios de cada Policy, la unicidad
+  por política y el borrado en cascada de sus reglas.
 
 La configuración base de Policy incluye el nombre, la compañía y los
-indicadores y modos de cada funcionalidad. Sus colecciones de reglas se
-incorporarán con [UrlRule (#26)](https://github.com/CristianPG1993/securebrowser-platform/issues/26)
-y [DownloadRule (#27)](https://github.com/CristianPG1993/securebrowser-platform/issues/27).
+indicadores y modos de cada funcionalidad. `Policy.urlRules` comienza vacía
+y se consulta mediante una colección de solo lectura. `Policy.addUrlRule`,
+`UrlRule.changeDomain` y `Policy.removeUrlRule` gestionan sus cambios y actualizan
+`Policy.updatedAt`; `createdAt` se conserva. La auditoría fija el instante de
+modificación al sincronizar con PostgreSQL.
+
+Los dominios se guardan en minúsculas, sin espacios exteriores ni punto final.
+Los dominios internacionales se convierten a ASCII mediante
+[IDN de Java](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/net/IDN.html).
+Se rechazan esquemas, rutas, puertos, comodines y formatos inválidos. El límite
+es de 253 caracteres ASCII y 63 por etiqueta. El mismo dominio puede aparecer
+en políticas distintas; dentro de una política no puede repetirse.
+
+Al retirar una regla se elimina su fila sin borrar Policy. Al eliminar Policy
+se eliminan sus reglas. El modo sigue estando en `Policy.urlFilteringMode`.
+La colección de descargas se incorporará con
+[DownloadRule (#27)](https://github.com/CristianPG1993/securebrowser-platform/issues/27).
 
 ## Compilar
 
@@ -123,6 +139,8 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
   obligatoria sin conectar con PostgreSQL.
 - `PolicyTest` comprueba el nombre, los valores iniciales y los cambios
   independientes de configuración sin conectar con PostgreSQL.
+- `UrlRuleTest` comprueba la normalización de dominios, sus límites y la gestión
+  de la colección de Policy sin conectar con PostgreSQL.
 - `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
   y los nombres repetidos en PostgreSQL.
 - `UserPersistenceTest` comprueba el guardado, la auditoría, la unicidad
@@ -131,6 +149,9 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
   de capacidad y compañía en PostgreSQL.
 - `PolicyPersistenceTest` comprueba el guardado, la auditoría, los nombres repetidos
   y las restricciones de configuración y compañía en PostgreSQL.
+- `UrlRulePersistenceTest` comprueba el guardado en cascada, la unicidad por Policy,
+  los dominios normalizados, las claves foráneas y los cambios de auditoría
+  al añadir, editar y retirar reglas en PostgreSQL.
 
 Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
 variables `SBP_DB_*` deben estar definidas en la misma terminal:
@@ -146,6 +167,7 @@ Para ejecutar únicamente las pruebas unitarias de una entidad:
 .\mvnw.cmd "-Dtest=UserTest" test
 .\mvnw.cmd "-Dtest=LicenseTest" test
 .\mvnw.cmd "-Dtest=PolicyTest" test
+.\mvnw.cmd "-Dtest=UrlRuleTest" test
 ```
 
 Para ejecutar únicamente las pruebas de persistencia de una entidad:
@@ -155,6 +177,7 @@ Para ejecutar únicamente las pruebas de persistencia de una entidad:
 .\mvnw.cmd "-Dtest=UserPersistenceTest" test
 .\mvnw.cmd "-Dtest=LicensePersistenceTest" test
 .\mvnw.cmd "-Dtest=PolicyPersistenceTest" test
+.\mvnw.cmd "-Dtest=UrlRulePersistenceTest" test
 ```
 
 Las modificaciones de las filas realizadas por las pruebas de persistencia
