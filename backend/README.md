@@ -96,6 +96,8 @@ Hibernate valida el esquema y Flyway aplica las migraciones de
 
 - `V1__create_companies.sql` crea la tabla `companies`.
 - `V2__create_users.sql` crea la tabla `users` y su relación con Company.
+- `V3__create_licenses.sql` crea la tabla `licenses`, su relación con Company
+  y la restricción de capacidad mínima.
 
 ## Compilar
 
@@ -110,10 +112,14 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
 - `CompanyTest` comprueba las reglas del nombre sin conectar con PostgreSQL.
 - `UserTest` comprueba la normalización, validaciones y modificaciones
   del usuario sin conectar con PostgreSQL.
+- `LicenseTest` comprueba la capacidad mínima, sus modificaciones y la compañía
+  obligatoria sin conectar con PostgreSQL.
 - `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
   y los nombres repetidos en PostgreSQL.
 - `UserPersistenceTest` comprueba el guardado, la auditoría, la unicidad
   global del email y las restricciones de compañía y rol en PostgreSQL.
+- `LicensePersistenceTest` comprueba el guardado, la auditoría y las restricciones
+  de capacidad y compañía en PostgreSQL.
 
 Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
 variables `SBP_DB_*` deben estar definidas en la misma terminal:
@@ -127,6 +133,7 @@ Para ejecutar únicamente las pruebas unitarias de una entidad:
 ```powershell
 .\mvnw.cmd "-Dtest=CompanyTest" test
 .\mvnw.cmd "-Dtest=UserTest" test
+.\mvnw.cmd "-Dtest=LicenseTest" test
 ```
 
 Para ejecutar únicamente las pruebas de persistencia de una entidad:
@@ -134,6 +141,7 @@ Para ejecutar únicamente las pruebas de persistencia de una entidad:
 ```powershell
 .\mvnw.cmd "-Dtest=CompanyPersistenceTest" test
 .\mvnw.cmd "-Dtest=UserPersistenceTest" test
+.\mvnw.cmd "-Dtest=LicensePersistenceTest" test
 ```
 
 Las modificaciones de las filas realizadas por las pruebas de persistencia
