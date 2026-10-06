@@ -92,8 +92,10 @@ Arranca la aplicación desde esa misma terminal. Las variables duran
 durante la sesión; deben definirse de nuevo al abrir otra terminal.
 
 Hibernate valida el esquema y Flyway aplica las migraciones de
-`src/main/resources/db/migration`. La migración inicial
-`V1__create_companies.sql` crea la tabla `companies`.
+`src/main/resources/db/migration`:
+
+- `V1__create_companies.sql` crea la tabla `companies`.
+- `V2__create_users.sql` crea la tabla `users` y su relación con Company.
 
 ## Compilar
 
@@ -106,8 +108,12 @@ Hibernate valida el esquema y Flyway aplica las migraciones de
 Las pruebas utilizan JUnit Jupiter y AssertJ.
 
 - `CompanyTest` comprueba las reglas del nombre sin conectar con PostgreSQL.
+- `UserTest` comprueba la normalización, validaciones y modificaciones
+  del usuario sin conectar con PostgreSQL.
 - `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
   y los nombres repetidos en PostgreSQL.
+- `UserPersistenceTest` comprueba el guardado, la auditoría, la unicidad
+  global del email y las restricciones de compañía y rol en PostgreSQL.
 
 Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
 variables `SBP_DB_*` deben estar definidas en la misma terminal:
@@ -116,20 +122,26 @@ variables `SBP_DB_*` deben estar definidas en la misma terminal:
 .\mvnw.cmd test
 ```
 
-Para ejecutar únicamente las pruebas del nombre:
+Para ejecutar únicamente las pruebas unitarias de una entidad:
 
 ```powershell
 .\mvnw.cmd "-Dtest=CompanyTest" test
+.\mvnw.cmd "-Dtest=UserTest" test
 ```
 
-Para ejecutar únicamente las pruebas de persistencia:
+Para ejecutar únicamente las pruebas de persistencia de una entidad:
 
 ```powershell
 .\mvnw.cmd "-Dtest=CompanyPersistenceTest" test
+.\mvnw.cmd "-Dtest=UserPersistenceTest" test
 ```
 
 Las modificaciones de las filas realizadas por las pruebas de persistencia
-se revierten al finalizar cada prueba.
+se revierten al finalizar cada prueba. Las migraciones aplicadas por Flyway
+se conservan.
+
+Algunas pruebas provocan rechazos SQL deliberados para comprobar las
+restricciones. El resultado debe mostrar cero fallos y errores.
 
 La fase `package` también ejecuta todas las pruebas antes de generar el JAR.
 
