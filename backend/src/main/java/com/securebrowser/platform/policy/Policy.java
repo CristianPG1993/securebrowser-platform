@@ -65,10 +65,14 @@ public class Policy {
     @Column(name = "download_control_enabled", nullable = false)
     private boolean downloadControlEnabled = true;
 
-    // Las futuras reglas de descarga comparten este modo.
+    // Todas las reglas de descarga comparten este modo.
     @Enumerated(EnumType.STRING)
     @Column(name = "download_control_mode", nullable = false, length = 9)
     private FilterMode downloadControlMode = FilterMode.DENYLIST;
+
+    // Las reglas de descarga se gestionan y eliminan desde su política.
+    @OneToMany(mappedBy = "policy", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<DownloadRule> downloadRules = new ArrayList<>();
 
     // Fecha de creación asignada por la auditoría.
     @CreatedDate
@@ -171,6 +175,35 @@ public class Policy {
     /** Devuelve las reglas sin permitir cambios directos en la colección. */
     public List<UrlRule> getUrlRules() {
         return Collections.unmodifiableList(urlRules);
+    }
+
+    /** Añade una extensión única y mantiene los dos lados de la relación. */
+    public DownloadRule addDownloadRule(String extension) {
+        DownloadRule rule = new DownloadRule(this, extension);
+        ensureDownloadExtensionAvailable(rule.getExtension());
+        downloadRules.add(rule);
+        markRulesChanged();
+        return rule;
+    }
+
+    /** Retira una regla propia; JPA elimina su fila al sincronizar. */
+    public void removeDownloadRule(DownloadRule rule) {
+        if (!downloadRules.remove(rule)) {
+            throw new IllegalArgumentException("Download rule does not belong to this policy");
+        }
+        markRulesChanged();
+    }
+
+    /** Rechaza extensiones repetidas antes de modificar la regla o la colección. */
+    void ensureDownloadExtensionAvailable(String extension) {
+        if (downloadRules.stream().anyMatch(rule -> rule.getExtension().equals(extension))) {
+            throw new IllegalArgumentException("Extension already belongs to this policy");
+        }
+    }
+
+    /** Devuelve las reglas de descarga sin permitir cambios directos en la lista. */
+    public List<DownloadRule> getDownloadRules() {
+        return Collections.unmodifiableList(downloadRules);
     }
 
     /** Devuelve el identificador de la política. */
