@@ -110,6 +110,8 @@ Hibernate valida el esquema y Flyway aplica las migraciones de
   la unicidad del enrollment de origen y sus referencias obligatorias.
 - `V9__create_security_events.sql` crea el historial de eventos, su UUID único
   global, los tipos permitidos y la referencia protegida al Device.
+- `V10__create_refresh_tokens.sql` crea los refresh tokens, la unicidad global
+  del hash, las restricciones temporales y el borrado en cascada desde User.
 
 La configuración base de Policy incluye el nombre, la compañía y los
 indicadores y modos de cada funcionalidad. `Policy.urlRules` comienza vacía
@@ -207,6 +209,31 @@ inactivo también puede registrar eventos pendientes sin reactivarse.
 La recepción autenticada, la deduplicación concurrente, la comparación de
 reenvíos y la respuesta de conflicto se implementarán en los servicios de eventos.
 
+`RefreshToken`, en el paquete `auth`, conserva User, el hash SHA-256 del secreto,
+el UUID `familyId` y las fechas de creación y caducidad. El constructor recibe
+estos datos del backend; valida el hash hexadecimal de 64 caracteres y lo guarda
+en minúsculas. La Company se obtiene de User, sin relación obligatoria con Device
+ni reserva de puestos de licencia.
+
+Las fechas obligatorias se ajustan a microsegundos y la caducidad debe ser
+posterior a la creación. No se utiliza auditoría que sustituya esas fechas.
+`usedAt` y `revokedAt` comienzan en `null`. `markUsed` registra un primer consumo
+entre `createdAt` (incluido) y `expiresAt` (excluido), siempre que no haya consumo
+ni revocación anteriores. `revoke` registra una primera revocación desde la
+creación, incluso después del consumo o de la caducidad.
+
+En RefreshToken pueden coexistir consumo y revocación; EnrollmentToken mantiene
+su regla de exclusión. Repetir cualquiera de esas transiciones se rechaza sin
+sustituir su fecha. `isUsableAt` deriva la disponibilidad en un instante recibido,
+sin almacenar una columna de estado ni modificar el registro al caducar.
+
+El hash tiene unicidad global, mientras que varios registros pueden compartir
+`familyId`. El borrado permitido de User elimina sus refresh tokens en cascada.
+La generación del secreto, login, rotación, revocación de grupos y bloqueo de
+User se implementarán en los servicios. También les corresponde conservar el
+mismo usuario y la caducidad absoluta del grupo durante las renovaciones.
+La duración inicial de 7 días es configurable y no se fija en la entidad.
+
 ## Compilar
 
 ```powershell
@@ -234,6 +261,8 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
   los cambios de política y actividad y el registro de última comunicación.
 - `SecurityEventTest` comprueba las referencias y fechas obligatorias, los tipos,
   el detalle opcional y su límite, la precisión temporal y los desajustes de reloj.
+- `RefreshTokenTest` comprueba el hash y origen obligatorios, los límites temporales,
+  el estado derivado, el primer consumo y la revocación de un token consumido.
 - `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
   y los nombres repetidos en PostgreSQL.
 - `UserPersistenceTest` comprueba el guardado, la auditoría, la unicidad
@@ -257,6 +286,9 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
 - `SecurityEventPersistenceTest` comprueba el guardado de UUID y tipos textuales,
   la unicidad global, los límites y referencias, las fechas originales y la
   conservación y recepción del historial de un Device inactivo.
+- `RefreshTokenPersistenceTest` comprueba el guardado, la unicidad del hash,
+  los grupos compartidos, las restricciones temporales, la coexistencia de consumo
+  y revocación y el borrado en cascada desde User.
 
 Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
 variables `SBP_DB_*` deben estar definidas en la misma terminal:
@@ -277,6 +309,7 @@ Para ejecutar únicamente las pruebas unitarias de una entidad:
 .\mvnw.cmd "-Dtest=EnrollmentTokenTest" test
 .\mvnw.cmd "-Dtest=DeviceTest" test
 .\mvnw.cmd "-Dtest=SecurityEventTest" test
+.\mvnw.cmd "-Dtest=RefreshTokenTest" test
 ```
 
 Para ejecutar únicamente las pruebas de persistencia de una entidad:
@@ -291,6 +324,7 @@ Para ejecutar únicamente las pruebas de persistencia de una entidad:
 .\mvnw.cmd "-Dtest=EnrollmentTokenPersistenceTest" test
 .\mvnw.cmd "-Dtest=DevicePersistenceTest" test
 .\mvnw.cmd "-Dtest=SecurityEventPersistenceTest" test
+.\mvnw.cmd "-Dtest=RefreshTokenPersistenceTest" test
 ```
 
 Las modificaciones de las filas realizadas por las pruebas de persistencia
