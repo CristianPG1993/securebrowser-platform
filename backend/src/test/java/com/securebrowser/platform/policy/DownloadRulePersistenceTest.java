@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 
 import com.securebrowser.platform.company.Company;
@@ -51,7 +52,7 @@ class DownloadRulePersistenceTest {
 
         Policy stored = entityManager.find(Policy.class, policyId);
 
-        assertThat(stored.getDownloadRules()).extracting(DownloadRule::getExtension)
+        assertThat(stored.getDownloadRules()).extracting(element -> Objects.requireNonNull(element).getExtension())
                 .containsExactlyInAnyOrder("exe", "pdf");
         assertThat(stored.getDownloadRules()).allSatisfy(rule -> {
             assertThat(rule.getId()).isPositive();
@@ -59,7 +60,7 @@ class DownloadRulePersistenceTest {
             assertThat(rule.getPolicy().getCompany().getId()).isEqualTo(companyId);
             assertThat(rule.getPolicy().getDownloadControlMode()).isEqualTo(FilterMode.ALLOWLIST);
         });
-        assertThat(stored.getUrlRules()).extracting(UrlRule::getDomain)
+        assertThat(stored.getUrlRules()).extracting(element -> Objects.requireNonNull(element).getDomain())
                 .containsExactly("example.com");
         assertThat(stored.isDownloadControlEnabled()).isFalse();
     }
@@ -95,7 +96,7 @@ class DownloadRulePersistenceTest {
             Policy afterAddition = entityManager.find(Policy.class, policyId);
             assertThat(afterAddition.getCreatedAt()).isEqualTo(creation);
             assertThat(afterAddition.getUpdatedAt()).isEqualTo(addition);
-            assertThat(afterAddition.getDownloadRules()).extracting(DownloadRule::getExtension)
+            assertThat(afterAddition.getDownloadRules()).extracting(element -> Objects.requireNonNull(element).getExtension())
                     .containsExactly("exe");
             entityManager.clear();
 
@@ -108,7 +109,7 @@ class DownloadRulePersistenceTest {
             Policy afterEdition = entityManager.find(Policy.class, policyId);
             assertThat(afterEdition.getCreatedAt()).isEqualTo(creation);
             assertThat(afterEdition.getUpdatedAt()).isEqualTo(edition);
-            assertThat(afterEdition.getDownloadRules()).extracting(DownloadRule::getExtension)
+            assertThat(afterEdition.getDownloadRules()).extracting(element -> Objects.requireNonNull(element).getExtension())
                     .containsExactly("pdf");
 
             auditingHandler.setDateTimeProvider(() -> Optional.of(removal));
@@ -120,7 +121,7 @@ class DownloadRulePersistenceTest {
             assertThat(afterRemoval.getCreatedAt()).isEqualTo(creation);
             assertThat(afterRemoval.getUpdatedAt()).isEqualTo(removal);
             assertThat(afterRemoval.getDownloadRules()).isEmpty();
-            assertThat(afterRemoval.getUrlRules()).extracting(UrlRule::getDomain)
+            assertThat(afterRemoval.getUrlRules()).extracting(element -> Objects.requireNonNull(element).getDomain())
                     .containsExactly("example.com");
             assertThat(entityManager.find(DownloadRule.class, ruleId)).isNull();
         } finally {

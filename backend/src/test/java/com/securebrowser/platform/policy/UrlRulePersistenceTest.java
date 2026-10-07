@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 
 import com.securebrowser.platform.company.Company;
@@ -44,7 +45,7 @@ class UrlRulePersistenceTest {
 
         Policy stored = entityManager.find(Policy.class, policyId);
 
-        assertThat(stored.getUrlRules()).extracting(UrlRule::getDomain)
+        assertThat(stored.getUrlRules()).extracting(element -> Objects.requireNonNull(element).getDomain())
                 .containsExactlyInAnyOrder("example.com", "xn--bcher-kva.de");
         assertThat(stored.getUrlRules()).allSatisfy(rule -> {
             assertThat(rule.getId()).isPositive();
@@ -81,7 +82,7 @@ class UrlRulePersistenceTest {
             Policy afterAddition = entityManager.find(Policy.class, policyId);
             assertThat(afterAddition.getCreatedAt()).isEqualTo(creation);
             assertThat(afterAddition.getUpdatedAt()).isEqualTo(addition);
-            assertThat(afterAddition.getUrlRules()).extracting(UrlRule::getDomain)
+            assertThat(afterAddition.getUrlRules()).extracting(element -> Objects.requireNonNull(element).getDomain())
                     .containsExactly("example.com");
             entityManager.clear();
 
@@ -95,7 +96,7 @@ class UrlRulePersistenceTest {
             Policy afterEdition = entityManager.find(Policy.class, policyId);
             assertThat(afterEdition.getCreatedAt()).isEqualTo(creation);
             assertThat(afterEdition.getUpdatedAt()).isEqualTo(edition);
-            assertThat(afterEdition.getUrlRules()).extracting(UrlRule::getDomain)
+            assertThat(afterEdition.getUrlRules()).extracting(element -> Objects.requireNonNull(element).getDomain())
                     .containsExactly("xn--bcher-kva.de");
 
             auditingHandler.setDateTimeProvider(() -> Optional.of(removal));
