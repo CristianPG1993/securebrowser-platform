@@ -106,6 +106,8 @@ Hibernate valida el esquema y Flyway aplica las migraciones de
   por política y las restricciones de formato y borrado en cascada.
 - `V7__create_enrollment_tokens.sql` crea los enrollments, la unicidad global
   del hash y las restricciones de referencias y ciclo de vida.
+- `V8__create_devices.sql` crea las instalaciones corporativas, su UUID único,
+  la unicidad del enrollment de origen y sus referencias obligatorias.
 
 La configuración base de Policy incluye el nombre, la compañía y los
 indicadores y modos de cada funcionalidad. `Policy.urlRules` comienza vacía
@@ -164,6 +166,26 @@ el enrollment esté utilizado, revocado o caducado. La generación y entrega del
 secreto, la duración de la vigencia, las pertenencias a Company, la reserva de
 capacidad y el consumo transaccional e idempotente se implementarán en los servicios.
 
+`Device` conserva su Company, User, License y EnrollmentToken de origen. Su
+`deviceIdentifier` es un UUID completo, normalizado en minúsculas y único en toda
+la plataforma; identifica la instalación y no sirve como credencial. Cada
+enrollment puede originar como máximo un Device, incluso si este se desactiva.
+
+El nombre es opcional, admite hasta 150 caracteres y pierde los espacios exteriores.
+Un nombre vacío se guarda como `null`. Las instalaciones comienzan activas;
+`deactivate` y `activate` cambian ese indicador conservando el registro y sus
+referencias. `assignPolicy` cambia la política actual sin modificar la política
+inicial del enrollment.
+
+La auditoría JPA asigna `createdAt` y `updatedAt` al guardar y conserva la fecha
+de creación en las modificaciones. `lastSeenAt` comienza vacío y `recordLastSeen`
+recibe una fecha del backend, ajustada a microsegundos. Las claves foráneas
+protegen los recursos referenciados también cuando el Device está inactivo.
+
+El registro desde el enrollment, los reintentos, la pertenencia a Company, la
+ocupación de licencias al activar o desactivar y la autenticación de las
+comunicaciones se coordinarán en los servicios.
+
 ## Compilar
 
 ```powershell
@@ -187,6 +209,8 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
   la gestión de descargas sin alterar las reglas de URL.
 - `EnrollmentTokenTest` comprueba el hash, las referencias obligatorias, las fechas,
   la precisión temporal, el estado derivado y las transiciones de uso y revocación.
+- `DeviceTest` comprueba el UUID, el nombre opcional, las referencias obligatorias,
+  los cambios de política y actividad y el registro de última comunicación.
 - `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
   y los nombres repetidos en PostgreSQL.
 - `UserPersistenceTest` comprueba el guardado, la auditoría, la unicidad
@@ -204,6 +228,9 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
 - `EnrollmentTokenPersistenceTest` comprueba el guardado, la unicidad global del hash,
   las restricciones temporales y de exclusión, las claves foráneas y la protección
   de las referencias históricas en PostgreSQL.
+- `DevicePersistenceTest` comprueba el guardado, la auditoría, las restricciones
+  del UUID y nombre, la unicidad de instalación y enrollment, las claves foráneas
+  y la conservación del origen al cambiar la política o desactivar el Device.
 
 Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
 variables `SBP_DB_*` deben estar definidas en la misma terminal:
@@ -222,6 +249,7 @@ Para ejecutar únicamente las pruebas unitarias de una entidad:
 .\mvnw.cmd "-Dtest=UrlRuleTest" test
 .\mvnw.cmd "-Dtest=DownloadRuleTest" test
 .\mvnw.cmd "-Dtest=EnrollmentTokenTest" test
+.\mvnw.cmd "-Dtest=DeviceTest" test
 ```
 
 Para ejecutar únicamente las pruebas de persistencia de una entidad:
@@ -234,6 +262,7 @@ Para ejecutar únicamente las pruebas de persistencia de una entidad:
 .\mvnw.cmd "-Dtest=UrlRulePersistenceTest" test
 .\mvnw.cmd "-Dtest=DownloadRulePersistenceTest" test
 .\mvnw.cmd "-Dtest=EnrollmentTokenPersistenceTest" test
+.\mvnw.cmd "-Dtest=DevicePersistenceTest" test
 ```
 
 Las modificaciones de las filas realizadas por las pruebas de persistencia
