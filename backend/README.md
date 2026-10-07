@@ -104,6 +104,8 @@ Hibernate valida el esquema y Flyway aplica las migraciones de
   por política y el borrado en cascada de sus reglas.
 - `V6__create_download_rules.sql` crea las extensiones de cada Policy, la unicidad
   por política y las restricciones de formato y borrado en cascada.
+- `V7__create_enrollment_tokens.sql` crea los enrollments, la unicidad global
+  del hash y las restricciones de referencias y ciclo de vida.
 
 La configuración base de Policy incluye el nombre, la compañía y los
 indicadores y modos de cada funcionalidad. `Policy.urlRules` comienza vacía
@@ -139,6 +141,29 @@ La migración de descargas utiliza
 [escapes Unicode de PostgreSQL](https://www.postgresql.org/docs/17/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-UESCAPE)
 para identificar los espacios Unicode sin depender de la configuración regional.
 
+`EnrollmentToken` conserva la License, el User y la Policy inicial. Su constructor
+recibe un hash SHA-256 de 64 caracteres hexadecimales y las fechas de emisión y
+caducidad proporcionadas por el backend. El hash se guarda en minúsculas y nunca
+se almacena el secreto original. Las referencias, el hash y las fechas de emisión
+y caducidad no tienen métodos de modificación.
+
+La fecha `createdAt` se asigna al emitir el enrollment y no se sustituye mediante
+auditoría automática al persistirlo. Las fechas se truncan a microsegundos para
+respetar la [precisión temporal de PostgreSQL](https://www.postgresql.org/docs/17/datatype-datetime.html).
+La caducidad debe ser posterior a la emisión también después de ese ajuste.
+
+`markUsed` registra un primer consumo entre `createdAt` (incluido) y `expiresAt`
+(excluido). `revoke` registra una revocación desde `createdAt`, incluso después de
+caducar. Un enrollment utilizado no puede revocarse, uno revocado no puede usarse
+y ninguna de esas transiciones se repite ni sustituye su fecha anterior.
+`isPendingAt` deriva si está pendiente y vigente en un instante recibido como
+argumento; no se almacena una columna de estado ni se modifica la fila al caducar.
+
+Las referencias históricas a User, License y Policy bloquean sus borrados aunque
+el enrollment esté utilizado, revocado o caducado. La generación y entrega del
+secreto, la duración de la vigencia, las pertenencias a Company, la reserva de
+capacidad y el consumo transaccional e idempotente se implementarán en los servicios.
+
 ## Compilar
 
 ```powershell
@@ -160,6 +185,8 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
   de la colección de Policy sin conectar con PostgreSQL.
 - `DownloadRuleTest` comprueba la normalización de extensiones, sus límites y
   la gestión de descargas sin alterar las reglas de URL.
+- `EnrollmentTokenTest` comprueba el hash, las referencias obligatorias, las fechas,
+  la precisión temporal, el estado derivado y las transiciones de uso y revocación.
 - `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
   y los nombres repetidos en PostgreSQL.
 - `UserPersistenceTest` comprueba el guardado, la auditoría, la unicidad
@@ -174,6 +201,9 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
 - `DownloadRulePersistenceTest` comprueba el guardado, la unicidad, los límites
   y el formato de extensiones, la auditoría de Policy y la eliminación de reglas
   individuales o de ambas colecciones con su política.
+- `EnrollmentTokenPersistenceTest` comprueba el guardado, la unicidad global del hash,
+  las restricciones temporales y de exclusión, las claves foráneas y la protección
+  de las referencias históricas en PostgreSQL.
 
 Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
 variables `SBP_DB_*` deben estar definidas en la misma terminal:
@@ -191,6 +221,7 @@ Para ejecutar únicamente las pruebas unitarias de una entidad:
 .\mvnw.cmd "-Dtest=PolicyTest" test
 .\mvnw.cmd "-Dtest=UrlRuleTest" test
 .\mvnw.cmd "-Dtest=DownloadRuleTest" test
+.\mvnw.cmd "-Dtest=EnrollmentTokenTest" test
 ```
 
 Para ejecutar únicamente las pruebas de persistencia de una entidad:
@@ -202,6 +233,7 @@ Para ejecutar únicamente las pruebas de persistencia de una entidad:
 .\mvnw.cmd "-Dtest=PolicyPersistenceTest" test
 .\mvnw.cmd "-Dtest=UrlRulePersistenceTest" test
 .\mvnw.cmd "-Dtest=DownloadRulePersistenceTest" test
+.\mvnw.cmd "-Dtest=EnrollmentTokenPersistenceTest" test
 ```
 
 Las modificaciones de las filas realizadas por las pruebas de persistencia
