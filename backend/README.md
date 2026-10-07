@@ -108,6 +108,8 @@ Hibernate valida el esquema y Flyway aplica las migraciones de
   del hash y las restricciones de referencias y ciclo de vida.
 - `V8__create_devices.sql` crea las instalaciones corporativas, su UUID único,
   la unicidad del enrollment de origen y sus referencias obligatorias.
+- `V9__create_security_events.sql` crea el historial de eventos, su UUID único
+  global, los tipos permitidos y la referencia protegida al Device.
 
 La configuración base de Policy incluye el nombre, la compañía y los
 indicadores y modos de cada funcionalidad. `Policy.urlRules` comienza vacía
@@ -186,6 +188,25 @@ El registro desde el enrollment, los reintentos, la pertenencia a Company, la
 ocupación de licencias al activar o desactivar y la autenticación de las
 comunicaciones se coordinarán en los servicios.
 
+`SecurityEvent` conserva el UUID generado por Desktop, el Device de origen, el
+tipo, el detalle y las fechas de ocurrencia y primera recepción. El UUID se mapea
+al tipo `uuid` de PostgreSQL. La Company se obtiene a través de Device y no se
+duplica en el evento. Los tipos admitidos son `URL_BLOCKED`, `DOWNLOAD_BLOCKED`
+y `POLICY_UPDATED`, guardados como texto.
+
+La entidad no ofrece métodos de modificación y sus columnas de contenido no se
+actualizan mediante JPA. El detalle es opcional, admite hasta 2.000 caracteres
+y conserva espacios y cadenas vacías. Ambas fechas son obligatorias y se ajustan
+a microsegundos: `occurredAt` procede de Desktop y `receivedAt` se proporciona
+desde el backend al primer registro, sin sustituirse mediante auditoría.
+Se admite una ocurrencia posterior a la recepción por desajustes del reloj cliente.
+
+El UUID tiene unicidad global y los eventos impiden borrar su Device de origen.
+Desactivar o cambiar la política del Device conserva su historial; un Device
+inactivo también puede registrar eventos pendientes sin reactivarse.
+La recepción autenticada, la deduplicación concurrente, la comparación de
+reenvíos y la respuesta de conflicto se implementarán en los servicios de eventos.
+
 ## Compilar
 
 ```powershell
@@ -211,6 +232,8 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
   la precisión temporal, el estado derivado y las transiciones de uso y revocación.
 - `DeviceTest` comprueba el UUID, el nombre opcional, las referencias obligatorias,
   los cambios de política y actividad y el registro de última comunicación.
+- `SecurityEventTest` comprueba las referencias y fechas obligatorias, los tipos,
+  el detalle opcional y su límite, la precisión temporal y los desajustes de reloj.
 - `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
   y los nombres repetidos en PostgreSQL.
 - `UserPersistenceTest` comprueba el guardado, la auditoría, la unicidad
@@ -231,6 +254,9 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
 - `DevicePersistenceTest` comprueba el guardado, la auditoría, las restricciones
   del UUID y nombre, la unicidad de instalación y enrollment, las claves foráneas
   y la conservación del origen al cambiar la política o desactivar el Device.
+- `SecurityEventPersistenceTest` comprueba el guardado de UUID y tipos textuales,
+  la unicidad global, los límites y referencias, las fechas originales y la
+  conservación y recepción del historial de un Device inactivo.
 
 Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
 variables `SBP_DB_*` deben estar definidas en la misma terminal:
@@ -250,6 +276,7 @@ Para ejecutar únicamente las pruebas unitarias de una entidad:
 .\mvnw.cmd "-Dtest=DownloadRuleTest" test
 .\mvnw.cmd "-Dtest=EnrollmentTokenTest" test
 .\mvnw.cmd "-Dtest=DeviceTest" test
+.\mvnw.cmd "-Dtest=SecurityEventTest" test
 ```
 
 Para ejecutar únicamente las pruebas de persistencia de una entidad:
@@ -263,6 +290,7 @@ Para ejecutar únicamente las pruebas de persistencia de una entidad:
 .\mvnw.cmd "-Dtest=DownloadRulePersistenceTest" test
 .\mvnw.cmd "-Dtest=EnrollmentTokenPersistenceTest" test
 .\mvnw.cmd "-Dtest=DevicePersistenceTest" test
+.\mvnw.cmd "-Dtest=SecurityEventPersistenceTest" test
 ```
 
 Las modificaciones de las filas realizadas por las pruebas de persistencia
