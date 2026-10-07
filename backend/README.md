@@ -102,6 +102,8 @@ Hibernate valida el esquema y Flyway aplica las migraciones de
   su relación con Company y las restricciones de sus modos.
 - `V5__create_url_rules.sql` crea los dominios de cada Policy, la unicidad
   por política y el borrado en cascada de sus reglas.
+- `V6__create_download_rules.sql` crea las extensiones de cada Policy, la unicidad
+  por política y las restricciones de formato y borrado en cascada.
 
 La configuración base de Policy incluye el nombre, la compañía y los
 indicadores y modos de cada funcionalidad. `Policy.urlRules` comienza vacía
@@ -119,8 +121,23 @@ en políticas distintas; dentro de una política no puede repetirse.
 
 Al retirar una regla se elimina su fila sin borrar Policy. Al eliminar Policy
 se eliminan sus reglas. El modo sigue estando en `Policy.urlFilteringMode`.
-La colección de descargas se incorporará con
-[DownloadRule (#27)](https://github.com/CristianPG1993/securebrowser-platform/issues/27).
+
+`Policy.downloadRules` también comienza vacía y se consulta mediante una colección
+de solo lectura. `Policy.addDownloadRule`, `DownloadRule.changeExtension` y
+`Policy.removeDownloadRule` gestionan sus cambios y actualizan `Policy.updatedAt`,
+conservando `createdAt` y las reglas de URL.
+
+Las extensiones se guardan en minúsculas y sin un punto inicial: `.EXE` se convierte
+en `exe`. Se rechazan extensiones vacías, espacios (también exteriores y Unicode),
+caracteres de control, rutas y puntos interiores como `tar.gz`. El límite es de
+20 caracteres después de normalizar. La unicidad se aplica dentro de cada Policy.
+El modo de las reglas procede de `Policy.downloadControlMode` y su compañía de Policy.
+Al retirar una regla se elimina su fila; al borrar Policy se eliminan ambas
+colecciones de reglas, conservando Company.
+
+La migración de descargas utiliza
+[escapes Unicode de PostgreSQL](https://www.postgresql.org/docs/17/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-UESCAPE)
+para identificar los espacios Unicode sin depender de la configuración regional.
 
 ## Compilar
 
@@ -141,6 +158,8 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
   independientes de configuración sin conectar con PostgreSQL.
 - `UrlRuleTest` comprueba la normalización de dominios, sus límites y la gestión
   de la colección de Policy sin conectar con PostgreSQL.
+- `DownloadRuleTest` comprueba la normalización de extensiones, sus límites y
+  la gestión de descargas sin alterar las reglas de URL.
 - `CompanyPersistenceTest` comprueba el guardado, la auditoría de fechas
   y los nombres repetidos en PostgreSQL.
 - `UserPersistenceTest` comprueba el guardado, la auditoría, la unicidad
@@ -152,6 +171,9 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
 - `UrlRulePersistenceTest` comprueba el guardado en cascada, la unicidad por Policy,
   los dominios normalizados, las claves foráneas y los cambios de auditoría
   al añadir, editar y retirar reglas en PostgreSQL.
+- `DownloadRulePersistenceTest` comprueba el guardado, la unicidad, los límites
+  y el formato de extensiones, la auditoría de Policy y la eliminación de reglas
+  individuales o de ambas colecciones con su política.
 
 Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
 variables `SBP_DB_*` deben estar definidas en la misma terminal:
@@ -168,6 +190,7 @@ Para ejecutar únicamente las pruebas unitarias de una entidad:
 .\mvnw.cmd "-Dtest=LicenseTest" test
 .\mvnw.cmd "-Dtest=PolicyTest" test
 .\mvnw.cmd "-Dtest=UrlRuleTest" test
+.\mvnw.cmd "-Dtest=DownloadRuleTest" test
 ```
 
 Para ejecutar únicamente las pruebas de persistencia de una entidad:
@@ -178,6 +201,7 @@ Para ejecutar únicamente las pruebas de persistencia de una entidad:
 .\mvnw.cmd "-Dtest=LicensePersistenceTest" test
 .\mvnw.cmd "-Dtest=PolicyPersistenceTest" test
 .\mvnw.cmd "-Dtest=UrlRulePersistenceTest" test
+.\mvnw.cmd "-Dtest=DownloadRulePersistenceTest" test
 ```
 
 Las modificaciones de las filas realizadas por las pruebas de persistencia
