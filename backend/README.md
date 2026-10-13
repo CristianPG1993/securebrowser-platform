@@ -240,6 +240,24 @@ La duración inicial de 7 días es configurable y no se fija en la entidad.
 .\mvnw.cmd compile
 ```
 
+## Acceso a persistencia de Company
+
+`CompanyRepository`, ubicado en `com.securebrowser.platform.company`,
+extiende `JpaRepository<Company, Long>`. Spring Data JPA proporciona
+su implementación y las operaciones heredadas de consulta y persistencia.
+
+Para consultar Company por su identificador y guardar sus cambios bastan
+los métodos heredados, como `findById` y `save`. Inicialmente no se necesitan
+consultas adicionales.
+
+El futuro CompanyService determinará la compañía permitida desde el contexto
+autenticado y aplicará las comprobaciones de permisos y las reglas de negocio.
+
+La validación utiliza las pruebas existentes de Company.
+`CompanyPersistenceTest` arranca el contexto de Spring y comprueba el mapeo
+y la auditoría sobre PostgreSQL. Se añadirán pruebas específicas del repositorio
+cuando existan consultas propias que aporten comportamiento adicional.
+
 ## Ejecutar las pruebas
 
 Las pruebas utilizan JUnit Jupiter y AssertJ.
