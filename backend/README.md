@@ -276,6 +276,38 @@ Company. Si la compañía no existe, se lanza `CompanyNotFoundException`.
 comprobar la separación entre compañías, la confirmación del cambio de nombre,
 la auditoría y los rechazos por nombre inválido o rol USER.
 
+## DTOs de Company
+
+Los DTOs se ubican en `com.securebrowser.platform.company.dto`
+y separan los datos de la API de la entidad JPA.
+
+`CompanyResponse` contiene únicamente `id`, `name`, `createdAt` y
+`updatedAt`. Su método `from` copia estos valores desde Company.
+Las fechas se representan en JSON como cadenas ISO 8601 en UTC.
+
+`CompanyUpdateRequest` contiene únicamente `name`. Su constructor elimina
+los espacios exteriores mediante `strip`. La validación exige contenido
+y un máximo de 150 puntos de código Unicode mediante `@NotBlank` y
+`@CodePointLength`, proporcionadas por el starter de validación.
+
+La validación HTTP y el rechazo de campos desconocidos se integrarán
+en la tarea del Controller.
+
+Las pruebas de los DTOs no necesitan PostgreSQL:
+
+- `CompanyUpdateRequestTest` comprueba normalización, nombres obligatorios
+  y límites de longitud con letras y emojis.
+- `CompanyResponseJsonTest` comprueba la conversión y el JSON de salida,
+  incluidos sus campos permitidos y fechas UTC.
+- `CompanyUpdateRequestJsonTest` comprueba la deserialización y posterior
+  validación cuando el nombre está ausente o es null.
+
+Desde la carpeta backend se pueden ejecutar juntas:
+
+```powershell
+.\mvnw.cmd "-Dtest=CompanyUpdateRequestTest,CompanyResponseJsonTest,CompanyUpdateRequestJsonTest" test
+```
+
 ## Ejecutar las pruebas
 
 Las pruebas utilizan JUnit Jupiter y AssertJ.
