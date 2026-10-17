@@ -250,13 +250,31 @@ Para consultar Company por su identificador y guardar sus cambios bastan
 los métodos heredados, como `findById` y `save`. Inicialmente no se necesitan
 consultas adicionales.
 
-El futuro CompanyService determinará la compañía permitida desde el contexto
-autenticado y aplicará las comprobaciones de permisos y las reglas de negocio.
+`CompanyService` utiliza este repositorio para consultar la compañía propia
+y guardar sus cambios, aplicando las comprobaciones de permisos.
 
 La validación utiliza las pruebas existentes de Company.
 `CompanyPersistenceTest` arranca el contexto de Spring y comprueba el mapeo
 y la auditoría sobre PostgreSQL. Se añadirán pruebas específicas del repositorio
 cuando existan consultas propias que aporten comportamiento adicional.
+
+## Servicio de Company
+
+`CompanyService` ofrece dos operaciones: `getOwnCompany` consulta la compañía
+propia y `changeOwnCompanyName` modifica su nombre. Ambas requieren el rol
+ADMIN y obtienen el identificador desde la compañía del usuario recibido.
+
+El usuario debe proceder de un contexto de confianza del backend.
+La integración con la autenticación real y JWT está pendiente.
+
+Las consultas utilizan una transacción de solo lectura. El cambio de nombre
+se realiza en una transacción de escritura y utiliza las validaciones de
+Company. Si la compañía no existe, se lanza `CompanyNotFoundException`.
+
+`CompanyServiceTest` comprueba el comportamiento con Mockito, sin PostgreSQL.
+`CompanyServicePersistenceTest` utiliza el servicio y repositorio reales para
+comprobar la separación entre compañías, la confirmación del cambio de nombre,
+la auditoría y los rechazos por nombre inválido o rol USER.
 
 ## Ejecutar las pruebas
 
@@ -345,9 +363,11 @@ Para ejecutar únicamente las pruebas de persistencia de una entidad:
 .\mvnw.cmd "-Dtest=RefreshTokenPersistenceTest" test
 ```
 
-Las modificaciones de las filas realizadas por las pruebas de persistencia
-se revierten al finalizar cada prueba. Las migraciones aplicadas por Flyway
-se conservan.
+Las pruebas de persistencia de las entidades revierten sus modificaciones
+al finalizar cada prueba. `CompanyServicePersistenceTest` utiliza transacciones
+que se confirman y elimina después los usuarios y compañías que ha creado,
+restaurando también el proveedor de fechas de auditoría.
+Las migraciones aplicadas por Flyway se conservan.
 
 Algunas pruebas provocan rechazos SQL deliberados para comprobar las
 restricciones. El resultado debe mostrar cero fallos y errores.
