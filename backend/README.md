@@ -8,6 +8,8 @@ Estructura mínima del backend en Java y Spring Boot.
 - Spring Boot 4.1.1, definido en pom.xml.
 - Maven 3.9.12, proporcionado por Maven Wrapper.
 - PostgreSQL 17.
+- Docker Desktop con el motor de contenedores Linux activo para las pruebas
+  de integración de la API de Company con Testcontainers.
 
 Los comandos siguientes se ejecutan desde la carpeta backend.
 
@@ -460,9 +462,67 @@ importa la configuración real, sin PostgreSQL:
 .\mvnw.cmd "-Dtest=JsonConfigurationTest" test
 ```
 
-Las pruebas de integración/MockMvc específicas del contrato de Company y sus
-errores corresponden al siguiente bloque, #45. El formato común de errores
-se completará en #46; este Controller no incorpora manejadores propios.
+El formato común de errores se completará en #46; este Controller no incorpora
+manejadores propios. Las pruebas de #45 comprueban los estados HTTP sin fijar
+todavía el cuerpo común de Problem Details.
+
+### Pruebas HTTP de Company
+
+`CompanyControllerTest` utiliza `@WebMvcTest` con el Controller, la configuración
+JSON y los filtros de seguridad reales. Sustituye CompanyService, JwtDecoder y
+AuthenticatedUserResolver por mocks y proporciona directamente un principal
+autenticado cuando el caso lo requiere. No conecta con PostgreSQL ni verifica
+firmas JWT. Sus 31 casos comprueban:
+
+- GET y PATCH correctos, campos públicos exactos, fechas UTC y normalización.
+- Nombres inválidos, JSON incorrecto, tipos y campos no permitidos: 400 sin
+  invocar el servicio.
+- Ausencia de autenticación: 401; rol USER: 403, antes de validar el cuerpo.
+- Traducción a 404 cuando el servicio simulado lanza CompanyNotFoundException.
+
+No requiere Docker ni variables de conexión:
+
+```powershell
+.\mvnw.cmd "-Dtest=CompanyControllerTest" test
+```
+
+`CompanyApiPersistenceTest` utiliza el contexto completo con MockMvc, JWT
+firmados, filtros, Controller, Service, Repository, JPA y PostgreSQL reales.
+Sus 12 casos comprueban la separación entre dos compañías, el cambio de nombre
+confirmado, la auditoría y la conservación de los datos ante entradas inválidas,
+rol USER, ausencia de autenticación o firma JWT incorrecta.
+
+`CompanyApiTestConfiguration` declara un PostgreSQL 17 temporal mediante
+Testcontainers. Spring gestiona el contenedor y `@ServiceConnection` proporciona
+los datos de conexión a JPA y Flyway, que aplica las migraciones V1–V10.
+El puerto se asigna automáticamente; esta clase no necesita las variables
+`SBP_DB_*` ni utiliza la base de datos habitual del desarrollador.
+
+Para ejecutarla:
+
+1. Abrir Docker Desktop y esperar a que el motor de contenedores Linux esté activo.
+2. Ejecutar desde la carpeta backend:
+
+```powershell
+.\mvnw.cmd "-Dtest=CompanyApiPersistenceTest" test
+```
+
+La primera ejecución descarga la imagen `postgres:17`. Se necesitan Docker
+disponible y acceso al registro para descargarla si no está en la caché. Los
+fallos de arranque del contenedor no se omiten ni se consideran pruebas pasadas.
+La clave JWT conocida del test y el hash BCrypt de ejemplo son exclusivos de
+pruebas y no forman parte de la configuración de producción.
+
+Las peticiones ejecutan sus propias transacciones; el test no se envuelve en
+una transacción con rollback. Los datos se preparan y confirman antes del HTTP,
+y se consultan de nuevo en otras transacciones después de cada operación.
+`@AfterEach` elimina únicamente las filas creadas y restaura la auditoría.
+Al cerrarse el contexto de Spring se detiene y elimina el contenedor; la imagen
+descargada permanece en la caché de Docker.
+
+El 404 se verifica con el servicio simulado: el test de integración no elimina
+una compañía que sigue referenciada por User para forzar ese caso, porque
+PostgreSQL lo impide mediante su clave foránea.
 
 ## DTOs de Company
 
@@ -546,8 +606,10 @@ Las pruebas utilizan JUnit Jupiter y AssertJ.
   los grupos compartidos, las restricciones temporales, la coexistencia de consumo
   y revocación y el borrado en cascada desde User.
 
-Para ejecutar todas las pruebas, PostgreSQL debe estar disponible y las
-variables `SBP_DB_*` deben estar definidas en la misma terminal:
+Para ejecutar todas las pruebas, Docker Desktop debe estar disponible para
+CompanyApiPersistenceTest. Las pruebas de persistencia anteriores siguen
+utilizando PostgreSQL externo y requieren las variables `SBP_DB_*` definidas
+en la misma terminal:
 
 ```powershell
 .\mvnw.cmd test
@@ -605,6 +667,9 @@ El archivo `.env` no se carga automáticamente al ejecutar Maven desde
 PowerShell; en ese caso deben definirse las variables de entorno.
 
 ## Empaquetar
+
+El empaquetado ejecuta toda la suite: necesita Docker Desktop y PostgreSQL
+externo con las variables `SBP_DB_*`, como se explica en la sección de pruebas.
 
 ```powershell
 .\mvnw.cmd package
