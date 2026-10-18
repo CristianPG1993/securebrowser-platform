@@ -21,17 +21,21 @@ import com.securebrowser.platform.user.UserRole;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.Filter;
+import jakarta.servlet.RequestDispatcher;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.web.servlet.MockMvc;
@@ -40,9 +44,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 
-/** Recorre JWT, filtros y resolución real de PostgreSQL con un endpoint solo de pruebas. */
+/** Recorre JWT, filtros y PostgreSQL mediante el Controller real de Company. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
-@Import(SecurityHttpTestSupport.ProbeConfiguration.class)
+@Import(SecurityHttpTestSupport.ClockConfiguration.class)
 class SecurityHttpPersistenceTest {
 
     // Hash público de prueba: no se utiliza para autenticar estas peticiones Bearer.
@@ -79,7 +83,9 @@ class SecurityHttpPersistenceTest {
 
         mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
                 .andExpect(status().is(expectedStatus));
-        mvc.perform(patch(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
+        mvc.perform(patch(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Empresa HTTP actualizada\"}"))
                 .andExpect(status().is(expectedStatus));
         assertThat(context.getBeansOfType(UserDetailsService.class)).isEmpty();
     }
@@ -115,7 +121,7 @@ class SecurityHttpPersistenceTest {
                 .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\""));
     }
 
-    /** El principal conserva la compañía real y no acepta otra enviada en el JWT. */
+    /** Devuelve la compañía real y no acepta otra enviada en el JWT. */
     @Test
     void exposesOnlyCurrentUsersCompany() throws Exception {
         User userA = persistUser(UserRole.ADMIN);
@@ -125,17 +131,43 @@ class SecurityHttpPersistenceTest {
 
         var result = mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearerA))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.userId").value(userA.getId()))
-                .andExpect(jsonPath("$.companyId").value(userA.getCompany().getId()))
-                .andExpect(jsonPath("$.role").value("ADMIN"))
+                .andExpect(jsonPath("$.id").value(userA.getCompany().getId()))
+                .andExpect(jsonPath("$.name").value(userA.getCompany().getName()))
+                .andExpect(jsonPath("$.userId").doesNotExist())
+                .andExpect(jsonPath("$.role").doesNotExist())
                 .andExpect(jsonPath("$.passwordHash").doesNotExist())
                 .andReturn();
         assertThat(result.getRequest().getSession(false)).isNull();
 
         mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + token(userB.getId())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.companyId").value(userB.getCompany().getId()));
+                .andExpect(jsonPath("$.id").value(userB.getCompany().getId()));
         mvc.perform(get(COMPANY_PATH)).andExpect(status().isUnauthorized());
+    }
+
+    /** Simula el procesamiento interno de errores y conserva el estado original. */
+    @ParameterizedTest
+    @ValueSource(ints = {400, 404})
+    void preservesStatusDuringInternalErrorDispatch(int statusCode) throws Exception {
+        mvc.perform(get("/error")
+                        .accept(MediaType.APPLICATION_JSON)
+                        .requestAttr(RequestDispatcher.ERROR_STATUS_CODE, statusCode)
+                        .requestAttr(RequestDispatcher.ERROR_REQUEST_URI, COMPANY_PATH)
+                        .with(request -> {
+                            request.setDispatcherType(DispatcherType.ERROR);
+                            return request;
+                        }))
+                .andExpect(status().is(statusCode));
+    }
+
+    /** Una petición normal a /error sigue sometida a la denegación de rutas no previstas. */
+    @Test
+    void rejectsDirectRequestsToErrorRoute() throws Exception {
+        mvc.perform(get("/error")).andExpect(status().isUnauthorized());
+
+        User admin = persistUser(UserRole.ADMIN);
+        mvc.perform(get("/error").header(HttpHeaders.AUTHORIZATION, "Bearer " + token(admin.getId())))
+                .andExpect(status().isForbidden());
     }
 
     /** Crea y confirma un usuario con un ADMIN adicional para las pruebas de cambios. */

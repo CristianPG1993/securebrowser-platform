@@ -3,7 +3,6 @@ package com.securebrowser.platform.company;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -11,12 +10,13 @@ import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 
-import com.securebrowser.platform.user.User;
+import com.securebrowser.platform.security.AuthenticatedUser;
 import com.securebrowser.platform.user.UserRole;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.security.access.AccessDeniedException;
 
 /** Comprueba las decisiones del servicio con dependencias controladas. */
 class CompanyServiceTest {
@@ -27,11 +27,7 @@ class CompanyServiceTest {
         CompanyRepository repository = mock(CompanyRepository.class);
         CompanyService service = new CompanyService(repository);
         Company company = mock(Company.class);
-        User admin = mock(User.class);
-
-        when(admin.getRole()).thenReturn(UserRole.ADMIN);
-        when(admin.getCompany()).thenReturn(company);
-        when(company.getId()).thenReturn(1L);
+        AuthenticatedUser admin = new AuthenticatedUser(25L, 1L, UserRole.ADMIN);
         when(repository.findById(1L)).thenReturn(Optional.of(company));
 
         Company result = service.getOwnCompany(admin);
@@ -46,12 +42,10 @@ class CompanyServiceTest {
     void rejectsUserBeforeQueryingRepository() {
         CompanyRepository repository = mock(CompanyRepository.class);
         CompanyService service = new CompanyService(repository);
-        User user = mock(User.class);
-
-        when(user.getRole()).thenReturn(UserRole.USER);
+        AuthenticatedUser user = new AuthenticatedUser(25L, 1L, UserRole.USER);
 
         assertThatThrownBy(() -> service.getOwnCompany(user))
-                .isInstanceOf(SecurityException.class);
+                .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(repository);
     }
@@ -61,12 +55,7 @@ class CompanyServiceTest {
     void rejectsMissingCompanyForAdmin() {
         CompanyRepository repository = mock(CompanyRepository.class);
         CompanyService service = new CompanyService(repository);
-        Company company = mock(Company.class);
-        User admin = mock(User.class);
-
-        when(admin.getRole()).thenReturn(UserRole.ADMIN);
-        when(admin.getCompany()).thenReturn(company);
-        when(company.getId()).thenReturn(1L);
+        AuthenticatedUser admin = new AuthenticatedUser(25L, 1L, UserRole.ADMIN);
         when(repository.findById(1L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getOwnCompany(admin))
@@ -76,31 +65,20 @@ class CompanyServiceTest {
         verifyNoMoreInteractions(repository);
     }
 
-    /** Rechaza una llamada sin usuario antes de acceder al repositorio. */
-    @Test
-    void rejectsMissingAuthenticatedUser() {
-        CompanyRepository repository = mock(CompanyRepository.class);
-        CompanyService service = new CompanyService(repository);
-
-        assertThatThrownBy(() -> service.getOwnCompany(null))
-                .isInstanceOf(IllegalArgumentException.class);
-
-        verifyNoInteractions(repository);
-    }
-
-    /** Rechaza un contexto sin compañía persistida antes de consultar datos. */
+    /** Rechaza consultas y cambios sin principal antes de acceder al repositorio. */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void rejectsMissingOrUnpersistedCompany(boolean hasCompany) {
+    void rejectsMissingAuthenticatedUser(boolean changingName) {
         CompanyRepository repository = mock(CompanyRepository.class);
         CompanyService service = new CompanyService(repository);
-        User admin = mock(User.class);
 
-        when(admin.getRole()).thenReturn(UserRole.ADMIN);
-        when(admin.getCompany()).thenReturn(
-                hasCompany ? new Company("Empresa A") : null);
-
-        assertThatThrownBy(() -> service.getOwnCompany(admin))
+        assertThatThrownBy(() -> {
+            if (changingName) {
+                service.changeOwnCompanyName(null, "Empresa B");
+            } else {
+                service.getOwnCompany(null);
+            }
+        })
                 .isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(repository);
@@ -111,12 +89,8 @@ class CompanyServiceTest {
     void changesOwnCompanyNameForAdmin() {
         CompanyRepository repository = mock(CompanyRepository.class);
         CompanyService service = new CompanyService(repository);
-        Company company = spy(new Company("Empresa A"));
-        User admin = mock(User.class);
-
-        when(admin.getRole()).thenReturn(UserRole.ADMIN);
-        when(admin.getCompany()).thenReturn(company);
-        when(company.getId()).thenReturn(1L);
+        Company company = new Company("Empresa A");
+        AuthenticatedUser admin = new AuthenticatedUser(25L, 1L, UserRole.ADMIN);
         when(repository.findById(1L)).thenReturn(Optional.of(company));
         when(repository.save(company)).thenReturn(company);
 
@@ -136,12 +110,10 @@ class CompanyServiceTest {
     void rejectsNameChangeForUser() {
         CompanyRepository repository = mock(CompanyRepository.class);
         CompanyService service = new CompanyService(repository);
-        User user = mock(User.class);
-
-        when(user.getRole()).thenReturn(UserRole.USER);
+        AuthenticatedUser user = new AuthenticatedUser(25L, 1L, UserRole.USER);
 
         assertThatThrownBy(() -> service.changeOwnCompanyName(user, "Empresa B"))
-                .isInstanceOf(SecurityException.class);
+                .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(repository);
     }
@@ -159,12 +131,8 @@ class CompanyServiceTest {
 
         CompanyRepository repository = mock(CompanyRepository.class);
         CompanyService service = new CompanyService(repository);
-        Company company = spy(new Company("Empresa A"));
-        User admin = mock(User.class);
-
-        when(admin.getRole()).thenReturn(UserRole.ADMIN);
-        when(admin.getCompany()).thenReturn(company);
-        when(company.getId()).thenReturn(1L);
+        Company company = new Company("Empresa A");
+        AuthenticatedUser admin = new AuthenticatedUser(25L, 1L, UserRole.ADMIN);
         when(repository.findById(1L)).thenReturn(Optional.of(company));
 
         assertThatThrownBy(() -> service.changeOwnCompanyName(admin, invalidName))
@@ -180,12 +148,7 @@ class CompanyServiceTest {
     void rejectsNameChangeWhenCompanyIsMissing() {
         CompanyRepository repository = mock(CompanyRepository.class);
         CompanyService service = new CompanyService(repository);
-        Company company = mock(Company.class);
-        User admin = mock(User.class);
-
-        when(admin.getRole()).thenReturn(UserRole.ADMIN);
-        when(admin.getCompany()).thenReturn(company);
-        when(company.getId()).thenReturn(1L);
+        AuthenticatedUser admin = new AuthenticatedUser(25L, 1L, UserRole.ADMIN);
         when(repository.findById(1L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.changeOwnCompanyName(admin, "Empresa B"))

@@ -1,5 +1,6 @@
 package com.securebrowser.platform.security;
 
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -49,6 +50,8 @@ public class SecurityConfiguration {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
+                        // Permite presentar errores internos conservando su estado HTTP original.
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/companies/me").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/companies/me").hasRole("ADMIN")
                         .anyRequest().denyAll())

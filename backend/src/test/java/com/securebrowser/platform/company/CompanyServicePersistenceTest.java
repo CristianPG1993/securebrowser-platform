@@ -16,12 +16,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.auditing.AuditingHandler;
 import org.springframework.data.auditing.CurrentDateTimeProvider;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 
 
 import com.securebrowser.platform.user.User;
 import com.securebrowser.platform.user.UserRole;
+import com.securebrowser.platform.security.AuthenticatedUser;
 
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -59,16 +61,16 @@ class CompanyServicePersistenceTest {
     /** Comprueba que cada administrador obtiene su propia compañía. */
     @Test
     void returnsOwnCompanyForEachAdmin() {
-        User adminA = persistActor("Empresa A", UserRole.ADMIN);
-        User adminB = persistActor("Empresa B", UserRole.ADMIN);
+        AuthenticatedUser adminA = persistActor("Empresa A", UserRole.ADMIN);
+        AuthenticatedUser adminB = persistActor("Empresa B", UserRole.ADMIN);
 
         Company companyA = companyService.getOwnCompany(adminA);
         Company companyB = companyService.getOwnCompany(adminB);
 
-        assertThat(companyA.getId()).isEqualTo(adminA.getCompany().getId());
+        assertThat(companyA.getId()).isEqualTo(adminA.companyId());
         assertThat(companyA.getName()).isEqualTo("Empresa A");
 
-        assertThat(companyB.getId()).isEqualTo(adminB.getCompany().getId());
+        assertThat(companyB.getId()).isEqualTo(adminB.companyId());
         assertThat(companyB.getName()).isEqualTo("Empresa B");
 
         assertThat(companyA.getId()).isNotEqualTo(companyB.getId());
@@ -77,8 +79,8 @@ class CompanyServicePersistenceTest {
     /** Comprueba el cambio de nombre, su confirmación y las fechas de auditoría. */
     @Test
     void commitsNameChangeAndUpdatesAuditOnlyForOwnCompany() {
-        User adminA = persistActor("Empresa A", UserRole.ADMIN);
-        User adminB = persistActor("Empresa B", UserRole.ADMIN);
+        AuthenticatedUser adminA = persistActor("Empresa A", UserRole.ADMIN);
+        AuthenticatedUser adminB = persistActor("Empresa B", UserRole.ADMIN);
 
         Company beforeA = companyService.getOwnCompany(adminA);
         Company beforeB = companyService.getOwnCompany(adminB);
@@ -109,7 +111,7 @@ class CompanyServicePersistenceTest {
     /** Comprueba que un nombre inválido no modifica los datos guardados. */
     @Test
     void rejectsInvalidNameWithoutChangingStoredCompany() {
-        User admin = persistActor("Empresa A", UserRole.ADMIN);
+        AuthenticatedUser admin = persistActor("Empresa A", UserRole.ADMIN);
         Company before = companyService.getOwnCompany(admin);
 
         assertThatThrownBy(() -> companyService.changeOwnCompanyName(admin, "   "))
@@ -126,8 +128,8 @@ class CompanyServicePersistenceTest {
     /** Comprueba que el rol USER no puede consultar ni modificar la compañía. */
     @Test
     void rejectsUserAccessWithoutChangingStoredCompany() {
-        User user = persistActor("Empresa A", UserRole.USER);
-        Long companyId = user.getCompany().getId();
+        AuthenticatedUser user = persistActor("Empresa A", UserRole.USER);
+        Long companyId = user.companyId();
 
         TransactionTemplate transactions = new TransactionTemplate(transactionManager);
 
@@ -135,10 +137,10 @@ class CompanyServicePersistenceTest {
                 transactions.execute(status -> entityManager.find(Company.class, companyId)));
 
         assertThatThrownBy(() -> companyService.getOwnCompany(user))
-                .isInstanceOf(SecurityException.class);
+                .isInstanceOf(AccessDeniedException.class);
 
         assertThatThrownBy(() -> companyService.changeOwnCompanyName(user, "Empresa modificada"))
-                .isInstanceOf(SecurityException.class);
+                .isInstanceOf(AccessDeniedException.class);
 
         Company reloaded = Objects.requireNonNull(
                 transactions.execute(status -> entityManager.find(Company.class, companyId)));
@@ -149,9 +151,9 @@ class CompanyServicePersistenceTest {
     }
 
     /**
-     * Guarda una compañía y su usuario de prueba en una transacción independiente.
+     * Guarda los datos y construye su principal de confianza en la misma transacción.
      */
-    private User persistActor(String companyName, UserRole role) {
+    private AuthenticatedUser persistActor(String companyName, UserRole role) {
         return Objects.requireNonNull(
                 new TransactionTemplate(transactionManager).execute(status -> {
                     Company company = new Company(companyName);
@@ -165,7 +167,7 @@ class CompanyServicePersistenceTest {
 
                     entityManager.persist(user);
                     entityManager.flush();
-                    return user;
+                    return new AuthenticatedUser(user.getId(), company.getId(), user.getRole());
                 }));
     }
 
