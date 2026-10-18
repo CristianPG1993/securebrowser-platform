@@ -1,0 +1,178 @@
+package com.securebrowser.platform.security;
+
+import static com.securebrowser.platform.security.SecurityHttpTestSupport.COMPANY_PATH;
+import static com.securebrowser.platform.security.SecurityHttpTestSupport.token;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+
+import com.securebrowser.platform.company.Company;
+import com.securebrowser.platform.user.User;
+import com.securebrowser.platform.user.UserRole;
+
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.servlet.Filter;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.context.WebApplicationContext;
+
+/** Recorre JWT, filtros y resolución real de PostgreSQL con un endpoint solo de pruebas. */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@Import(SecurityHttpTestSupport.ProbeConfiguration.class)
+class SecurityHttpPersistenceTest {
+
+    // Hash público de prueba: no se utiliza para autenticar estas peticiones Bearer.
+    private static final String PASSWORD_HASH =
+            "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
+    @Autowired
+    private WebApplicationContext context;
+
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    // Cada prueba elimina únicamente las filas pertenecientes a sus propias compañías.
+    private final List<Long> companyIds = new ArrayList<>();
+    private MockMvc mvc;
+
+    /** Usa el contexto completo y la misma cadena de filtros que la aplicación. */
+    @BeforeEach
+    void setUp() {
+        mvc = MockMvcBuilders.webAppContextSetup(context)
+                .addFilters(context.getBean("springSecurityFilterChain", Filter.class)).build();
+    }
+
+    /** El rol persistido determina el acceso a GET y PATCH, sin usuarios en memoria. */
+    @ParameterizedTest
+    @EnumSource(UserRole.class)
+    void authorizesUsingPersistedRole(UserRole role) throws Exception {
+        User user = persistUser(role);
+        String bearer = "Bearer " + token(user.getId());
+        int expectedStatus = role == UserRole.ADMIN ? 200 : 403;
+
+        mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
+                .andExpect(status().is(expectedStatus));
+        mvc.perform(patch(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
+                .andExpect(status().is(expectedStatus));
+        assertThat(context.getBeansOfType(UserDetailsService.class)).isEmpty();
+    }
+
+    /** El mismo JWT pierde acceso al confirmarse el cambio de ADMIN a USER en PostgreSQL. */
+    @Test
+    void reflectsCommittedRoleChangeWithSameJwt() throws Exception {
+        User user = persistUser(UserRole.ADMIN);
+        String bearer = "Bearer " + token(user.getId());
+        mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
+                .andExpect(status().isOk());
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                entityManager.find(User.class, user.getId()).changeRole(UserRole.USER));
+
+        mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Un borrado confirmado invalida la identidad de un JWT todavía vigente. */
+    @Test
+    void rejectsCommittedUserDeletionWithSameJwt() throws Exception {
+        User user = persistUser(UserRole.USER);
+        String bearer = "Bearer " + token(user.getId());
+        mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
+                .andExpect(status().isForbidden());
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                entityManager.remove(entityManager.find(User.class, user.getId())));
+
+        mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\""));
+    }
+
+    /** El principal conserva la compañía real y no acepta otra enviada en el JWT. */
+    @Test
+    void exposesOnlyCurrentUsersCompany() throws Exception {
+        User userA = persistUser(UserRole.ADMIN);
+        User userB = persistUser(UserRole.ADMIN);
+        String bearerA = "Bearer " + token(userA.getId(),
+                Map.of("companyId", userB.getCompany().getId(), "role", "USER"));
+
+        var result = mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearerA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(userA.getId()))
+                .andExpect(jsonPath("$.companyId").value(userA.getCompany().getId()))
+                .andExpect(jsonPath("$.role").value("ADMIN"))
+                .andExpect(jsonPath("$.passwordHash").doesNotExist())
+                .andReturn();
+        assertThat(result.getRequest().getSession(false)).isNull();
+
+        mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + token(userB.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companyId").value(userB.getCompany().getId()));
+        mvc.perform(get(COMPANY_PATH)).andExpect(status().isUnauthorized());
+    }
+
+    /** Crea y confirma un usuario con un ADMIN adicional para las pruebas de cambios. */
+    private User persistUser(UserRole role) {
+        return Objects.requireNonNull(new TransactionTemplate(transactionManager).execute(status -> {
+            Company company = new Company("Empresa HTTP " + UUID.randomUUID());
+            entityManager.persist(company);
+            companyIds.add(company.getId());
+            entityManager.persist(newUser(UserRole.ADMIN, company));
+            User user = newUser(role, company);
+            entityManager.persist(user);
+            entityManager.flush();
+            return user;
+        }));
+    }
+
+    /** Evita colisiones de email entre ejecuciones y compañías. */
+    private User newUser(UserRole role, Company company) {
+        return new User("Ana", "García", UUID.randomUUID() + "@example.com",
+                PASSWORD_HASH, role, company);
+    }
+
+    /** Limpia los datos confirmados y el contexto local de autenticación. */
+    @AfterEach
+    void cleanUp() {
+        SecurityContextHolder.clearContext();
+        if (companyIds.isEmpty()) {
+            return;
+        }
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            for (Long companyId : companyIds) {
+                entityManager.createNativeQuery("DELETE FROM users WHERE company_id = :companyId")
+                        .setParameter("companyId", companyId).executeUpdate();
+                entityManager.createNativeQuery("DELETE FROM companies WHERE id = :companyId")
+                        .setParameter("companyId", companyId).executeUpdate();
+            }
+        });
+        companyIds.clear();
+    }
+}

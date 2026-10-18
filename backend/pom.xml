@@ -27,6 +27,12 @@
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
 
+        <!-- Seguridad HTTP y soporte para autenticar peticiones Bearer JWT. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+        </dependency>
+
         <!-- Integración de persistencia con Spring Data JPA y Hibernate. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
