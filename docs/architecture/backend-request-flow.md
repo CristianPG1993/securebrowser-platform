@@ -2,15 +2,11 @@
 
 ## Alcance y estado
 
-Estos diagramas explican las clases de la integración JWT de la tarea #51.
-La implementación está en la rama de trabajo. La suite completa ha pasado con
-703 pruebas, sin fallos, errores ni pruebas omitidas, y se ha comprobado el JAR
-generado. No describen un flujo de login ni de renovación de tokens.
-
-Company ya dispone de entidad, repositorio, servicio y DTOs. Su Controller y la
-adaptación del servicio al principal autenticado corresponden a #44; las pruebas
-de su API corresponden a #45. El tramo final del segundo diagrama representa
-esa integración prevista, no un endpoint ya disponible.
+Estos diagramas explican la integración JWT de la tarea #51 y el flujo de
+Company implementado en la rama de la tarea #44. Incluyen Controller, servicio,
+repositorio, DTOs y la lectura estricta del JSON. Las pruebas específicas
+completas de la API corresponden a #45 y el formato común de errores a #46.
+No describen un flujo de login ni de renovación de tokens.
 
 Los diagramas están escritos directamente en Mermaid y se visualizan al abrir
 este documento en GitHub. Sus bloques son también la fuente editable.
@@ -49,6 +45,11 @@ con 900 segundos como valor inicial.
 con el proveedor y el filtro Bearer de Spring Security. Los beans se reutilizan;
 el usuario y sus permisos se consultan de nuevo para cada petición autenticada.
 
+Spring también prepara el mapper de Jackson utilizando las reglas de
+`JsonConfiguration`. Ese mapper convierte entre el JSON HTTP y los DTOs;
+rechaza campos desconocidos, contenido sobrante y números o booleanos donde
+el DTO espera texto.
+
 ## 2. En cada petición: validar, identificar y autorizar
 
 Este diagrama muestra el recorrido correcto de un ADMIN. Las respuestas de
@@ -62,7 +63,7 @@ sequenceDiagram
     participant JWT as Validacion JWT
     participant Identity as Identidad actual
     participant DB as PostgreSQL
-    participant Company as API Company pendiente
+    participant Company as API Company
 
     Client->>Security: GET o PATCH /api/v1/companies/me con Bearer JWT
     Security->>JWT: JwtAuthenticationProvider llama a decode(token)
@@ -78,13 +79,14 @@ sequenceDiagram
     Identity-->>Security: Principal y ROLE_ADMIN obtenidos de PostgreSQL
     Security->>Security: Comprueba la ruta, el metodo HTTP y el rol
 
-    rect rgb(245, 245, 245)
-        Note over Security,Company: Integracion prevista en Company, pendiente de #44 y #45
-        Security->>Company: Continua hasta el futuro CompanyController
-        Company->>Company: Valida DTO de entrada si es PATCH
+    rect rgb(167, 234, 255)
+        Note over Security,Company: CompanyController usa el principal autenticado
+        Security->>Company: Spring proporciona @AuthenticationPrincipal
+        Company->>Company: Spring lee y valida el DTO de entrada si es PATCH
         Company->>Company: CompanyService comprueba ambito y negocio
         Company->>DB: CompanyRepository consulta o guarda dentro de la transaccion
-        DB-->>Company: Datos de Company
+        DB-->>Company: Datos de Company y fechas auditadas
+        Company->>Company: Finaliza la transaccion del servicio
         Company->>Company: Convierte el resultado a CompanyResponse
         Company-->>Client: HTTP 200 con JSON
     end
@@ -94,6 +96,16 @@ La columna **Identidad actual** agrupa `AuthenticatedUserJwtConverter` y
 `AuthenticatedUserResolver`. El converter recibe un JWT ya validado; el resolver
 consulta al usuario dentro de una transacción de solo lectura. La interacción
 con PostgreSQL pasa por Spring Data JPA e Hibernate.
+
+La columna **API Company** agrupa Controller, servicio, repositorio y DTOs.
+`CompanyController` obtiene el principal mediante `@AuthenticationPrincipal` y
+lo entrega a CompanyService. El servicio consulta exclusivamente por su
+`companyId`, comprueba el rol ADMIN y aplica las reglas de Company. La conversión
+a `CompanyResponse` ocurre después de terminar la transacción del servicio.
+
+Por ejemplo, si Ana pertenece a la compañía 1, un GET devuelve los datos de esa
+compañía. Un PATCH con `{"name":"Empresa B"}` cambia su nombre. El cliente no
+elige otra compañía mediante un identificador en el cuerpo de la petición.
 
 `AuthenticatedUser` contiene userId, companyId y role. El
 `AuthenticatedUserAuthenticationToken` lo adapta a Spring Security y asigna
@@ -112,15 +124,24 @@ operación si el usuario cambia de rol o se elimina. No se guarda una sesión HT
 | La firma y los claims son válidos, pero User ya no existe | 401 con desafío Bearer | Al resolver la identidad. |
 | PostgreSQL no está disponible, se agota el tiempo de espera o no se puede iniciar la transacción de resolución | 503 | Durante la resolución; no se omite esta consulta. |
 | El usuario existe, pero su rol, ruta o método HTTP no están permitidos | 403 | Después de autenticar y antes del Controller. |
+| El JSON de PATCH es incorrecto, tiene campos desconocidos o el nombre no supera la validación | 400 | Al leer y validar el DTO, antes de ejecutar el método del Controller. |
+| La compañía no se encuentra dentro del ámbito del principal ADMIN | 404 | CompanyService lanza CompanyNotFoundException. |
 
 `SecurityAuthenticationEntryPoint` prepara los rechazos 401 y 503 sin detalles
 internos. La cadena de seguridad responde 403 a los rechazos de permisos. El
 formato común de errores, incluido Problem Details, corresponde a #46.
 
-Actualmente, un ADMIN puede superar el filtro para GET/PATCH de Company, pero
-todavía no existe su Controller real. Los tests de seguridad importan un endpoint
-exclusivo de pruebas que observa el principal; no ejecuta el flujo Company del
-tramo gris ni sustituye sus futuras pruebas de API.
+`CompanyNotFoundException` utiliza `@ResponseStatus` para indicar el 404.
+Cuando el servidor prepara una respuesta de error puede realizar un procesamiento
+interno de tipo `DispatcherType.ERROR`. SecurityConfiguration permite ese paso
+para conservar el estado original. Por ejemplo, un 400 continúa siendo 400.
+Una petición normal del cliente a `/error` sigue bloqueada.
+
+`SecurityHttpTest` mantiene un endpoint exclusivo de pruebas para aislar JWT
+y permisos con el resolver simulado. `SecurityHttpPersistenceTest` utiliza
+CompanyController y PostgreSQL reales; importa únicamente el reloj fijo para
+evitar registrar también el Controller provisional. Las pruebas específicas
+completas del contrato de Company se desarrollarán en #45.
 
 ## Cómo localizar cada responsabilidad
 
@@ -131,7 +152,8 @@ tramo gris ni sustituye sus futuras pruebas de API.
 | Consultar la identidad actual | `AuthenticatedUserJwtConverter`, `AuthenticatedUserResolver`, `UserRepository`. |
 | Representar la identidad y sus autoridades | `AuthenticatedUser`, `AuthenticatedUserAuthenticationToken`. |
 | Decidir acceso HTTP y responder rechazos de seguridad | `SecurityConfiguration`, `SecurityAuthenticationEntryPoint`. |
-| Procesar Company después de autenticar | Futuro `CompanyController`, `CompanyService`, `CompanyRepository` y DTOs. |
+| Leer JSON y validar el DTO de entrada | `JsonConfiguration`, Jackson, `CompanyUpdateRequest` y `@Valid` en el Controller. |
+| Procesar Company después de autenticar | `CompanyController`, `CompanyService`, `CompanyRepository` y DTOs. |
 
 ## Referencias
 

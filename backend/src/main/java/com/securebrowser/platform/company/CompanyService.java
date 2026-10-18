@@ -1,8 +1,9 @@
 package com.securebrowser.platform.company;
 
-import com.securebrowser.platform.user.User;
+import com.securebrowser.platform.security.AuthenticatedUser;
 import com.securebrowser.platform.user.UserRole;
 
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,31 +20,25 @@ public class CompanyService {
     }
 
     /**
-     * Consulta la compañía del usuario de confianza tras comprobar su permiso
-     * ADMIN.
+     * Consulta la compañía del principal de confianza tras comprobar su rol ADMIN.
      */
     @Transactional(readOnly = true)
-    public Company getOwnCompany(User authenticatedUser) {
+    public Company getOwnCompany(AuthenticatedUser authenticatedUser) {
         if (authenticatedUser == null) {
             throw new IllegalArgumentException("Authenticated user is required");
         }
 
-        if (authenticatedUser.getRole() != UserRole.ADMIN) {
-            throw new SecurityException("Company administration requires ADMIN role");
+        if (authenticatedUser.role() != UserRole.ADMIN) {
+            throw new AccessDeniedException("Company administration requires ADMIN role");
         }
 
-        Company company = authenticatedUser.getCompany();
-        if (company == null || company.getId() == null) {
-            throw new IllegalArgumentException("A persisted company is required");
-        }
-
-        return companyRepository.findById(company.getId())
+        return companyRepository.findById(authenticatedUser.companyId())
                 .orElseThrow(CompanyNotFoundException::new);
     }
 
     /** Cambia el nombre de la compañía propia dentro de una transacción. */
     @Transactional
-    public Company changeOwnCompanyName(User authenticatedUser, String name) {
+    public Company changeOwnCompanyName(AuthenticatedUser authenticatedUser, String name) {
         Company company = getOwnCompany(authenticatedUser);
         company.changeName(name);
         return companyRepository.save(company);

@@ -244,7 +244,7 @@ La duración inicial de 7 días es configurable y no se fija en la entidad.
 
 Los [diagramas del flujo del backend](../docs/architecture/backend-request-flow.md)
 separan el arranque de la aplicación del recorrido de cada petición y señalan
-la integración pendiente de Company.
+la integración del flujo de Company.
 
 Las peticiones se autentican mediante `Authorization: Bearer <JWT>`.
 El backend acepta únicamente HS256 y exige `sub`, `iss`, `aud`, `iat`, `exp`
@@ -308,6 +308,11 @@ utiliza el encabezado Bearer y no cookies. El filtro Bearer y el proveedor JWT
 son los de Spring Security y se conectan expresamente sin abrir endpoints de
 descubrimiento OAuth.
 
+El procesamiento interno de errores de tipo `DispatcherType.ERROR` está
+permitido para conservar los estados 400 y 404 al preparar sus respuestas.
+Una petición normal a `/error` continúa denegada: esa excepción se aplica
+al procesamiento interno del contenedor, no al acceso público a la ruta.
+
 La ausencia de autenticación válida produce 401 con `WWW-Authenticate: Bearer`;
 un Bearer rechazado utiliza el desafío `Bearer error="invalid_token"` sin
 detalles internos. Un rol insuficiente produce 403. Los fallos de disponibilidad
@@ -316,12 +321,11 @@ producen 503 sin tratarse como credenciales incorrectas. Otros errores de
 persistencia no se etiquetan indiscriminadamente como indisponibilidad temporal.
 Estas respuestas no publican el mensaje interno de la excepción.
 
-El Controller real de Company y su integración con CompanyService corresponden
-a las tareas #44 y #45. Este bloque configura sus permisos, pero todavía no
-implementa sus endpoints: un ADMIN válido puede superar el filtro y encontrar
-que aún no hay un handler de Company. Login, BCrypt, emisión, refresh y logout
-siguen pendientes de sus flujos. El formato común de errores MVC/Security,
-incluido Problem Details, se completará en #46.
+`CompanyController` implementa GET y PATCH de la compañía propia y delega en
+CompanyService utilizando el principal autenticado. Las pruebas específicas
+completas de esta API se desarrollarán en #45. Login, comprobación BCrypt,
+emisión, refresh y logout siguen pendientes de sus flujos. El formato común
+de errores MVC/Security, incluido Problem Details, se completará en #46.
 
 ### Pruebas de seguridad
 
@@ -359,15 +363,20 @@ Con PostgreSQL y las variables `SBP_DB_*`:
 ```
 
 `AuthenticatedUserResolverPersistenceTest` comprueba la consulta transaccional.
-`SecurityHttpPersistenceTest` recorre JWT, filtros y usuario real de PostgreSQL,
-incluidos cambios de rol y borrados confirmados entre peticiones. Ambos limpian
-únicamente los usuarios y compañías que han creado.
+`SecurityHttpPersistenceTest` recorre JWT, filtros, CompanyController,
+CompanyService y PostgreSQL reales, incluidos cambios de rol y borrados
+confirmados entre peticiones. También simula el procesamiento interno de
+errores en MockMvc para comprobar que conserva 400 y 404, y verifica que
+`/error` sigue bloqueado ante peticiones normales. Ambos tests limpian únicamente
+los usuarios y compañías que han creado.
 
 `SecurityHttpTestSupport` contiene los tokens y el endpoint exclusivos de pruebas.
 Ese endpoint observa el principal y prueba permisos; no consulta ni modifica
-Company ni sustituye las pruebas de su futura API. Sus componentes se importan
-expresamente en estas pruebas y se excluyen del escaneo normal de Spring Boot.
-El caso HTTP de 503 simula el fallo de persistencia; no detiene PostgreSQL.
+Company. `SecurityHttpTest` importa `ProbeConfiguration` para utilizarlo de forma
+aislada; `SecurityHttpPersistenceTest` importa solo `ClockConfiguration` y utiliza
+el Controller real. Los componentes exclusivos de prueba se excluyen del escaneo
+normal de Spring Boot. El caso HTTP de 503 simula el fallo de persistencia;
+no detiene PostgreSQL.
 
 ## Acceso a persistencia de Company
 
@@ -391,21 +400,69 @@ cuando existan consultas propias que aporten comportamiento adicional.
 
 `CompanyService` ofrece dos operaciones: `getOwnCompany` consulta la compañía
 propia y `changeOwnCompanyName` modifica su nombre. Ambas requieren el rol
-ADMIN y obtienen el identificador desde la compañía del usuario recibido.
+ADMIN y reciben un `AuthenticatedUser` de confianza. El identificador de la
+compañía procede de `authenticatedUser.companyId()`; el servicio no recibe
+una entidad User ni un identificador de compañía elegido por el cliente.
 
-El usuario debe proceder de un contexto de confianza del backend.
-La validación JWT y el principal autenticado ya se preparan en `security`.
-La adaptación final entre ese principal, el Controller y este servicio sigue
-pendiente de la tarea #44.
+El principal procede de la validación JWT y de la consulta del usuario actual
+en PostgreSQL. El servicio conserva la comprobación explícita del rol y lanza
+`AccessDeniedException` para USER, también al invocarlo sin pasar por HTTP.
 
 Las consultas utilizan una transacción de solo lectura. El cambio de nombre
 se realiza en una transacción de escritura y utiliza las validaciones de
-Company. Si la compañía no existe, se lanza `CompanyNotFoundException`.
+Company. Si la compañía no existe, se lanza `CompanyNotFoundException`, asociada
+a HTTP 404 mediante `@ResponseStatus`.
 
 `CompanyServiceTest` comprueba el comportamiento con Mockito, sin PostgreSQL.
 `CompanyServicePersistenceTest` utiliza el servicio y repositorio reales para
 comprobar la separación entre compañías, la confirmación del cambio de nombre,
 la auditoría y los rechazos por nombre inválido o rol USER.
+
+## API de Company
+
+`CompanyController` expone únicamente estas operaciones:
+
+| Método y ruta | Entrada | Respuesta | Permiso |
+| --- | --- | --- | --- |
+| GET `/api/v1/companies/me` | Sin cuerpo. | 200 `CompanyResponse`. | ADMIN de su propia compañía. |
+| PATCH `/api/v1/companies/me` | JSON `CompanyUpdateRequest`. | 200 `CompanyResponse`. | ADMIN de su propia compañía. |
+
+`@AuthenticationPrincipal` proporciona el `AuthenticatedUser` preparado por
+Spring Security. `me` identifica la compañía de ese principal. El Controller
+delega en el servicio y devuelve DTOs; no accede directamente al repositorio
+ni devuelve la entidad JPA. La respuesta se construye después de que termine
+la transacción del servicio, incluyendo las fechas auditadas.
+
+Por ejemplo, un PATCH válido contiene:
+
+```json
+{"name":"Empresa B"}
+```
+
+El cuerpo requiere `Content-Type: application/json`. `@RequestBody` lo convierte
+al DTO y `@Valid` comprueba su nombre obligatorio y longitud máxima.
+
+`JsonConfiguration` personaliza el mapper de Jackson que utiliza Spring Boot:
+
+- Rechaza campos desconocidos o del servidor, como `companyId`, `id` y fechas.
+- Rechaza números y booleanos donde el DTO espera texto: `{"name":123}` no se
+  convierte en un nombre válido; `{"name":"123"}` sí contiene texto.
+- Rechaza contenido adicional después del objeto JSON principal.
+
+Los errores de lectura o validación producen HTTP 400. Los cuerpos vacíos o
+sin un nombre válido tampoco se admiten. La ausencia de autenticación y el
+rol USER conservan los estados 401 y 403 de la seguridad.
+
+`JsonConfigurationTest` comprueba estas reglas mediante un `@JsonTest` que
+importa la configuración real, sin PostgreSQL:
+
+```powershell
+.\mvnw.cmd "-Dtest=JsonConfigurationTest" test
+```
+
+Las pruebas de integración/MockMvc específicas del contrato de Company y sus
+errores corresponden al siguiente bloque, #45. El formato común de errores
+se completará en #46; este Controller no incorpora manejadores propios.
 
 ## DTOs de Company
 
@@ -421,8 +478,8 @@ los espacios exteriores mediante `strip`. La validación exige contenido
 y un máximo de 150 puntos de código Unicode mediante `@NotBlank` y
 `@CodePointLength`, proporcionadas por el starter de validación.
 
-La validación HTTP y el rechazo de campos desconocidos se integrarán
-en la tarea del Controller.
+La validación HTTP se aplica en CompanyController con `@Valid`, y la lectura
+estricta de campos y tipos se configura mediante JsonConfiguration.
 
 Las pruebas de los DTOs no necesitan PostgreSQL:
 

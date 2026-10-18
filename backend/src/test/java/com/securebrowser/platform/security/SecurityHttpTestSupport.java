@@ -70,9 +70,13 @@ final class SecurityHttpTestSupport {
 
     /** Importa explícitamente el reloj y los recursos que nunca forman parte del JAR. */
     @TestConfiguration(proxyBeanMethods = false)
-    @Import({ProbeController.class, MethodProtectedProbe.class})
+    @Import({ProbeController.class, MethodProtectedProbe.class, ClockConfiguration.class})
     static class ProbeConfiguration {
+    }
 
+    /** Permite reutilizar el reloj sin registrar el endpoint de prueba en el contexto real. */
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ClockConfiguration {
         /** Hace reproducibles las fechas de todos los tokens de las pruebas HTTP. */
         @Bean
         @Primary
