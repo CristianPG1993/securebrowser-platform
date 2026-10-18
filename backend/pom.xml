@@ -66,6 +66,34 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Pruebas del Controller y sus peticiones HTTP mediante MockMvc. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Contextos de autenticación controlados para probar permisos HTTP. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Integra el ciclo de vida y la conexión de los contenedores con Spring. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- PostgreSQL real y temporal para las pruebas de integración de la API. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- Soporte de validación para los datos de entrada de la API. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

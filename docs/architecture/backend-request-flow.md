@@ -3,9 +3,9 @@
 ## Alcance y estado
 
 Estos diagramas explican la integración JWT de la tarea #51 y el flujo de
-Company implementado en la rama de la tarea #44. Incluyen Controller, servicio,
+Company implementado en la tarea #44. Incluyen Controller, servicio,
 repositorio, DTOs y la lectura estricta del JSON. Las pruebas específicas
-completas de la API corresponden a #45 y el formato común de errores a #46.
+de la API se incorporan en #45 y el formato común de errores corresponde a #46.
 No describen un flujo de login ni de renovación de tokens.
 
 Los diagramas están escritos directamente en Mermaid y se visualizan al abrir
@@ -54,8 +54,26 @@ el DTO espera texto.
 
 Este diagrama muestra el recorrido correcto de un ADMIN. Las respuestas de
 rechazo se explican después para mantener legible la secuencia.
+Las etiquetas y flechas son negras sobre fondos claros; el fondo blanco del
+recorrido mantiene el contraste también en visores con tema oscuro.
 
 ```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    darkMode: false
+    primaryColor: '#e0f2fe'
+    primaryTextColor: '#000000'
+    actorBorder: '#334155'
+    actorLineColor: '#64748b'
+    signalColor: '#000000'
+    signalTextColor: '#000000'
+    noteBkgColor: '#e0f2fe'
+    noteTextColor: '#000000'
+    noteBorderColor: '#334155'
+    sequenceNumberColor: '#ffffff'
+---
 sequenceDiagram
     autonumber
     participant Client as Cliente
@@ -65,30 +83,32 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant Company as API Company
 
-    Client->>Security: GET o PATCH /api/v1/companies/me con Bearer JWT
-    Security->>JWT: JwtAuthenticationProvider llama a decode(token)
-    JWT->>JWT: StrictJwtDecoder comprueba los tipos originales
-    JWT->>JWT: NimbusJwtDecoder verifica la firma HS256
-    JWT->>JWT: JwtClaimsValidator comprueba claims y fechas
-    JWT-->>Security: JWT validado
+    rect rgb(255, 255, 255)
+        Client->>Security: GET o PATCH /api/v1/companies/me con Bearer JWT
+        Security->>JWT: JwtAuthenticationProvider llama a decode(token)
+        JWT->>JWT: StrictJwtDecoder comprueba los tipos originales
+        JWT->>JWT: NimbusJwtDecoder verifica la firma HS256
+        JWT->>JWT: JwtClaimsValidator comprueba claims y fechas
+        JWT-->>Security: JWT validado
 
-    Security->>Identity: AuthenticatedUserJwtConverter.convert(jwt)
-    Identity->>DB: Resolver consulta UserRepository.findById(sub)
-    DB-->>Identity: User con su Company y rol actuales
-    Identity->>Identity: Construye AuthenticatedUser y AuthenticationToken
-    Identity-->>Security: Principal y ROLE_ADMIN obtenidos de PostgreSQL
-    Security->>Security: Comprueba la ruta, el metodo HTTP y el rol
+        Security->>Identity: AuthenticatedUserJwtConverter.convert(jwt)
+        Identity->>DB: Resolver consulta UserRepository.findById(sub)
+        DB-->>Identity: User con su Company y rol actuales
+        Identity->>Identity: Construye AuthenticatedUser y AuthenticationToken
+        Identity-->>Security: Principal y ROLE_ADMIN obtenidos de PostgreSQL
+        Security->>Security: Comprueba la ruta, el metodo HTTP y el rol
 
-    rect rgb(167, 234, 255)
-        Note over Security,Company: CompanyController usa el principal autenticado
-        Security->>Company: Spring proporciona @AuthenticationPrincipal
-        Company->>Company: Spring lee y valida el DTO de entrada si es PATCH
-        Company->>Company: CompanyService comprueba ambito y negocio
-        Company->>DB: CompanyRepository consulta o guarda dentro de la transaccion
-        DB-->>Company: Datos de Company y fechas auditadas
-        Company->>Company: Finaliza la transaccion del servicio
-        Company->>Company: Convierte el resultado a CompanyResponse
-        Company-->>Client: HTTP 200 con JSON
+        rect rgb(167, 234, 255)
+            Note over Security,Company: CompanyController usa el principal autenticado
+            Security->>Company: Spring proporciona @AuthenticationPrincipal
+            Company->>Company: Spring lee y valida el DTO de entrada si es PATCH
+            Company->>Company: CompanyService comprueba ambito y negocio
+            Company->>DB: CompanyRepository consulta o guarda dentro de la transaccion
+            DB-->>Company: Datos de Company y fechas auditadas
+            Company->>Company: Finaliza la transaccion del servicio
+            Company->>Company: Convierte el resultado a CompanyResponse
+            Company-->>Client: HTTP 200 con JSON
+        end
     end
 ```
 
@@ -140,8 +160,13 @@ Una petición normal del cliente a `/error` sigue bloqueada.
 `SecurityHttpTest` mantiene un endpoint exclusivo de pruebas para aislar JWT
 y permisos con el resolver simulado. `SecurityHttpPersistenceTest` utiliza
 CompanyController y PostgreSQL reales; importa únicamente el reloj fijo para
-evitar registrar también el Controller provisional. Las pruebas específicas
-completas del contrato de Company se desarrollarán en #45.
+evitar registrar también el Controller provisional.
+
+`CompanyControllerTest` verifica el contrato HTTP con filtros reales, el servicio
+simulado y principales preparados directamente. `CompanyApiPersistenceTest`
+recorre el flujo completo con JWT firmados y un PostgreSQL temporal gestionado
+por `CompanyApiTestConfiguration`: comprueba separación entre compañías,
+confirmación del cambio, auditoría y rechazos sin cambios en los datos.
 
 ## Cómo localizar cada responsabilidad
 
