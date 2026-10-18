@@ -33,6 +33,10 @@ La [organización interna del backend](backend-structure.md) define los paquetes
 por funcionalidad, sus responsabilidades y la ubicación de las pruebas, conforme
 al [ADR-0007](../adr/0007-backend-package-organization.md).
 
+Los [diagramas del flujo del backend](backend-request-flow.md) muestran cómo se
+prepara la configuración JWT y cómo una petición pasa por validación,
+identificación y permisos antes de llegar al flujo previsto de Company.
+
 El [diseño de autenticación JWT](jwt-authentication.md) recoge el flujo de login,
 la renovación automática, el tratamiento de contraseñas y la validación de
 peticiones, conforme al

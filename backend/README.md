@@ -240,6 +240,135 @@ La duración inicial de 7 días es configurable y no se fija en la entidad.
 .\mvnw.cmd compile
 ```
 
+## Validación JWT y usuario autenticado
+
+Los [diagramas del flujo del backend](../docs/architecture/backend-request-flow.md)
+separan el arranque de la aplicación del recorrido de cada petición y señalan
+la integración pendiente de Company.
+
+Las peticiones se autentican mediante `Authorization: Bearer <JWT>`.
+El backend acepta únicamente HS256 y exige `sub`, `iss`, `aud`, `iat`, `exp`
+y `jti`, con sus tipos originales correctos. `sub` identifica un User mediante
+un Long positivo. El emisor y la audiencia deben coincidir con la configuración;
+la emisión no puede estar en el futuro y la caducidad debe ser posterior a ella.
+El token se rechaza exactamente al alcanzar `exp`, sin tolerancia adicional.
+Si existe `nbf`, se respeta también su fecha de inicio.
+
+Antes de arrancar la aplicación, configura estas variables en la misma terminal
+que las de PostgreSQL:
+
+```powershell
+$env:SBP_JWT_ISSUER = 'securebrowser-backend'
+$env:SBP_JWT_AUDIENCE = 'securebrowser-api'
+$env:SBP_JWT_MAX_LIFETIME_SECONDS = '900'
+```
+
+La clave debe proceder de al menos 32 bytes aleatorios y expresarse en Base64.
+Para generar una clave local sin imprimirla en la terminal:
+
+```powershell
+$sbpJwtBytes = [byte[]]::new(32)
+$sbpJwtRandom = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $sbpJwtRandom.GetBytes($sbpJwtBytes)
+    $env:SBP_JWT_SECRET_BASE64 = [Convert]::ToBase64String($sbpJwtBytes)
+} finally {
+    $sbpJwtRandom.Dispose()
+    [Array]::Clear($sbpJwtBytes, 0, $sbpJwtBytes.Length)
+}
+```
+
+Estas variables duran durante la sesión de terminal. La aplicación no incluye
+una clave predeterminada. Conserva la misma clave entre arranques si necesitas
+validar tokens anteriores; generar otra invalida sus firmas. Base64 representa
+los bytes como texto, pero no cifra ni protege la clave. No la incluyas en Git.
+La duración máxima tiene un valor predeterminado de 900 segundos; emisor,
+audiencia y clave son obligatorios.
+
+`JwtConfiguration` prepara el decodificador y un reloj UTC sustituible en pruebas.
+`StrictJwtDecoder` verifica los tipos originales antes de las conversiones;
+`NimbusJwtDecoder` comprueba la firma y `JwtClaimsValidator` valida los claims.
+`AuthenticatedUserJwtConverter` usa `AuthenticatedUserResolver` y `UserRepository`
+para obtener el usuario actual dentro de una transacción de solo lectura.
+El principal `AuthenticatedUser` contiene únicamente userId, companyId y role.
+`AuthenticatedUserAuthenticationToken` asigna ROLE_ADMIN o ROLE_USER desde esa
+identidad; no conserva contraseñas ni el JWT como credenciales.
+
+Cada petición consulta el User actual. La compañía y los permisos proceden de
+PostgreSQL, aunque el token incluya claims alternativos de rol o compañía.
+Un usuario eliminado recibe 401; un cambio de rol confirmado se aplica a la
+petición siguiente con el mismo JWT. Las compañías son inmutables en el dominio:
+no se incorpora una operación de traslado de usuarios.
+
+`SecurityConfiguration` activa la seguridad de métodos y una cadena sin sesión
+HTTP. Solo permite GET y PATCH `/api/v1/companies/me` al rol ADMIN; deniega
+las demás rutas y métodos. Basic, formulario, logout y caché de peticiones están
+deshabilitados. CSRF está deshabilitado porque la autenticación de esta API
+utiliza el encabezado Bearer y no cookies. El filtro Bearer y el proveedor JWT
+son los de Spring Security y se conectan expresamente sin abrir endpoints de
+descubrimiento OAuth.
+
+La ausencia de autenticación válida produce 401 con `WWW-Authenticate: Bearer`;
+un Bearer rechazado utiliza el desafío `Bearer error="invalid_token"` sin
+detalles internos. Un rol insuficiente produce 403. Los fallos de disponibilidad
+de PostgreSQL, los tiempos de espera y la imposibilidad de iniciar su transacción
+producen 503 sin tratarse como credenciales incorrectas. Otros errores de
+persistencia no se etiquetan indiscriminadamente como indisponibilidad temporal.
+Estas respuestas no publican el mensaje interno de la excepción.
+
+El Controller real de Company y su integración con CompanyService corresponden
+a las tareas #44 y #45. Este bloque configura sus permisos, pero todavía no
+implementa sus endpoints: un ADMIN válido puede superar el filtro y encontrar
+que aún no hay un handler de Company. Login, BCrypt, emisión, refresh y logout
+siguen pendientes de sus flujos. El formato común de errores MVC/Security,
+incluido Problem Details, se completará en #46.
+
+### Pruebas de seguridad
+
+`src/test/resources/application-default.properties` proporciona una clave conocida,
+emisor y audiencia exclusivamente para pruebas sin perfil activo. No sustituye
+la configuración de PostgreSQL ni forma parte del JAR ejecutable. Los contextos
+aislados de configuración establecen sus propias propiedades para poder probar
+también configuraciones inválidas. Si se activa otro perfil de pruebas, debe
+proporcionarse su configuración JWT correspondiente.
+
+Sin PostgreSQL, desde la carpeta backend:
+
+```powershell
+.\mvnw.cmd "-Dtest=AuthenticatedUserResolverTest,JwtPropertiesTest,JwtClaimsValidatorTest,StrictJwtDecoderTest,JwtConfigurationTest,AuthenticatedUserAuthenticationTokenTest,AuthenticatedUserJwtConverterTest,SecurityAuthenticationEntryPointTest,SecurityHttpTest" test
+```
+
+- `JwtPropertiesTest` comprueba los requisitos de la configuración y su binding.
+- `JwtClaimsValidatorTest` comprueba los claims con un reloj fijo.
+- `StrictJwtDecoderTest` aísla la comprobación de tipos usando un delegado simulado.
+- `JwtConfigurationTest` utiliza el bean real y firmas reales para comprobar el
+  conjunto, incluidos algoritmos, manipulación, tipos y caducidad.
+- `AuthenticatedUserAuthenticationTokenTest` comprueba identidad, autoridades y
+  cambios permitidos del estado de autenticación.
+- `AuthenticatedUserResolverTest` y `AuthenticatedUserJwtConverterTest` usan
+  Mockito para aislar la resolución, los permisos actuales y los fallos de acceso.
+- `SecurityAuthenticationEntryPointTest` comprueba los estados y desafíos genéricos.
+- `SecurityHttpTest` recorre filtros y firmas reales mediante MockMvc, con el
+  resolver simulado. Comprueba 401/403/503, ausencia de sesión, rutas cerradas,
+  cambios de permisos y el interceptor de seguridad de métodos.
+
+Con PostgreSQL y las variables `SBP_DB_*`:
+
+```powershell
+.\mvnw.cmd "-Dtest=AuthenticatedUserResolverPersistenceTest,SecurityHttpPersistenceTest" test
+```
+
+`AuthenticatedUserResolverPersistenceTest` comprueba la consulta transaccional.
+`SecurityHttpPersistenceTest` recorre JWT, filtros y usuario real de PostgreSQL,
+incluidos cambios de rol y borrados confirmados entre peticiones. Ambos limpian
+únicamente los usuarios y compañías que han creado.
+
+`SecurityHttpTestSupport` contiene los tokens y el endpoint exclusivos de pruebas.
+Ese endpoint observa el principal y prueba permisos; no consulta ni modifica
+Company ni sustituye las pruebas de su futura API. Sus componentes se importan
+expresamente en estas pruebas y se excluyen del escaneo normal de Spring Boot.
+El caso HTTP de 503 simula el fallo de persistencia; no detiene PostgreSQL.
+
 ## Acceso a persistencia de Company
 
 `CompanyRepository`, ubicado en `com.securebrowser.platform.company`,
@@ -265,7 +394,9 @@ propia y `changeOwnCompanyName` modifica su nombre. Ambas requieren el rol
 ADMIN y obtienen el identificador desde la compañía del usuario recibido.
 
 El usuario debe proceder de un contexto de confianza del backend.
-La integración con la autenticación real y JWT está pendiente.
+La validación JWT y el principal autenticado ya se preparan en `security`.
+La adaptación final entre ese principal, el Controller y este servicio sigue
+pendiente de la tarea #44.
 
 Las consultas utilizan una transacción de solo lectura. El cambio de nombre
 se realiza en una transacción de escritura y utiliza las validaciones de
