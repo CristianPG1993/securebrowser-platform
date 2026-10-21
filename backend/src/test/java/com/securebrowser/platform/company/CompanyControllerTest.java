@@ -5,6 +5,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
+import static com.securebrowser.platform.exception.ApiProblemAssertions.problem;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -15,6 +16,8 @@ import java.time.Instant;
 import java.util.stream.Stream;
 
 import com.securebrowser.platform.config.JsonConfiguration;
+import com.securebrowser.platform.exception.ApiExceptionHandler;
+import com.securebrowser.platform.exception.ApiErrorCode;
 import com.securebrowser.platform.security.AuthenticatedUser;
 import com.securebrowser.platform.security.AuthenticatedUserAuthenticationToken;
 import com.securebrowser.platform.security.AuthenticatedUserJwtConverter;
@@ -27,6 +30,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -38,7 +44,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /** Comprueba el contrato HTTP con filtros reales e identidades y servicios controlados. */
 @WebMvcTest(CompanyController.class)
-@Import({JsonConfiguration.class, SecurityConfiguration.class,
+@Import({JsonConfiguration.class, ApiExceptionHandler.class, SecurityConfiguration.class,
         AuthenticatedUserJwtConverter.class, SecurityAuthenticationEntryPoint.class})
 class CompanyControllerTest {
 
@@ -136,7 +142,57 @@ class CompanyControllerTest {
                         .content("""
                                 {"name": "   "}
                                 """))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(content().json("""
+                        {
+                            "type": "about:blank",
+                            "title": "Bad Request",
+                            "status": 400,
+                            "detail": "La petición contiene datos no válidos.",
+                            "instance": "/api/v1/companies/me",
+                            "code": "VALIDATION_ERROR",
+                            "errors": [
+                                {
+                                    "field": "name",
+                                    "message": "El campo es obligatorio y no puede estar en blanco."
+                                }
+                            ]
+                        }
+                        """, JsonCompareMode.STRICT));
+
+        verifyNoInteractions(companyService, jwtDecoder, userResolver);
+    }
+
+    /** El error de longitud explica el campo sin devolver el nombre rechazado. */
+    @Test
+    void rejectsLongNameWithSafeValidationProblem() throws Exception {
+        AuthenticatedUser admin = new AuthenticatedUser(25L, 7L, UserRole.ADMIN);
+        String invalidName = "dato-privado-".repeat(13);
+
+        mvc.perform(patch(COMPANY_PATH)
+                        .with(authentication(new AuthenticatedUserAuthenticationToken(admin)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .content("{\"name\": \"%s\"}".formatted(invalidName)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(content().json("""
+                        {
+                            "type": "about:blank",
+                            "title": "Bad Request",
+                            "status": 400,
+                            "detail": "La petición contiene datos no válidos.",
+                            "instance": "/api/v1/companies/me",
+                            "code": "VALIDATION_ERROR",
+                            "errors": [
+                                {
+                                    "field": "name",
+                                    "message": "El campo supera la longitud permitida."
+                                }
+                            ]
+                        }
+                        """, JsonCompareMode.STRICT));
 
         verifyNoInteractions(companyService, jwtDecoder, userResolver);
     }
@@ -152,7 +208,7 @@ class CompanyControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isBadRequest());
+                .andExpect(problem(ApiErrorCode.VALIDATION_ERROR, COMPANY_PATH));
 
         verifyNoInteractions(companyService, jwtDecoder, userResolver);
     }
@@ -168,7 +224,24 @@ class CompanyControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(content().json("""
+                        {
+                            "type": "about:blank",
+                            "title": "Bad Request",
+                            "status": 400,
+                            "detail": "La petición contiene datos no válidos.",
+                            "instance": "/api/v1/companies/me",
+                            "code": "VALIDATION_ERROR",
+                            "errors": [
+                                {
+                                    "field": "body",
+                                    "message": "El cuerpo debe contener un JSON válido con los campos y tipos admitidos."
+                                }
+                            ]
+                        }
+                        """, JsonCompareMode.STRICT));
 
         verifyNoInteractions(companyService, jwtDecoder, userResolver);
     }
@@ -178,7 +251,7 @@ class CompanyControllerTest {
     void rejectsGetWithoutAuthentication() throws Exception {
         mvc.perform(get(COMPANY_PATH)
                         .accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isUnauthorized());
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
 
         verifyNoInteractions(companyService, jwtDecoder, userResolver);
     }
@@ -192,7 +265,7 @@ class CompanyControllerTest {
                         .content("""
                                 {"name": "Empresa renovada"}
                                 """))
-                .andExpect(status().isUnauthorized());
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
 
         verifyNoInteractions(companyService, jwtDecoder, userResolver);
     }
@@ -205,7 +278,7 @@ class CompanyControllerTest {
         mvc.perform(get(COMPANY_PATH)
                         .with(authentication(new AuthenticatedUserAuthenticationToken(user)))
                         .accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isForbidden());
+                .andExpect(problem(ApiErrorCode.ACCESS_DENIED, COMPANY_PATH));
 
         verifyNoInteractions(companyService, jwtDecoder, userResolver);
     }
@@ -222,7 +295,7 @@ class CompanyControllerTest {
                         .content("""
                                 {"name": "Empresa renovada"}
                                 """))
-                .andExpect(status().isForbidden());
+                .andExpect(problem(ApiErrorCode.ACCESS_DENIED, COMPANY_PATH));
 
         verifyNoInteractions(companyService, jwtDecoder, userResolver);
     }
@@ -235,8 +308,20 @@ class CompanyControllerTest {
 
         mvc.perform(get(COMPANY_PATH)
                         .with(authentication(new AuthenticatedUserAuthenticationToken(admin)))
+                        .queryParam("token", "test-secret")
                         .accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(content().json("""
+                        {
+                            "type": "about:blank",
+                            "title": "Not Found",
+                            "status": 404,
+                            "detail": "No se ha encontrado el recurso solicitado.",
+                            "instance": "/api/v1/companies/me",
+                            "code": "RESOURCE_NOT_FOUND"
+                        }
+                        """, JsonCompareMode.STRICT));
 
         verify(companyService).getOwnCompany(admin);
         verifyNoMoreInteractions(companyService);
@@ -257,7 +342,18 @@ class CompanyControllerTest {
                         .content("""
                                 {"name": "Empresa renovada"}
                                 """))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(content().json("""
+                        {
+                            "type": "about:blank",
+                            "title": "Not Found",
+                            "status": 404,
+                            "detail": "No se ha encontrado el recurso solicitado.",
+                            "instance": "/api/v1/companies/me",
+                            "code": "RESOURCE_NOT_FOUND"
+                        }
+                        """, JsonCompareMode.STRICT));
 
         verify(companyService).changeOwnCompanyName(admin, "Empresa renovada");
         verifyNoMoreInteractions(companyService);
@@ -272,7 +368,7 @@ class CompanyControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isUnauthorized());
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
 
         verifyNoInteractions(companyService, jwtDecoder, userResolver);
     }
@@ -288,8 +384,50 @@ class CompanyControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isForbidden());
+                .andExpect(problem(ApiErrorCode.ACCESS_DENIED, COMPANY_PATH));
 
+        verifyNoInteractions(companyService, jwtDecoder, userResolver);
+    }
+
+    /** Los errores del servicio mantienen su categoría y ocultan sus mensajes internos. */
+    @ParameterizedTest
+    @CsvSource({"temporary,SERVICE_UNAVAILABLE", "unexpected,INTERNAL_ERROR", "denied,ACCESS_DENIED"})
+    void translatesServiceFailuresToCommonProblem(String scenario, ApiErrorCode expected) throws Exception {
+        AuthenticatedUser admin = new AuthenticatedUser(25L, 7L, UserRole.ADMIN);
+        RuntimeException failure = switch (scenario) {
+            case "temporary" -> new DataAccessResourceFailureException("Private SQL and password details");
+            case "denied" -> new AccessDeniedException("Private company and role");
+            default -> new NullPointerException("Private programming detail");
+        };
+        when(companyService.getOwnCompany(admin)).thenThrow(failure);
+
+        mvc.perform(get(COMPANY_PATH)
+                        .with(authentication(new AuthenticatedUserAuthenticationToken(admin)))
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(problem(expected, COMPANY_PATH));
+
+        verify(companyService).getOwnCompany(admin);
+        verifyNoMoreInteractions(companyService);
+        verifyNoInteractions(jwtDecoder, userResolver);
+    }
+
+    @Test
+    void rejectsUnsupportedResponseFormatWithoutCallingService() throws Exception {
+        AuthenticatedUser admin = new AuthenticatedUser(25L, 7L, UserRole.ADMIN);
+        mvc.perform(get(COMPANY_PATH)
+                        .with(authentication(new AuthenticatedUserAuthenticationToken(admin)))
+                        .accept(MediaType.APPLICATION_XML))
+                .andExpect(problem(ApiErrorCode.NOT_ACCEPTABLE, COMPANY_PATH));
+        verifyNoInteractions(companyService, jwtDecoder, userResolver);
+    }
+
+    @Test
+    void rejectsUnsupportedBodyFormatWithoutCallingService() throws Exception {
+        AuthenticatedUser admin = new AuthenticatedUser(25L, 7L, UserRole.ADMIN);
+        mvc.perform(patch(COMPANY_PATH)
+                        .with(authentication(new AuthenticatedUserAuthenticationToken(admin)))
+                        .contentType(MediaType.TEXT_PLAIN).content("private body"))
+                .andExpect(problem(ApiErrorCode.UNSUPPORTED_MEDIA_TYPE, COMPANY_PATH));
         verifyNoInteractions(companyService, jwtDecoder, userResolver);
     }
 

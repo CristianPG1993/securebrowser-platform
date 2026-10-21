@@ -1,10 +1,10 @@
 package com.securebrowser.platform.company;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.securebrowser.platform.exception.ApiProblemAssertions.problem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Clock;
@@ -25,6 +25,7 @@ import com.nimbusds.jose.JWSObject;
 import com.nimbusds.jose.Payload;
 import com.nimbusds.jose.crypto.MACSigner;
 import com.securebrowser.platform.security.JwtProperties;
+import com.securebrowser.platform.exception.ApiErrorCode;
 import com.securebrowser.platform.user.User;
 import com.securebrowser.platform.user.UserRole;
 
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -168,7 +170,7 @@ class CompanyApiPersistenceTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isBadRequest());
+                .andExpect(problem(ApiErrorCode.VALIDATION_ERROR, COMPANY_PATH));
 
         assertStoredCompanyUnchanged(beforeA);
         assertStoredCompanyUnchanged(beforeB);
@@ -191,7 +193,7 @@ class CompanyApiPersistenceTest {
             mvc.perform(get(COMPANY_PATH)
                             .header(HttpHeaders.AUTHORIZATION, authorization)
                             .accept(MediaType.APPLICATION_JSON))
-                    .andExpect(status().isForbidden());
+                    .andExpect(problem(ApiErrorCode.ACCESS_DENIED, COMPANY_PATH));
 
             mvc.perform(patch(COMPANY_PATH)
                             .header(HttpHeaders.AUTHORIZATION, authorization)
@@ -200,7 +202,7 @@ class CompanyApiPersistenceTest {
                             .content("""
                                     {"name": "Cambio sin permiso"}
                                     """))
-                    .andExpect(status().isForbidden());
+                    .andExpect(problem(ApiErrorCode.ACCESS_DENIED, COMPANY_PATH));
 
             assertStoredCompanyUnchanged(beforeA);
             assertStoredCompanyUnchanged(beforeB);
@@ -218,7 +220,7 @@ class CompanyApiPersistenceTest {
 
         mvc.perform(get(COMPANY_PATH).accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"));
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
 
         mvc.perform(patch(COMPANY_PATH)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -226,7 +228,7 @@ class CompanyApiPersistenceTest {
                         .content("""
                                 {"name": "Cambio sin autenticación"}
                                 """))
-                .andExpect(status().isUnauthorized());
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
 
         assertStoredCompanyUnchanged(beforeA);
         assertStoredCompanyUnchanged(beforeB);
@@ -250,7 +252,7 @@ class CompanyApiPersistenceTest {
                         .header(HttpHeaders.AUTHORIZATION, authorization)
                         .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\""));
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
 
         mvc.perform(patch(COMPANY_PATH)
                         .header(HttpHeaders.AUTHORIZATION, authorization)
@@ -259,7 +261,27 @@ class CompanyApiPersistenceTest {
                         .content("""
                                 {"name": "Cambio con firma incorrecta"}
                                 """))
-                .andExpect(status().isUnauthorized());
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
+
+        assertStoredCompanyUnchanged(beforeA);
+        assertStoredCompanyUnchanged(beforeB);
+    }
+
+    /** Los formatos no soportados también se rechazan sin modificar datos reales. */
+    @ParameterizedTest
+    @CsvSource({"response,NOT_ACCEPTABLE", "body,UNSUPPORTED_MEDIA_TYPE"})
+    void rejectsUnsupportedFormatsWithoutChangingEitherCompany(String scenario, ApiErrorCode expected) throws Exception {
+        TestActor adminA = persistActor("Empresa A", UserRole.ADMIN);
+        TestActor adminB = persistActor("Empresa B", UserRole.ADMIN);
+        Company beforeA = readStoredCompany(adminA.companyId());
+        Company beforeB = readStoredCompany(adminB.companyId());
+        auditingHandler.setDateTimeProvider(() -> Optional.of(INITIAL_TIME.plusSeconds(60)));
+
+        var request = scenario.equals("response")
+                ? get(COMPANY_PATH).accept(MediaType.APPLICATION_XML)
+                : patch(COMPANY_PATH).contentType(MediaType.TEXT_PLAIN).content("private-test-value");
+        mvc.perform(request.header(HttpHeaders.AUTHORIZATION, "Bearer " + token(adminA.userId())))
+                .andExpect(problem(expected, COMPANY_PATH));
 
         assertStoredCompanyUnchanged(beforeA);
         assertStoredCompanyUnchanged(beforeB);

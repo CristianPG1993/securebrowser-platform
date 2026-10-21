@@ -2,10 +2,10 @@ package com.securebrowser.platform.security;
 
 import static com.securebrowser.platform.security.SecurityHttpTestSupport.COMPANY_PATH;
 import static com.securebrowser.platform.security.SecurityHttpTestSupport.token;
+import static com.securebrowser.platform.exception.ApiProblemAssertions.problem;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 import com.securebrowser.platform.company.Company;
+import com.securebrowser.platform.exception.ApiErrorCode;
 import com.securebrowser.platform.user.User;
 import com.securebrowser.platform.user.UserRole;
 
@@ -43,6 +44,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 
 /** Recorre JWT, filtros y PostgreSQL mediante el Controller real de Company. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
@@ -82,11 +84,21 @@ class SecurityHttpPersistenceTest {
         int expectedStatus = role == UserRole.ADMIN ? 200 : 403;
 
         mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
-                .andExpect(status().is(expectedStatus));
+                .andExpect(status().is(expectedStatus))
+                .andExpect(result -> {
+                    if (role == UserRole.USER) {
+                        problem(ApiErrorCode.ACCESS_DENIED, COMPANY_PATH).match(result);
+                    }
+                });
         mvc.perform(patch(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Empresa HTTP actualizada\"}"))
-                .andExpect(status().is(expectedStatus));
+                .andExpect(status().is(expectedStatus))
+                .andExpect(result -> {
+                    if (role == UserRole.USER) {
+                        problem(ApiErrorCode.ACCESS_DENIED, COMPANY_PATH).match(result);
+                    }
+                });
         assertThat(context.getBeansOfType(UserDetailsService.class)).isEmpty();
     }
 
@@ -102,7 +114,7 @@ class SecurityHttpPersistenceTest {
                 entityManager.find(User.class, user.getId()).changeRole(UserRole.USER));
 
         mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
-                .andExpect(status().isForbidden());
+                .andExpect(problem(ApiErrorCode.ACCESS_DENIED, COMPANY_PATH));
     }
 
     /** Un borrado confirmado invalida la identidad de un JWT todavía vigente. */
@@ -118,7 +130,7 @@ class SecurityHttpPersistenceTest {
 
         mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, bearer))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\""));
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
     }
 
     /** Devuelve la compañía real y no acepta otra enviada en el JWT. */
@@ -147,27 +159,31 @@ class SecurityHttpPersistenceTest {
 
     /** Simula el procesamiento interno de errores y conserva el estado original. */
     @ParameterizedTest
-    @ValueSource(ints = {400, 404})
+    @ValueSource(ints = {400, 401, 403, 404, 405, 406, 415, 500, 503})
     void preservesStatusDuringInternalErrorDispatch(int statusCode) throws Exception {
         mvc.perform(get("/error")
                         .accept(MediaType.APPLICATION_JSON)
                         .requestAttr(RequestDispatcher.ERROR_STATUS_CODE, statusCode)
-                        .requestAttr(RequestDispatcher.ERROR_REQUEST_URI, COMPANY_PATH)
+                        .requestAttr(RequestDispatcher.ERROR_REQUEST_URI, COMPANY_PATH + "?token=private-test-value")
+                        .requestAttr(RequestDispatcher.ERROR_EXCEPTION,
+                                statusCode == 405
+                                        ? new HttpRequestMethodNotSupportedException("POST", java.util.Set.of("GET", "PATCH"))
+                                        : new IllegalStateException("Private SQL and token details"))
                         .with(request -> {
                             request.setDispatcherType(DispatcherType.ERROR);
                             return request;
                         }))
-                .andExpect(status().is(statusCode));
+                .andExpect(problem(ApiErrorCode.fromStatus(statusCode), COMPANY_PATH));
     }
 
     /** Una petición normal a /error sigue sometida a la denegación de rutas no previstas. */
     @Test
     void rejectsDirectRequestsToErrorRoute() throws Exception {
-        mvc.perform(get("/error")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/error")).andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, "/error"));
 
         User admin = persistUser(UserRole.ADMIN);
         mvc.perform(get("/error").header(HttpHeaders.AUTHORIZATION, "Bearer " + token(admin.getId())))
-                .andExpect(status().isForbidden());
+                .andExpect(problem(ApiErrorCode.ACCESS_DENIED, "/error"));
     }
 
     /** Crea y confirma un usuario con un ADMIN adicional para las pruebas de cambios. */

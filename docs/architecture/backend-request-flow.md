@@ -5,7 +5,7 @@
 Estos diagramas explican la integración JWT de la tarea #51 y el flujo de
 Company implementado en la tarea #44. Incluyen Controller, servicio,
 repositorio, DTOs y la lectura estricta del JSON. Las pruebas específicas
-de la API se incorporan en #45 y el formato común de errores corresponde a #46.
+de la API se incorporan en #45 y el formato común de errores en #46.
 No describen un flujo de login ni de renovación de tokens.
 
 Los diagramas están escritos directamente en Mermaid y se visualizan al abrir
@@ -148,14 +148,26 @@ operación si el usuario cambia de rol o se elimina. No se guarda una sesión HT
 | La compañía no se encuentra dentro del ámbito del principal ADMIN | 404 | CompanyService lanza CompanyNotFoundException. |
 
 `SecurityAuthenticationEntryPoint` prepara los rechazos 401 y 503 sin detalles
-internos. La cadena de seguridad responde 403 a los rechazos de permisos. El
-formato común de errores, incluido Problem Details, corresponde a #46.
+internos. `SecurityAccessDeniedHandler` prepara el 403 de permisos. Ambos usan
+`ApiProblemDetailWriter` y `ApiProblemDetailFactory` para devolver el mismo
+`application/problem+json` que `ApiExceptionHandler` utiliza en MVC.
+El cuerpo contiene type, title, status, detail, instance y code; los errores
+400 añaden errors con field y message, sin valores rechazados. Los 401 incluyen
+`WWW-Authenticate: Bearer realm="sbp"`.
 
 `CompanyNotFoundException` utiliza `@ResponseStatus` para indicar el 404.
+`ApiExceptionHandler` construye su cuerpo público como RESOURCE_NOT_FOUND.
 Cuando el servidor prepara una respuesta de error puede realizar un procesamiento
 interno de tipo `DispatcherType.ERROR`. SecurityConfiguration permite ese paso
-para conservar el estado original. Por ejemplo, un 400 continúa siendo 400.
+para conservar el estado original. `ApiErrorController` aplica el formato común
+con la ruta original sin query. Por ejemplo, un 400 continúa siendo 400.
 Una petición normal del cliente a `/error` sigue bloqueada.
+
+Los estados 405, 406 y 415 conservan su significado de protocolo; 405 mantiene
+Allow. La seguridad se aplica primero y puede rechazar métodos no autorizados
+con 401/403 antes de MVC. Los fallos temporales pertinentes producen 503;
+los errores inesperados de programación o integridad mantienen 500 y una
+explicación genérica. No se publica SQL, tokens ni el texto interno del fallo.
 
 `SecurityHttpTest` mantiene un endpoint exclusivo de pruebas para aislar JWT
 y permisos con el resolver simulado. `SecurityHttpPersistenceTest` utiliza
@@ -176,7 +188,9 @@ confirmación del cambio, auditoría y rechazos sin cambios en los datos.
 | Validar el token recibido | `StrictJwtDecoder`, `NimbusJwtDecoder`, `JwtClaimsValidator`. |
 | Consultar la identidad actual | `AuthenticatedUserJwtConverter`, `AuthenticatedUserResolver`, `UserRepository`. |
 | Representar la identidad y sus autoridades | `AuthenticatedUser`, `AuthenticatedUserAuthenticationToken`. |
-| Decidir acceso HTTP y responder rechazos de seguridad | `SecurityConfiguration`, `SecurityAuthenticationEntryPoint`. |
+| Decidir acceso HTTP y responder rechazos de seguridad | `SecurityConfiguration`, `SecurityAuthenticationEntryPoint`, `SecurityAccessDeniedHandler`. |
+| Construir y escribir errores comunes | `ApiErrorCode`, `ApiProblemDetailFactory`, `ApiProblemDetailWriter`, `ApiFieldError`. |
+| Traducir errores de MVC y procesamiento interno | `ApiExceptionHandler`, `ApiErrorController`. |
 | Leer JSON y validar el DTO de entrada | `JsonConfiguration`, Jackson, `CompanyUpdateRequest` y `@Valid` en el Controller. |
 | Procesar Company después de autenticar | `CompanyController`, `CompanyService`, `CompanyRepository` y DTOs. |
 
