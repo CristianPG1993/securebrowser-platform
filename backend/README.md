@@ -751,9 +751,9 @@ target/securebrowser-backend-0.0.1-SNAPSHOT.jar
 
 El workflow [Backend CI](../.github/workflows/backend.yml) ejecuta el job
 `Backend build and tests` en GitHub Actions. Se activa al abrir o actualizar
-una Pull Request hacia `main` y con los pushes a `main`. Cuando el workflow
-esté incorporado a la rama principal, también podrá iniciarse manualmente
-desde la pestaña Actions. No filtra por rutas: las PR de documentación
+una Pull Request hacia `main` y con los pushes a `main`. También puede
+iniciarse manualmente desde la pestaña Actions.
+No filtra por rutas: las PR de documentación
 también ejecutan la comprobación.
 
 El entorno utiliza Ubuntu 24.04, Temurin JDK 25 y Maven 3.9.12 mediante el
@@ -790,10 +790,13 @@ mantén Docker Desktop disponible. Desde la carpeta backend:
 .\mvnw.cmd --batch-mode --no-transfer-progress verify
 ```
 
-El check que se propone exigir en `main` se llama `Backend build and tests`.
-Su activación en el ruleset `protect-main` se realizará por separado, después
-de comprobar una ejecución correcta en una PR real. El procedimiento y las
-reglas de revisión se documentan en [CONTRIBUTING.md](../CONTRIBUTING.md).
+El ruleset `protect-main` exige superar el check `Backend build and tests`
+con origen GitHub Actions y mantener la rama de la PR actualizada con `main`
+antes de fusionar. Su activación se realizó tras verificar el workflow en
+la PR #56 y en el commit fusionado en `main`: ambas ejecuciones completaron
+805 pruebas sin fallos, errores ni pruebas omitidas. Los enlaces a esas
+ejecuciones y las reglas de revisión están en
+[CONTRIBUTING.md](../CONTRIBUTING.md#validación-y-mantenimiento-del-check-obligatorio).
 
 ## Arrancar
 
