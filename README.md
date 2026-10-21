@@ -45,9 +45,11 @@ incluidos los cambios de documentación.
 
 La configuración y el comando para reproducir la comprobación están en el
 [README del backend](backend/README.md#integración-continua-del-backend).
-El check `Backend build and tests` se propone como obligatorio en el ruleset
-`protect-main`; su activación se realizará por separado tras verificar una PR
-real, siguiendo [CONTRIBUTING.md](CONTRIBUTING.md).
+El ruleset `protect-main` exige superar el check `Backend build and tests`
+con origen GitHub Actions y mantener la rama de la PR actualizada con `main`
+antes de fusionar. CI se verificó en la PR #56 y después de su fusión.
+Los resultados y las reglas de revisión están en
+[CONTRIBUTING.md](CONTRIBUTING.md#validación-y-mantenimiento-del-check-obligatorio).
 
 ## Documentación
 

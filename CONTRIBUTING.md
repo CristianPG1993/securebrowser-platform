@@ -33,7 +33,8 @@ configurado en GitHub.
 | Require conversation resolution before merging | Activado |
 | Restrict deletions | Activado |
 | Block force pushes | Activado |
-| Require status checks to pass before merging | Pendiente de activar tras validar Backend CI en una PR real |
+| Require status checks to pass before merging | Activado: `Backend build and tests`, origen GitHub Actions |
+| Require branches to be up to date before merging | Activado |
 
 La lista de bypass vacía hace que el workflow mediante Pull Requests
 también se aplique al administrador del repositorio.
@@ -44,8 +45,9 @@ correspondientes antes de fusionar. Las conversaciones de revisión
 deben estar resueltas.
 
 El workflow [Backend CI](.github/workflows/backend.yml) define el check
-`Backend build and tests`. Incorporar el workflow al repositorio no activa
-automáticamente la obligación de superar ese check en el ruleset.
+`Backend build and tests`. El ruleset exige que ese check proceda de GitHub
+Actions y se supere antes de fusionar. La rama de la PR debe estar actualizada
+con `main`; si esta avanza, actualizar la rama y esperar al nuevo check.
 Las comprobaciones manuales adicionales se documentan en cada Pull Request.
 
 [Configuración del ruleset protect-main](<https://github.com/CristianPG1993/securebrowser-platform/settings/rules/24382571>).
@@ -54,23 +56,34 @@ Para comprobar la configuración, abrir el ruleset en GitHub y verificar
 su estado Active, el destino main, la lista de bypass vacía y las reglas
 indicadas en esta tabla.
 
-### Activar el check obligatorio de backend
+### Validación y mantenimiento del check obligatorio
 
-La activación se realizará como un paso separado, con confirmación expresa,
-después de validar el workflow en una PR real:
+El workflow se verificó en la [PR #56](https://github.com/CristianPG1993/securebrowser-platform/pull/56)
+y después de su fusión en `main`. Ambas ejecuciones completaron 805 pruebas
+sin fallos, errores ni pruebas omitidas y generaron el JAR:
+
+- [Ejecución de la PR](https://github.com/CristianPG1993/securebrowser-platform/actions/runs/39605638848).
+- [Ejecución de main](https://github.com/CristianPG1993/securebrowser-platform/actions/runs/39606084602).
+
+Tras esa validación, el autor activó el check obligatorio en `protect-main`
+el 21 de octubre de 2026. La configuración se comprobó también mediante
+las reglas efectivas de `main`, conservando el resto de las protecciones.
+
+Para revisar o volver a configurar la regla:
 
 1. Comprobar que la PR ejecuta `Backend CI` y que su check
    `Backend build and tests` termina correctamente para la última revisión.
    Registrar el enlace a la ejecución en la PR.
-2. Abrir el ruleset `protect-main` y añadir la regla
+2. Abrir el ruleset `protect-main` y comprobar la regla
    `Require status checks to pass before merging`.
 3. Seleccionar el nombre exacto `Backend build and tests`, comprobado en
    esa ejecución, y GitHub Actions como origen esperado del check.
 4. Conservar las demás reglas: estado Active, destino `main`, bypass vacío,
    PR obligatoria, cero aprobaciones externas, resolución de conversaciones,
    protección frente al borrado y bloqueo de force pushes.
-5. Guardar y comprobar que una PR necesita el check antes de fusionarse.
-   Actualizar la tabla anterior cuando la activación esté verificada.
+5. Conservar la exigencia de actualizar la rama de la PR con `main` antes
+   del merge. Si se cambia la configuración, guardar y comprobar de nuevo
+   las reglas efectivas y el check requerido en una PR.
 
 No se cambia el número de aprobaciones ni se añaden excepciones para
 evitar un check fallido. La configuración de reglas se describe en la
