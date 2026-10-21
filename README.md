@@ -22,12 +22,32 @@ usuarios, licencias, dispositivos, políticas y eventos de seguridad.
 
 ## Estado actual
 
-El modelo de dominio y las decisiones iniciales de arquitectura están
-documentados. El backend dispone de una estructura mínima con Spring Boot,
-Maven Wrapper y compilación, empaquetado y arranque verificados.
+El backend dispone del modelo de dominio implementado mediante entidades JPA,
+migraciones Flyway V1–V10 y pruebas de dominio y persistencia sobre PostgreSQL.
+El primer flujo REST de Company incluye Repository, Service, DTOs, Controller
+y pruebas HTTP y de integración. La API permite consultar y modificar el nombre
+de la compañía propia con rol ADMIN.
+
+La seguridad valida JWT Bearer y obtiene la identidad, la compañía y el rol
+actuales desde PostgreSQL. El tratamiento común de errores utiliza Problem
+Details. Los flujos de login, emisión y renovación de tokens siguen pendientes.
 
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).
+
+## Integración continua
+
+El workflow [Backend CI](.github/workflows/backend.yml) compila el backend,
+ejecuta todas sus pruebas y genera el JAR mediante Maven Wrapper. Utiliza
+Java 25, PostgreSQL 17 y Docker para las pruebas con Testcontainers.
+Se ejecuta en las Pull Requests hacia `main` y con los pushes a `main`,
+incluidos los cambios de documentación.
+
+La configuración y el comando para reproducir la comprobación están en el
+[README del backend](backend/README.md#integración-continua-del-backend).
+El check `Backend build and tests` se propone como obligatorio en el ruleset
+`protect-main`; su activación se realizará por separado tras verificar una PR
+real, siguiendo [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentación
 
@@ -35,6 +55,7 @@ Los requisitos y comandos de ejecución están disponibles en el
 - [Modelo de dominio del MVP](docs/architecture/domain-model.md).
 - [Decisiones arquitectónicas (ADR)](docs/adr/).
 - [Convenciones del proyecto](docs/architecture/conventions.md).
+- [Guía de contribución y revisión de Pull Requests](CONTRIBUTING.md).
 
 ## Derechos de uso
 

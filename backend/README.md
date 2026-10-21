@@ -1,6 +1,7 @@
 # Backend de SecureBrowser Platform
 
-Estructura mínima del backend en Java y Spring Boot.
+Backend en Java y Spring Boot con dominio JPA, migraciones Flyway V1–V10,
+API de Company, validación JWT y tratamiento común de errores.
 
 ## Requisitos
 
@@ -745,6 +746,54 @@ Genera el JAR ejecutable:
 ```text
 target/securebrowser-backend-0.0.1-SNAPSHOT.jar
 ```
+
+## Integración continua del backend
+
+El workflow [Backend CI](../.github/workflows/backend.yml) ejecuta el job
+`Backend build and tests` en GitHub Actions. Se activa al abrir o actualizar
+una Pull Request hacia `main` y con los pushes a `main`. Cuando el workflow
+esté incorporado a la rama principal, también podrá iniciarse manualmente
+desde la pestaña Actions. No filtra por rutas: las PR de documentación
+también ejecutan la comprobación.
+
+El entorno utiliza Ubuntu 24.04, Temurin JDK 25 y Maven 3.9.12 mediante el
+Wrapper del repositorio. Las acciones de checkout y preparación de Java
+están fijadas a commits concretos. La caché de Maven reutiliza dependencias;
+las pruebas se ejecutan en cada comprobación.
+
+GitHub prepara un servicio PostgreSQL 17 y espera a que `pg_isready` indique
+que está disponible. El workflow proporciona las variables `SBP_DB_URL`,
+`SBP_DB_USERNAME` y `SBP_DB_PASSWORD` con credenciales desechables exclusivas
+de CI. No utiliza el archivo `.env` ni la base de datos del desarrollador.
+`CompanyApiPersistenceTest` arranca además su propio PostgreSQL 17 mediante
+Testcontainers y `@ServiceConnection`, utilizando Docker en el runner.
+Los contenedores son temporales y no se conserva su base de datos.
+
+Desde la carpeta backend, GitHub ejecuta:
+
+```sh
+./mvnw --batch-mode --no-transfer-progress verify
+```
+
+El comando compila, ejecuta todas las pruebas y genera el JAR ejecutable.
+Los contextos de persistencia aplican las migraciones Flyway V1–V10 y
+Hibernate valida el esquema. La configuración JWT de pruebas procede de
+`src/test/resources/application-default.properties`; CI no necesita una
+clave JWT de producción. No se omiten pruebas ni se ignoran sus fallos.
+Un error de compilación o de pruebas hace fallar el job.
+
+Para ejecutar la misma verificación en PowerShell, configura primero las
+variables `SBP_DB_*` para tu PostgreSQL local como se explica arriba y
+mantén Docker Desktop disponible. Desde la carpeta backend:
+
+```powershell
+.\mvnw.cmd --batch-mode --no-transfer-progress verify
+```
+
+El check que se propone exigir en `main` se llama `Backend build and tests`.
+Su activación en el ruleset `protect-main` se realizará por separado, después
+de comprobar una ejecución correcta en una PR real. El procedimiento y las
+reglas de revisión se documentan en [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Arrancar
 
