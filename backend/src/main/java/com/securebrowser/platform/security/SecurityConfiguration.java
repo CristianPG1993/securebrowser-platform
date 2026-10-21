@@ -1,11 +1,11 @@
 package com.securebrowser.platform.security;
 
 import jakarta.servlet.DispatcherType;
-import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -24,6 +24,7 @@ import org.springframework.security.web.authentication.AnonymousAuthenticationFi
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @EnableWebSecurity
 @EnableMethodSecurity
+@Import(SecurityAccessDeniedHandler.class)
 public class SecurityConfiguration {
 
     /** Conecta la validación del JWT con la identidad actual y los permisos HTTP. */
@@ -31,7 +32,8 @@ public class SecurityConfiguration {
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
             JwtDecoder decoder,
             AuthenticatedUserJwtConverter converter,
-            SecurityAuthenticationEntryPoint entryPoint) throws Exception {
+            SecurityAuthenticationEntryPoint entryPoint,
+            SecurityAccessDeniedHandler accessDeniedHandler) throws Exception {
         JwtAuthenticationProvider provider = new JwtAuthenticationProvider(decoder);
         provider.setJwtAuthenticationConverter(converter);
 
@@ -57,8 +59,7 @@ public class SecurityConfiguration {
                         .anyRequest().denyAll())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(entryPoint)
-                        .accessDeniedHandler((request, response, exception) ->
-                                response.setStatus(HttpServletResponse.SC_FORBIDDEN)))
+                        .accessDeniedHandler(accessDeniedHandler))
                 .addFilterBefore(bearerFilter, AnonymousAuthenticationFilter.class);
 
         return http.build();

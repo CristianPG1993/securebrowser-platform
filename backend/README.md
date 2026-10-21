@@ -315,19 +315,22 @@ permitido para conservar los estados 400 y 404 al preparar sus respuestas.
 Una petición normal a `/error` continúa denegada: esa excepción se aplica
 al procesamiento interno del contenedor, no al acceso público a la ruta.
 
-La ausencia de autenticación válida produce 401 con `WWW-Authenticate: Bearer`;
-un Bearer rechazado utiliza el desafío `Bearer error="invalid_token"` sin
-detalles internos. Un rol insuficiente produce 403. Los fallos de disponibilidad
+La ausencia o el rechazo de una autenticación válida produce 401 con
+`WWW-Authenticate: Bearer realm="sbp"` y el código `AUTHENTICATION_REQUIRED`,
+sin distinguir públicamente la causa interna. Un rol insuficiente produce
+403 `ACCESS_DENIED`. Los fallos de disponibilidad
 de PostgreSQL, los tiempos de espera y la imposibilidad de iniciar su transacción
 producen 503 sin tratarse como credenciales incorrectas. Otros errores de
 persistencia no se etiquetan indiscriminadamente como indisponibilidad temporal.
-Estas respuestas no publican el mensaje interno de la excepción.
+Estas respuestas utilizan el formato común `application/problem+json` y no
+publican el mensaje interno de la excepción. SecurityAuthenticationEntryPoint
+y SecurityAccessDeniedHandler delegan la escritura en ApiProblemDetailWriter.
 
 `CompanyController` implementa GET y PATCH de la compañía propia y delega en
 CompanyService utilizando el principal autenticado. Las pruebas específicas
-completas de esta API se desarrollarán en #45. Login, comprobación BCrypt,
+de esta API se incorporaron en #45. Login, comprobación BCrypt,
 emisión, refresh y logout siguen pendientes de sus flujos. El formato común
-de errores MVC/Security, incluido Problem Details, se completará en #46.
+de errores MVC/Security se implementa en #46 mediante Problem Details.
 
 ### Pruebas de seguridad
 
@@ -462,9 +465,9 @@ importa la configuración real, sin PostgreSQL:
 .\mvnw.cmd "-Dtest=JsonConfigurationTest" test
 ```
 
-El formato común de errores se completará en #46; este Controller no incorpora
-manejadores propios. Las pruebas de #45 comprueban los estados HTTP sin fijar
-todavía el cuerpo común de Problem Details.
+El formato común de errores se gestiona en el paquete `exception`, conforme a
+#46. CompanyController no incorpora manejadores propios. Las pruebas HTTP y
+de integración comprueban ahora tanto el estado como el cuerpo de Problem Details.
 
 ### Pruebas HTTP de Company
 
@@ -472,13 +475,14 @@ todavía el cuerpo común de Problem Details.
 JSON y los filtros de seguridad reales. Sustituye CompanyService, JwtDecoder y
 AuthenticatedUserResolver por mocks y proporciona directamente un principal
 autenticado cuando el caso lo requiere. No conecta con PostgreSQL ni verifica
-firmas JWT. Sus 31 casos comprueban:
+firmas JWT. Sus 37 casos comprueban:
 
 - GET y PATCH correctos, campos públicos exactos, fechas UTC y normalización.
 - Nombres inválidos, JSON incorrecto, tipos y campos no permitidos: 400 sin
   invocar el servicio.
 - Ausencia de autenticación: 401; rol USER: 403, antes de validar el cuerpo.
 - Traducción a 404 cuando el servicio simulado lanza CompanyNotFoundException.
+- JSON común de errores, formatos no soportados y fallos 500/503 del servicio.
 
 No requiere Docker ni variables de conexión:
 
@@ -488,9 +492,10 @@ No requiere Docker ni variables de conexión:
 
 `CompanyApiPersistenceTest` utiliza el contexto completo con MockMvc, JWT
 firmados, filtros, Controller, Service, Repository, JPA y PostgreSQL reales.
-Sus 12 casos comprueban la separación entre dos compañías, el cambio de nombre
+Sus 14 casos comprueban la separación entre dos compañías, el cambio de nombre
 confirmado, la auditoría y la conservación de los datos ante entradas inválidas,
-rol USER, ausencia de autenticación o firma JWT incorrecta.
+rol USER, ausencia de autenticación, firma JWT incorrecta y formatos no soportados.
+Los rechazos se comprueban con el cuerpo completo de Problem Details.
 
 `CompanyApiTestConfiguration` declara un PostgreSQL 17 temporal mediante
 Testcontainers. Spring gestiona el contenedor y `@ServiceConnection` proporciona
@@ -523,6 +528,66 @@ descargada permanece en la caché de Docker.
 El 404 se verifica con el servicio simulado: el test de integración no elimina
 una compañía que sigue referenciada por User para forzar ese caso, porque
 PostgreSQL lo impide mediante su clave foránea.
+
+## Respuestas comunes de error
+
+Los errores utilizan `application/problem+json`, con `type: about:blank`,
+`title`, `status`, `detail`, `instance` y `code`. La ruta `instance` no incluye
+query. Los títulos describen el estado HTTP en inglés; los mensajes públicos
+son controlados y no reproducen los mensajes internos de las excepciones.
+
+| Código | Estado | Uso actual |
+| --- | --- | --- |
+| VALIDATION_ERROR | 400 | Entrada inválida o JSON que no se puede leer como el DTO. |
+| AUTHENTICATION_REQUIRED | 401 | Autenticación ausente, rechazada o usuario eliminado. |
+| ACCESS_DENIED | 403 | Permisos insuficientes. |
+| RESOURCE_NOT_FOUND | 404 | Recurso inexistente o fuera del ámbito autorizado. |
+| METHOD_NOT_ALLOWED | 405 | MVC recibe un método no soportado; conserva Allow. |
+| NOT_ACCEPTABLE | 406 | Formato de respuesta no soportado. |
+| UNSUPPORTED_MEDIA_TYPE | 415 | Tipo de cuerpo no soportado. |
+| INTERNAL_ERROR | 500 | Error inesperado con explicación genérica. |
+| SERVICE_UNAVAILABLE | 503 | Fallo temporal pertinente de una dependencia. |
+
+La validación añade `errors`, una lista de objetos con únicamente `field` y
+`message`. `field` identifica el campo del DTO, `body` para un cuerpo que no se
+puede leer, o `request` para parámetros y errores generales de la petición.
+No se devuelven valores rechazados, tokens, contraseñas, SQL ni stack traces.
+
+Las responsabilidades se reparten así:
+
+- `ApiErrorCode` conserva los códigos, estados y explicaciones públicas.
+- `ApiProblemDetailFactory` construye el cuerpo y determina una ruta segura.
+- `ApiFieldError` representa un fallo de entrada sin conservar su valor.
+- `ApiExceptionHandler` traduce las excepciones de MVC y del servicio.
+- `ApiProblemDetailWriter` escribe el mismo cuerpo desde los filtros.
+- `SecurityAuthenticationEntryPoint` elige 401 o 503 al autenticar;
+  `SecurityAccessDeniedHandler` responde 403.
+- `ApiErrorController` sustituye la respuesta de `/error` para procesamientos
+  internos `DispatcherType.ERROR`, usando el estado y la ruta originales.
+  Las peticiones normales a `/error` siguen sometidas a la seguridad.
+
+Solo TransientDataAccessException, DataAccessResourceFailureException y
+CannotCreateTransactionException se clasifican como indisponibilidad temporal.
+Los errores imprevistos de argumentos, programación o integridad mantienen
+500. El 503 no incluye Retry-After porque no se conoce un plazo fiable.
+El 401 conserva el desafío Bearer definido en el contrato.
+
+La seguridad autoriza antes de MVC: los métodos y rutas que no permite la cadena
+siguen produciendo 401/403. El 405 se aplica cuando MVC recibe un método que su
+mapping no admite. `ApiExceptionHandlerTest` aísla MVC con un Controller de prueba
+para comprobar ese caso y Allow, sin relajar los permisos de la aplicación.
+También comprueba 406, 415, parámetros y categorías de excepciones. Los tests
+de Company y Security mantienen los filtros reales activados.
+
+Pruebas del mecanismo común sin PostgreSQL ni Docker:
+
+```powershell
+.\mvnw.cmd "-Dtest=ApiProblemDetailFactoryTest,ApiProblemDetailWriterTest,ApiExceptionHandlerTest,SecurityAccessDeniedHandlerTest,SecurityAuthenticationEntryPointTest,CompanyControllerTest,SecurityHttpTest" test
+```
+
+`SecurityHttpPersistenceTest` comprueba además el formato común en el flujo real
+con PostgreSQL, los cambios de identidad y los procesamientos internos de error,
+incluidas la conservación de Allow y la exclusión de la query original.
 
 ## DTOs de Company
 

@@ -3,6 +3,7 @@ package com.securebrowser.platform.security;
 import static com.securebrowser.platform.security.SecurityHttpTestSupport.COMPANY_PATH;
 import static com.securebrowser.platform.security.SecurityHttpTestSupport.NOW;
 import static com.securebrowser.platform.security.SecurityHttpTestSupport.token;
+import static com.securebrowser.platform.exception.ApiProblemAssertions.problem;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -12,13 +13,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.Map;
 
 import com.securebrowser.platform.user.UserRole;
+import com.securebrowser.platform.exception.ApiErrorCode;
 
 import jakarta.servlet.Filter;
 
@@ -28,6 +29,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.env.MapPropertySource;
@@ -70,7 +73,7 @@ class SecurityHttpTest {
     void rejectsMissingBearer() throws Exception {
         mvc.perform(get(COMPANY_PATH))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"));
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
         verifyNoInteractions(resolver);
     }
 
@@ -78,9 +81,9 @@ class SecurityHttpTest {
     @Test
     void rejectsAlternativeCredentials() throws Exception {
         mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, "Basic dXNlcjpwYXNz"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
         mvc.perform(get(COMPANY_PATH).param("access_token", token(25L)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH));
         verifyNoInteractions(resolver);
     }
 
@@ -96,11 +99,10 @@ class SecurityHttpTest {
             default -> throw new IllegalArgumentException("Unknown test scenario");
         };
 
-        var result = mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + bearer))
+        mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + bearer))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\""))
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH))
                 .andReturn();
-        assertThat(result.getResponse().getContentAsString()).isEmpty();
         verifyNoInteractions(resolver);
     }
 
@@ -130,7 +132,7 @@ class SecurityHttpTest {
         mvc.perform(request(HttpMethod.valueOf(method), COMPANY_PATH)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer "
                                 + token(25L, Map.of("role", "ADMIN", "companyId", 999L))))
-                .andExpect(status().isForbidden());
+                .andExpect(problem(ApiErrorCode.ACCESS_DENIED, COMPANY_PATH));
     }
 
     /** Un usuario inexistente produce 401 aunque el JWT siga correctamente firmado. */
@@ -138,11 +140,10 @@ class SecurityHttpTest {
     void rejectsDeletedUser() throws Exception {
         when(resolver.resolve(25L)).thenThrow(new BadCredentialsException("Internal user detail"));
 
-        var result = mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + token(25L)))
+        mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + token(25L)))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\""))
+                .andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, COMPANY_PATH))
                 .andReturn();
-        assertThat(result.getResponse().getContentAsString()).isEmpty();
     }
 
     /** El error de persistencia simulado recorre el filtro real y conserva el estado 503. */
@@ -150,11 +151,10 @@ class SecurityHttpTest {
     void returns503WhenDatabaseIsUnavailable() throws Exception {
         when(resolver.resolve(25L)).thenThrow(new DataAccessResourceFailureException("Private SQL detail"));
 
-        var result = mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + token(25L)))
+        mvc.perform(get(COMPANY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + token(25L)))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(header().doesNotExist(HttpHeaders.WWW_AUTHENTICATE))
+                .andExpect(problem(ApiErrorCode.SERVICE_UNAVAILABLE, COMPANY_PATH))
                 .andReturn();
-        assertThat(result.getResponse().getContentAsString()).isEmpty();
     }
 
     /** Toda ruta no acordada permanece cerrada, incluido el descubrimiento OAuth. */
@@ -162,9 +162,9 @@ class SecurityHttpTest {
     @ValueSource(strings = {"/", "/login", "/api/v1/auth/login", "/api/v1/users",
             "/api/v1/companies/7", "/.well-known/oauth-protected-resource"})
     void deniesUnspecifiedRoutes(String path) throws Exception {
-        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        mvc.perform(get(path)).andExpect(problem(ApiErrorCode.AUTHENTICATION_REQUIRED, path));
         mvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, "Bearer " + token(25L)))
-                .andExpect(status().isForbidden());
+                .andExpect(problem(ApiErrorCode.ACCESS_DENIED, path));
     }
 
     /** Otros métodos HTTP no adquieren permiso por coincidir con la ruta de Company. */
@@ -221,6 +221,7 @@ class SecurityHttpTest {
     /** MVC, JWT y filtros reales, con un único sustituto para la consulta de identidad. */
     @TestConfiguration(proxyBeanMethods = false)
     @EnableWebMvc
+    @ImportAutoConfiguration(JacksonAutoConfiguration.class)
     @Import({JwtConfiguration.class, SecurityConfiguration.class,
             AuthenticatedUserJwtConverter.class, SecurityAuthenticationEntryPoint.class,
             SecurityHttpTestSupport.ProbeConfiguration.class})
