@@ -33,7 +33,7 @@ configurado en GitHub.
 | Require conversation resolution before merging | Activado |
 | Restrict deletions | Activado |
 | Block force pushes | Activado |
-| Require status checks to pass before merging | Pendiente de configurar al incorporar CI |
+| Require status checks to pass before merging | Pendiente de activar tras validar Backend CI en una PR real |
 
 La lista de bypass vacía hace que el workflow mediante Pull Requests
 también se aplique al administrador del repositorio.
@@ -43,9 +43,10 @@ proyecto individual. El autor revisa el diff y realiza las comprobaciones
 correspondientes antes de fusionar. Las conversaciones de revisión
 deben estar resueltas.
 
-Actualmente no hay workflows de CI configurados. Cuando se incorporen,
-se añadirán sus checks obligatorios al ruleset. Mientras tanto,
-las comprobaciones manuales se documentan en cada Pull Request.
+El workflow [Backend CI](.github/workflows/backend.yml) define el check
+`Backend build and tests`. Incorporar el workflow al repositorio no activa
+automáticamente la obligación de superar ese check en el ruleset.
+Las comprobaciones manuales adicionales se documentan en cada Pull Request.
 
 [Configuración del ruleset protect-main](<https://github.com/CristianPG1993/securebrowser-platform/settings/rules/24382571>).
 
@@ -53,7 +54,27 @@ Para comprobar la configuración, abrir el ruleset en GitHub y verificar
 su estado Active, el destino main, la lista de bypass vacía y las reglas
 indicadas en esta tabla.
 
-Esto deja registrada la configuración y distingue las reglas activas de los checks que añadiremos cuando exista CI.
+### Activar el check obligatorio de backend
+
+La activación se realizará como un paso separado, con confirmación expresa,
+después de validar el workflow en una PR real:
+
+1. Comprobar que la PR ejecuta `Backend CI` y que su check
+   `Backend build and tests` termina correctamente para la última revisión.
+   Registrar el enlace a la ejecución en la PR.
+2. Abrir el ruleset `protect-main` y añadir la regla
+   `Require status checks to pass before merging`.
+3. Seleccionar el nombre exacto `Backend build and tests`, comprobado en
+   esa ejecución, y GitHub Actions como origen esperado del check.
+4. Conservar las demás reglas: estado Active, destino `main`, bypass vacío,
+   PR obligatoria, cero aprobaciones externas, resolución de conversaciones,
+   protección frente al borrado y bloqueo de force pushes.
+5. Guardar y comprobar que una PR necesita el check antes de fusionarse.
+   Actualizar la tabla anterior cuando la activación esté verificada.
+
+No se cambia el número de aprobaciones ni se añaden excepciones para
+evitar un check fallido. La configuración de reglas se describe en la
+[documentación de GitHub sobre checks obligatorios](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging).
 
 ## Ramas de trabajo
 
@@ -65,6 +86,7 @@ El nombre debe describir el propósito del cambio. Ejemplos:
 - `feature/device-enrollment`: nueva funcionalidad.
 - `fix/event-deduplication`: corrección de un error.
 - `test/license-capacity`: pruebas.
+- `ci/backend-build-tests`: integración continua del backend.
 
 Cada rama debe mantener el alcance de su tarea. Los cambios ajenos
 se gestionan en otra rama y otra Pull Request.
@@ -98,6 +120,48 @@ La Pull Request debe incluir:
 Mientras el trabajo esté incompleto, mantener la Pull Request como
 borrador.
 
+## Comprobaciones de CI del backend
+
+`Backend CI` se ejecuta en las PR hacia `main` y con los pushes a `main`.
+También permite ejecución manual cuando el workflow está en la rama principal.
+No utiliza filtros por rutas: una PR que solo cambie documentación también
+debe obtener el check, para que su futura obligatoriedad no deje PR bloqueadas
+sin una ejecución.
+
+El job `Backend build and tests` utiliza Ubuntu 24.04, JDK 25, Maven Wrapper
+3.9.12, un servicio PostgreSQL 17 con comprobación de disponibilidad y Docker
+para las pruebas que utilizan Testcontainers. Su configuración de conexión
+es exclusiva de CI y no requiere `.env` ni servicios del equipo del autor.
+
+Ejecuta `./mvnw --batch-mode --no-transfer-progress verify` desde `backend`.
+Debe compilar, ejecutar todas las pruebas y generar el JAR, incluyendo las
+comprobaciones de Flyway e Hibernate realizadas por los tests de persistencia.
+No se aceptan `skipTests`, selección parcial de tests ni opciones para ignorar
+fallos como sustitutos de esta verificación completa.
+
+Para reproducir la comprobación en PowerShell, preparar PostgreSQL, las
+variables `SBP_DB_*` y Docker como indica el [README del backend](backend/README.md).
+Desde `backend`:
+
+```powershell
+.\mvnw.cmd --batch-mode --no-transfer-progress verify
+```
+
+Antes del merge, revisar el resultado de la última revisión de la PR y abrir
+los logs si falla. Si se publican nuevos commits, esperar al check de esa
+revisión; una ejecución anterior o cancelada no valida los cambios nuevos.
+Tras fusionar, comprobar también la ejecución correspondiente al push a `main`.
+
+### Correspondencia con las decisiones de arquitectura
+
+La configuración actual de Spring Boot 4.1.1 gestiona JUnit Jupiter 6.0.3.
+El [documento de estructura del backend](docs/architecture/backend-structure.md)
+ya menciona JUnit 6, mientras que el
+[ADR-0007 aceptado](docs/adr/0007-backend-package-organization.md) conserva
+la previsión inicial de JUnit 5. CI utiliza las dependencias actuales del POM.
+La discrepancia queda identificada para su revisión; cualquier aclaración
+del ADR se consultará antes de modificar esa decisión aceptada.
+
 ## Revisión y fusión
 
 Antes de fusionar una Pull Request:
@@ -119,8 +183,7 @@ Cuando una Pull Request ejecute workflows de GitHub Actions,
 sus comprobaciones deben finalizar correctamente antes del merge.
 No se fusiona mientras haya comprobaciones pendientes o fallidas.
 
-Mientras no existan workflows configurados, documentar las
-comprobaciones manuales realizadas en la Pull Request.
+Documentar también las comprobaciones manuales que no cubra el workflow.
 
 Fusionar mediante GitHub cuando el cambio esté terminado y revisado.
 
