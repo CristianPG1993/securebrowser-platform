@@ -390,17 +390,75 @@ no detiene PostgreSQL.
 extiende `JpaRepository<Company, Long>`. Spring Data JPA proporciona
 su implementación y las operaciones heredadas de consulta y persistencia.
 
-Para consultar Company por su identificador y guardar sus cambios bastan
-los métodos heredados, como `findById` y `save`. Inicialmente no se necesitan
-consultas adicionales.
+Para consultar Company por su identificador y guardar sus cambios, CompanyService
+utiliza los métodos heredados `findById` y `save`. El flujo de usuarios añade
+`findByIdForUpdate` para coordinar operaciones que protegen al último ADMIN.
 
 `CompanyService` utiliza este repositorio para consultar la compañía propia
 y guardar sus cambios, aplicando las comprobaciones de permisos.
 
-La validación utiliza las pruebas existentes de Company.
-`CompanyPersistenceTest` arranca el contexto de Spring y comprueba el mapeo
-y la auditoría sobre PostgreSQL. Se añadirán pruebas específicas del repositorio
-cuando existan consultas propias que aporten comportamiento adicional.
+`CompanyPersistenceTest` comprueba el mapeo y la auditoría sobre PostgreSQL.
+La consulta propia de bloqueo se verifica además mediante
+`RepositoryLockPersistenceTest`, descrito en el apartado siguiente.
+
+## Consultas y bloqueos para User
+
+`UserRepository` conserva `JpaRepository<User, Long>` y añade las consultas
+necesarias para los próximos servicios de usuarios:
+
+- Detalle por id y Company, con `Optional.empty()` tanto para un usuario
+  inexistente como para uno perteneciente a otra compañía.
+- Páginas por Company, con filtro opcional de rol mediante una segunda consulta,
+  orden fijo por id ascendente y totales limitados al mismo ámbito.
+- Existencia global del email normalizado, incluida la exclusión del propio
+  usuario cuando se comprueba un cambio de email. La restricción PostgreSQL
+  `uq_users_email` sigue siendo la garantía final ante escrituras concurrentes.
+- Recuento por Company y rol para el futuro control del último ADMIN.
+- Consulta de un usuario de la Company con bloqueo de escritura.
+
+`CompanyRepository.findByIdForUpdate` permite coordinar cambios de rol y
+borrados. Cuando una operación necesita ambas filas, el servicio debe bloquear
+primero Company y después User, manteniendo los bloqueos hasta el final de
+su transacción y comprobando de nuevo las reglas pertinentes bajo el bloqueo.
+Si necesita varios Users, debe adquirirlos en orden de id ascendente.
+
+Ambas consultas bloqueantes utilizan `PESSIMISTIC_WRITE` y el hint
+`jakarta.persistence.lock.timeout=0`. En PostgreSQL se aplica `NOWAIT`: una
+fila ocupada se rechaza inmediatamente, sin esperar su liberación ni omitir
+el recurso. Spring traduce ese rechazo a una excepción de bloqueo transitoria,
+compatible con el tratamiento 503 existente. Las consultas requieren una
+transacción de escritura; no añaden límites transaccionales de negocio al
+repositorio.
+
+`RefreshTokenRepository.findByUser_IdAndRevokedAtIsNullOrderByIdAsc` recupera
+los tokens aún no revocados de todos los grupos del usuario, incluidos los
+consumidos o caducados. El futuro servicio de cambio de contraseña debe bloquear
+antes el User autorizado y llamar a `RefreshToken.revoke` sobre esos registros
+en la misma transacción que modifica el hash. Los registros previamente
+revocados conservan su fecha. Este acceso no implementa login ni renovación.
+
+Las pruebas de estos repositorios comparten
+`PostgresRepositoryTestConfiguration`, que proporciona un PostgreSQL 17 temporal
+mediante Testcontainers y `@ServiceConnection`. No requieren las variables
+`SBP_DB_*` ni utilizan la base local. Con Docker disponible, desde backend:
+
+```powershell
+.\mvnw.cmd "-Dtest=UserRepositoryPersistenceTest,RepositoryLockPersistenceTest,RefreshTokenRepositoryPersistenceTest" test
+```
+
+- `UserRepositoryPersistenceTest` verifica ámbito, paginación, filtro, orden,
+  totales, email y recuentos mediante consultas reales.
+- `RepositoryLockPersistenceTest` utiliza transacciones y conexiones distintas
+  para comprobar exclusión, rechazo `NOWAIT`, liberación tras commit/rollback
+  y escritura revertida respetando el orden Company → User. Sus datos se
+  confirman para compartirlos entre conexiones y se eliminan al terminar.
+- `RefreshTokenRepositoryPersistenceTest` comprueba la selección por usuario y
+  la revocación de los registros seleccionados, conservando grupos ajenos y
+  fechas anteriores. Estos tests y los de consultas revierten sus fixtures.
+
+Los permisos, la regla del último ADMIN y el cambio completo de contraseña se
+implementarán en los servicios de las tareas #59–#61. No hay todavía endpoints
+REST de usuarios.
 
 ## Servicio de Company
 
