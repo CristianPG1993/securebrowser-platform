@@ -24,9 +24,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.jwt.JwsHeader;
 
 /** Comprueba la configuración completa con firmas reales y sin base de datos. */
 class JwtConfigurationTest {
@@ -60,6 +65,55 @@ class JwtConfigurationTest {
             assertThat(context.getBean(Clock.class).getZone()).isEqualTo(ZoneOffset.UTC);
             assertThat(context.getBean(JwtDecoder.class))
                     .isInstanceOf(StrictJwtDecoder.class);
+        });
+    }
+
+    /** El firmador real produce un JWT que acepta nuestro verificador real. */
+    @Test
+    void encoderProducesTokenAcceptedByDecoder() {
+        fixedClockRunner.run(context -> {
+            // La configuración con la clave de prueba debe arrancar correctamente.
+            assertThat(context).hasNotFailed();
+
+            // Spring debe proporcionar un único firmador JWT.
+            assertThat(context).hasSingleBean(JwtEncoder.class);
+
+            JwtEncoder encoder = context.getBean(JwtEncoder.class);
+            JwtDecoder decoder = context.getBean(JwtDecoder.class);
+
+            JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).type("JWT").build();
+            JwtClaimsSet claims = JwtClaimsSet.builder()
+                    .subject("25")
+                    .issuer("sbp-test")
+                    .audience(List.of("sbp-api-test"))
+                    .issuedAt(NOW)
+                    .expiresAt(NOW.plusSeconds(900))
+                    .id("encoder-test-token")
+                    .build();
+
+            Jwt signed = encoder.encode(JwtEncoderParameters.from(header, claims));
+            Jwt verified = decoder.decode(signed.getTokenValue());
+
+            // El token recibido utiliza el algoritmo HS256 acordado.
+            assertThat(verified.getHeaders().get("alg")).isEqualTo("HS256");
+
+            // El usuario identificado sigue siendo el 25 tras firmar y verificar.
+            assertThat(verified.getSubject()).isEqualTo("25");
+
+            // El emisor conserva exactamente el texto configurado.
+            assertThat(verified.getClaims().get("iss")).isEqualTo("sbp-test");
+
+            // El token está dirigido a nuestra API de prueba.
+            assertThat(verified.getAudience()).containsExactly("sbp-api-test");
+
+            // La emisión coincide con el instante del reloj fijo.
+            assertThat(verified.getIssuedAt()).isEqualTo(NOW);
+
+            // La caducidad se conserva a los 900 segundos de la emisión.
+            assertThat(verified.getExpiresAt()).isEqualTo(NOW.plusSeconds(900));
+
+            // El identificador del token tampoco cambia en el recorrido.
+            assertThat(verified.getId()).isEqualTo("encoder-test-token");
         });
     }
 

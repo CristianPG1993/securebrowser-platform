@@ -19,6 +19,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /** Busca un usuario solo dentro de la compañía indicada. */
     Optional<User> findByIdAndCompany_Id(Long id, Long companyId);
 
+    /** Busca la identidad de login mediante su email global y ya normalizado. */
+    Optional<User> findByEmail(String email);
+
     /** Lista los usuarios de una compañía por id ascendente y con paginación. */
     Page<User> findByCompany_IdOrderByIdAsc(Long companyId, Pageable pageable);
 
