@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "SBP — Autenticación y Policy (bloques 1 y 2)",
-    "description": "Ejecuta en orden contra el perfil demo. Define baseUrl y las dos contraseñas demo en un entorno local. Comprueba autenticación ADMIN/USER, consulta y PATCH de Policy, rechazo de un PATCH inválido sin cambios y acceso administrativo denegado a USER. Mantiene tokens separados y no exporta secretos. Device y SecurityEvent se incorporarán en sus bloques posteriores.",
+    "name": "SBP — Autenticación, Policy y Device (bloques 1–3)",
+    "description": "Ejecuta en orden contra el perfil demo con baseUrl y las dos contraseñas en un entorno local. ADMIN modifica Policy y consulta el catálogo de dispositivos; USER lista sus instalaciones y obtiene la Policy modificada. Comprueba propiedad, actividad, validación y autenticación. Los scripts guardan IDs y tokens por separado; el archivo no contiene secretos reales. SecurityEvent se incorporará en el bloque 4.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -41,6 +41,26 @@
     },
     {
       "key": "adminPolicyId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "demoCompanyId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userProfileId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "demoDeviceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userDeviceId",
       "value": "",
       "type": "string"
     }
@@ -120,6 +140,7 @@
               "    pm.expect(body.role).to.eql('ADMIN');",
               "    pm.expect(body.email).to.eql('admin@demo.local');",
               "    pm.expect(Object.keys(body).sort()).to.eql(['id', 'companyId', 'name', 'lastName', 'email', 'role', 'createdAt', 'updatedAt'].sort());",
+              "    pm.collectionVariables.set('demoCompanyId', body.companyId);",
               "});"
             ]
           }
@@ -381,6 +402,85 @@
       }
     },
     {
+      "name": "Listar Device ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('ADMIN lista los dispositivos de su Company', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.items).to.be.an('array').and.not.empty;",
+              "    body.items.forEach(d => pm.expect(d.companyId).to.eql(Number(pm.collectionVariables.get('demoCompanyId'))));",
+              "    const demo = body.items.find(d => d.deviceIdentifier === 'b7eacb45-4aba-4a5a-8c0c-633a61294af1');",
+              "    pm.expect(demo).to.be.an('object');",
+              "    pm.collectionVariables.set('demoDeviceId', demo.id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices?size=100"
+      }
+    },
+    {
+      "name": "ADMIN no suplanta la instalación del USER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('La política como instalación requiere ser propietario incluso con rol ADMIN', function () {",
+              "    pm.response.to.have.status(404);",
+              "    pm.expect(pm.response.json().code).to.eql('RESOURCE_NOT_FOUND');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices/{{demoDeviceId}}/policy"
+      }
+    },
+    {
       "name": "Login USER",
       "event": [
         {
@@ -454,6 +554,7 @@
               "    pm.expect(body.role).to.eql('USER');",
               "    pm.expect(body.email).to.eql('user@demo.local');",
               "    pm.expect(Object.keys(body).sort()).to.eql(['id', 'companyId', 'name', 'lastName', 'email', 'role', 'createdAt', 'updatedAt'].sort());",
+              "    pm.collectionVariables.set('userProfileId', body.id);",
               "});"
             ]
           }
@@ -478,6 +579,181 @@
           }
         ],
         "url": "{{baseUrl}}/users/me"
+      }
+    },
+    {
+      "name": "Listar Device propios USER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('USER solo lista sus instalaciones activas y conserva el contrato', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.items).to.be.an('array').and.not.empty;",
+              "    body.items.forEach(d => {",
+              "        pm.expect(d.userId).to.eql(Number(pm.collectionVariables.get('userProfileId')));",
+              "        pm.expect(d.companyId).to.eql(Number(pm.collectionVariables.get('demoCompanyId')));",
+              "        pm.expect(d.active).to.eql(true);",
+              "        pm.expect(Object.keys(d).sort()).to.eql(['id', 'deviceIdentifier', 'name', 'companyId', 'userId', 'licenseId', 'policyId', 'enrollmentTokenId', 'active', 'createdAt', 'updatedAt', 'lastSeenAt'].sort());",
+              "    });",
+              "    const demo = body.items.find(d => d.deviceIdentifier === 'b7eacb45-4aba-4a5a-8c0c-633a61294af1');",
+              "    pm.expect(demo).to.be.an('object');",
+              "    pm.collectionVariables.set('userDeviceId', demo.id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices?active=true&size=100"
+      }
+    },
+    {
+      "name": "USER obtiene la Policy modificada por ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('La instalación recibe la configuración confirmada por ADMIN', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.id).to.eql(Number(pm.collectionVariables.get('adminPolicyId')));",
+              "    pm.expect(body.name).to.eql('Política demo verificada');",
+              "    pm.expect(body.urlFilteringEnabled).to.eql(true);",
+              "    pm.expect(body.urlFilteringMode).to.eql('DENYLIST');",
+              "    pm.expect(body.urlRules).to.eql(['blocked.example', 'phishing.example']);",
+              "    pm.expect(body.downloadControlEnabled).to.eql(true);",
+              "    pm.expect(body.downloadControlMode).to.eql('DENYLIST');",
+              "    pm.expect(body.downloadRules).to.eql(['bat', 'exe']);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices/{{userDeviceId}}/policy"
+      }
+    },
+    {
+      "name": "Verificar lastSeenAt de la instalación USER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('La comunicación autorizada ha registrado lastSeenAt', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const device = pm.response.json().items.find(d => d.id === Number(pm.collectionVariables.get('userDeviceId')));",
+              "    pm.expect(device).to.be.an('object');",
+              "    pm.expect(device.lastSeenAt).to.be.a('string').and.not.empty;",
+              "    pm.expect(Number.isFinite(Date.parse(device.lastSeenAt))).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices?active=true&size=100"
+      }
+    },
+    {
+      "name": "Filtrar Device inactivos USER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('La instalación demo activa no aparece al filtrar inactivos', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.items).to.be.an('array');",
+              "    body.items.forEach(d => {",
+              "        pm.expect(d.userId).to.eql(Number(pm.collectionVariables.get('userProfileId')));",
+              "        pm.expect(d.active).to.eql(false);",
+              "    });",
+              "    pm.expect(body.items.some(d => d.id === Number(pm.collectionVariables.get('userDeviceId')))).to.eql(false);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices?active=false"
       }
     },
     {

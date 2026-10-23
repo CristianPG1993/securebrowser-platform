@@ -7,6 +7,9 @@ import com.securebrowser.platform.auth.InvalidCredentialsException;
 import com.securebrowser.platform.auth.InvalidRefreshTokenException;
 import com.securebrowser.platform.policy.PolicyNotFoundException;
 import com.securebrowser.platform.policy.InvalidPolicyRequestException;
+import com.securebrowser.platform.device.DeviceNotFoundException;
+import com.securebrowser.platform.device.DeviceInactiveException;
+import com.securebrowser.platform.device.InvalidDeviceRequestException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -70,6 +73,23 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     public ResponseEntity<ProblemDetail> handleInvalidPolicyRequest(HttpServletRequest request) {
         ProblemDetail problem = problemFactory.create(ApiErrorCode.VALIDATION_ERROR, request);
         problem.setProperty("errors", List.of(new ApiFieldError("request", "Los datos de la política no son válidos.")));
+        return ResponseEntity.status(problem.getStatus()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
+    }
+
+    @ExceptionHandler(DeviceNotFoundException.class)
+    public ResponseEntity<ProblemDetail> handleDeviceNotFound(HttpServletRequest request) {
+        return publicProblem(ApiErrorCode.RESOURCE_NOT_FOUND, request);
+    }
+
+    @ExceptionHandler(DeviceInactiveException.class)
+    public ResponseEntity<ProblemDetail> handleDeviceInactive(HttpServletRequest request) {
+        return publicProblem(ApiErrorCode.DEVICE_INACTIVE, request);
+    }
+
+    @ExceptionHandler(InvalidDeviceRequestException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidDeviceRequest(HttpServletRequest request) {
+        ProblemDetail problem = problemFactory.create(ApiErrorCode.VALIDATION_ERROR, request);
+        problem.setProperty("errors", List.of(new ApiFieldError("request", "Los datos del dispositivo no son válidos.")));
         return ResponseEntity.status(problem.getStatus()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
     }
 

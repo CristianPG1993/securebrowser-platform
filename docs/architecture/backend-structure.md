@@ -57,7 +57,7 @@ su primera clase. La clase de arranque estará en el paquete base.
 | `user` | User, UserRole, datos personales y reglas de administración de usuarios. |
 | `license` | License y reglas de capacidad de instalaciones. |
 | `enrollment` | EnrollmentToken, emisión, consumo, revocación y coordinación del registro de una instalación. |
-| `device` | Device, política asignada, actividad y datos de la instalación. |
+| `device` | Listado paginado por Company y propietario, consulta de política de instalación activa y registro transaccional de lastSeenAt. |
 | `policy` | Consultas y PATCH administrativos de Policy, DTOs, reglas de URL y descargas, pertenencia por Company y bloqueo de edición. |
 | `api` | PageResponse, contrato compartido de páginas sin exponer la serialización interna de Spring Data. |
 | `securityevent` | SecurityEvent, SecurityEventType, consulta, recepción y deduplicación de eventos. |
