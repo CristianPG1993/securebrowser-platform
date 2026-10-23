@@ -39,6 +39,10 @@ El ADMIN puede listar, consultar y actualizar las políticas de su compañía.
 El PATCH de Policy conserva los campos omitidos, reemplaza listas de reglas
 y confirma configuración y auditoría de forma atómica.
 
+El listado de Device limita al ADMIN a su compañía y al USER a sus instalaciones.
+El propietario de una instalación activa puede obtener su política y registrar
+su última comunicación con la hora del backend.
+
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).
 

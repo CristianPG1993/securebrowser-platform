@@ -11,6 +11,7 @@ public enum ApiErrorCode {
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "El token de renovación no es válido."),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "No tienes permiso para realizar esta operación."),
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "No se ha encontrado el recurso solicitado."),
+    DEVICE_INACTIVE(HttpStatus.CONFLICT, "El dispositivo está inactivo."),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "El método HTTP no está permitido para esta ruta."),
     NOT_ACCEPTABLE(HttpStatus.NOT_ACCEPTABLE, "El formato de respuesta solicitado no está disponible."),
     UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "El tipo de contenido enviado no está admitido."),

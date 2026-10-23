@@ -1,7 +1,7 @@
 # Backend de SecureBrowser Platform
 
 Backend en Java y Spring Boot con dominio JPA, migraciones Flyway V1–V10,
-API de Company y Policy, autenticación con rotación de tokens, perfil propio,
+API de Company, Policy y consultas de Device, autenticación con rotación de tokens, perfil propio,
 datos demo y tratamiento común de errores.
 
 ## Guía rápida de pruebas
@@ -38,10 +38,12 @@ hayas definido las variables de entorno. Maven no carga `.env` automáticamente.
    | demoUserPassword | Contraseña del USER demo. |
 
    Usa las contraseñas con las que se crearon las cuentas; reiniciar no las cambia.
-   Pulsa `Run`, conserva las dieciséis peticiones en orden y una iteración, e inicia
-   la ejecución. Deben pasar las dieciséis comprobaciones, sin fallos ni errores:
-   diez de autenticación y seis de Policy.
+   Pulsa `Run`, conserva las veintidós peticiones en orden y una iteración, e inicia
+   la ejecución. Deben pasar las veintidós comprobaciones, sin fallos ni errores:
+   diez de autenticación, seis de Policy y seis de Device.
    El 401 de «Rechazar refresh USER después del logout» es el resultado esperado.
+   También son esperados el 403 del USER al catálogo de Policy y el 404 del ADMIN
+   que intenta consultar la política como instalación del USER.
 
 ## Requisitos
 
@@ -347,7 +349,9 @@ no se incorpora una operación de traslado de usuarios.
 HTTP. Permite POST `/api/v1/auth/login`, `/api/v1/auth/refresh` y
 `/api/v1/auth/logout` sin JWT; GET `/api/v1/users/me` para ADMIN y USER;
 y GET/PATCH `/api/v1/companies/me`, GET `/api/v1/policies` y
-GET/PATCH `/api/v1/policies/{id}` para ADMIN. Deniega las demás rutas y
+GET/PATCH `/api/v1/policies/{id}` para ADMIN. Permite GET `/api/v1/devices`
+y GET `/api/v1/devices/{id}/policy` a ADMIN y USER; DeviceService limita el
+ámbito y exige propiedad para consultar la política de instalación. Deniega las demás rutas y
 métodos. Basic, formulario, logout de Spring y caché de peticiones están
 deshabilitados. CSRF está deshabilitado porque la autenticación de esta API
 utiliza el encabezado Bearer y no cookies. El filtro Bearer y el proveedor JWT
@@ -644,6 +648,7 @@ son controlados y no reproducen los mensajes internos de las excepciones.
 | AUTHENTICATION_REQUIRED | 401 | Autenticación ausente, rechazada o usuario eliminado. |
 | ACCESS_DENIED | 403 | Permisos insuficientes. |
 | RESOURCE_NOT_FOUND | 404 | Recurso inexistente o fuera del ámbito autorizado. |
+| DEVICE_INACTIVE | 409 | Instalación propia inactiva al consultar su política. |
 | METHOD_NOT_ALLOWED | 405 | MVC recibe un método no soportado; conserva Allow. |
 | NOT_ACCEPTABLE | 406 | Formato de respuesta no soportado. |
 | UNSUPPORTED_MEDIA_TYPE | 415 | Tipo de cuerpo no soportado. |
@@ -1001,7 +1006,7 @@ renovaciones, logout y rechazo del refresh revocado. Los scripts conservan los
 tokens de ADMIN y USER en variables distintas. El archivo del repositorio no
 incluye contraseñas ni tokens reales.
 
-Esta colección cubre autenticación y Policy. Se ampliará con Device y SecurityEvent
+Esta colección cubre autenticación, Policy y Device. Se ampliará con SecurityEvent
 cuando estén cerrados sus bloques; el recorrido completo y Docker Compose
 corresponden a la entrega reproducible del bloque 5.
 
@@ -1012,7 +1017,8 @@ por HTTP. Las tarjetas #59–#64 siguen pendientes y se replanifican fuera del b
 mínimo; la consulta propia de perfil es solo la parte necesaria para autenticación.
 
 El bloque 2 implementa las consultas y la edición de Policy descritas abajo.
-Quedan los bloques 3 (Device), 4 (SecurityEvent) y 5 (entrega reproducible).
+El bloque 3 incorpora el listado de Device y la consulta de política de instalación.
+Quedan los bloques 4 (SecurityEvent) y 5 (entrega reproducible).
 Cada bloque conserva una única PR y exige pruebas, `mvn verify` y CI en verde antes
 del siguiente. Al cerrarlos se congela el backend MVP y se pasa a C++/CEF.
 
@@ -1070,7 +1076,7 @@ La colección Postman selecciona una política del listado propio, la consulta,
 modifica su nombre y reglas, rechaza un PATCH con extensiones duplicadas y
 comprueba que el estado confirmado permanece intacto. También verifica el
 403 del USER al catálogo administrativo. Esta prueba modifica la política demo
-y puede repetirse. El usuario consultará la política de su Device en el bloque 3.
+y puede repetirse. En el bloque 3 el usuario consulta esa misma política mediante su Device.
 
 PolicyUpdateRequestTest y PolicyServiceTest verifican lectura estricta y
 permisos directos. PolicyRepositoryPersistenceTest y PolicyApiPersistenceTest
@@ -1078,3 +1084,45 @@ comprueban PostgreSQL real, paginación, aislamiento, confirmación, rollback
 después de flush, bloqueo y lecturas coherentes mientras otra transacción edita.
 POST, DELETE, asignaciones de Device y endpoints independientes de reglas
 quedan fuera de este bloque.
+
+## Consultas de Device: bloque 3
+
+| Ruta | Permiso y resultado |
+| --- | --- |
+| GET /api/v1/devices | ADMIN: su Company; USER: propios. PageResponse<DeviceResponse>. |
+| GET /api/v1/devices/{id}/policy | Propietario ADMIN o USER, misma Company y Device activo. PolicyResponse. |
+
+El listado admite page (inicial 0), size (inicial 20, rango 1–100), userId
+y active (true o false). Ordena por id ascendente; sus totales conservan
+el mismo ámbito y filtros. USER no puede consultar otro propietario mediante
+userId, aunque pertenezca a su Company. Una referencia ajena o inexistente
+produce 404; los parámetros inválidos, repetidos o desconocidos producen 400.
+Las consultas administrativas no modifican lastSeenAt.
+
+La política como instalación exige ser propietario incluso con rol ADMIN;
+la administración de políticas se realiza mediante /policies. Se comprueba
+propiedad antes de actividad: una instalación ajena conserva 404 y una propia
+inactiva responde 409 DEVICE_INACTIVE, sin registrar comunicación.
+
+Una consulta correcta obtiene un snapshot coherente de Policy y sus reglas,
+registra lastSeenAt con el Clock del backend y confirma la auditoría de Device
+en la misma transacción. Se bloquea el Device con NOWAIT: la contención produce
+503 y permite reintentar. REPEATABLE_READ evita mezclar partes de ediciones
+concurrentes de Policy. Un fallo revierte también lastSeenAt y updatedAt.
+No se modifican la política, el propietario, la licencia ni el enrollment.
+
+Postman comprueba ADMIN lista Device → ADMIN no suplanta al propietario →
+USER lista sus instalaciones → obtiene la Policy modificada por ADMIN →
+verifica lastSeenAt y filtros. Importa de nuevo la colección actualizada antes
+de ejecutar sus 22 comprobaciones; conserva las contraseñas en tu entorno local.
+Si el backend ya estaba arrancado con una versión anterior, reinícialo con el
+perfil demo para cargar las rutas nuevas.
+
+DeviceRepositoryPersistenceTest comprueba filtros, páginas y ámbito en PostgreSQL.
+DeviceServiceTest verifica los controles en invocaciones directas.
+DeviceApiPersistenceTest recorre las rutas con filtros y servicios reales,
+incluidos rechazos sin cambios, rollback después de flush, contención y lectura
+coherente durante una edición administrativa concurrente.
+
+GET de detalle independiente, PATCH, POST y DELETE de Device, enrollments
+y administración de licencias quedan fuera de este bloque.
