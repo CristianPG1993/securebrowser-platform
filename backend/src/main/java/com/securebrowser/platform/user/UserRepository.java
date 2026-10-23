@@ -22,6 +22,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /** Busca la identidad de login mediante su email global y ya normalizado. */
     Optional<User> findByEmail(String email);
 
+    /**
+     * Resuelve el login y bloquea el User antes de comprobar su contraseña y crear su grupo.
+     * El servicio mantiene esa transacción hasta guardar el refresh; NOWAIT evita esperas de fila.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "0"))
+    @Query("select u from User u where u.email = :email")
+    Optional<User> findByEmailForUpdate(@Param("email") String email);
+
     /** Lista los usuarios de una compañía por id ascendente y con paginación. */
     Page<User> findByCompany_IdOrderByIdAsc(Long companyId, Pageable pageable);
 
