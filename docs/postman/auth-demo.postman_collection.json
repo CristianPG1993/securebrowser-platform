@@ -1,0 +1,504 @@
+{
+  "info": {
+    "name": "SBP — Autenticación y datos demo (bloque 1)",
+    "description": "Ejecuta en orden contra el perfil demo. Define demoAdminPassword y demoUserPassword en un entorno local, sin exportar secretos. La colección guarda por separado los tokens ADMIN y USER. Login crea una familia; refresh la rota sin ampliar su vencimiento; logout revoca la familia. Policy, Device y SecurityEvent se incorporarán en sus bloques posteriores.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8080/api/v1"
+    },
+    {
+      "key": "demoAdminPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "demoUserPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userRefreshToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Login ADMIN",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const password = pm.variables.get('demoAdminPassword');",
+              "if (!password) { throw new Error('Define la contraseña demo en el entorno local de Postman.'); }",
+              "pm.variables.set('loginBody', JSON.stringify({email: 'admin@demo.local', password: password}));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Responde 200 y entrega el contrato de tokens', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['accessToken', 'expiresIn', 'refreshToken', 'tokenType'].sort());",
+              "    pm.expect(body.tokenType).to.eql('Bearer');",
+              "    pm.expect(body.expiresIn).to.be.above(0);",
+              "    pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+              "    pm.expect(body.refreshToken).to.match(/^[A-Za-z0-9_-]{43}$/);",
+              "    pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store');",
+              "    pm.expect(pm.response.headers.get('Pragma')).to.eql('no-cache');",
+              "    pm.collectionVariables.set('adminAccessToken', body.accessToken);",
+              "    pm.collectionVariables.set('adminRefreshToken', body.refreshToken);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{{loginBody}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/login"
+      }
+    },
+    {
+      "name": "Perfil ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Devuelve el perfil propio y el rol actual', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.role).to.eql('ADMIN');",
+              "    pm.expect(body.email).to.eql('admin@demo.local');",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['id', 'companyId', 'name', 'lastName', 'email', 'role', 'createdAt', 'updatedAt'].sort());",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/users/me"
+      }
+    },
+    {
+      "name": "Login USER",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const password = pm.variables.get('demoUserPassword');",
+              "if (!password) { throw new Error('Define la contraseña demo en el entorno local de Postman.'); }",
+              "pm.variables.set('loginBody', JSON.stringify({email: 'user@demo.local', password: password}));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Responde 200 y entrega el contrato de tokens', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['accessToken', 'expiresIn', 'refreshToken', 'tokenType'].sort());",
+              "    pm.expect(body.tokenType).to.eql('Bearer');",
+              "    pm.expect(body.expiresIn).to.be.above(0);",
+              "    pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+              "    pm.expect(body.refreshToken).to.match(/^[A-Za-z0-9_-]{43}$/);",
+              "    pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store');",
+              "    pm.expect(pm.response.headers.get('Pragma')).to.eql('no-cache');",
+              "    pm.collectionVariables.set('userAccessToken', body.accessToken);",
+              "    pm.collectionVariables.set('userRefreshToken', body.refreshToken);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{{loginBody}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/login"
+      }
+    },
+    {
+      "name": "Perfil USER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Devuelve el perfil propio y el rol actual', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.role).to.eql('USER');",
+              "    pm.expect(body.email).to.eql('user@demo.local');",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['id', 'companyId', 'name', 'lastName', 'email', 'role', 'createdAt', 'updatedAt'].sort());",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/users/me"
+      }
+    },
+    {
+      "name": "Renovar ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Responde 200 y entrega el contrato de tokens', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['accessToken', 'expiresIn', 'refreshToken', 'tokenType'].sort());",
+              "    pm.expect(body.tokenType).to.eql('Bearer');",
+              "    pm.expect(body.expiresIn).to.be.above(0);",
+              "    pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+              "    pm.expect(body.refreshToken).to.match(/^[A-Za-z0-9_-]{43}$/);",
+              "    pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store');",
+              "    pm.expect(pm.response.headers.get('Pragma')).to.eql('no-cache');",
+              "    pm.collectionVariables.set('adminAccessToken', body.accessToken);",
+              "    pm.collectionVariables.set('adminRefreshToken', body.refreshToken);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{adminRefreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/refresh"
+      }
+    },
+    {
+      "name": "Perfil ADMIN después de renovar",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Devuelve el perfil propio y el rol actual', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.role).to.eql('ADMIN');",
+              "    pm.expect(body.email).to.eql('admin@demo.local');",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['id', 'companyId', 'name', 'lastName', 'email', 'role', 'createdAt', 'updatedAt'].sort());",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/users/me"
+      }
+    },
+    {
+      "name": "Renovar USER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Responde 200 y entrega el contrato de tokens', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['accessToken', 'expiresIn', 'refreshToken', 'tokenType'].sort());",
+              "    pm.expect(body.tokenType).to.eql('Bearer');",
+              "    pm.expect(body.expiresIn).to.be.above(0);",
+              "    pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+              "    pm.expect(body.refreshToken).to.match(/^[A-Za-z0-9_-]{43}$/);",
+              "    pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store');",
+              "    pm.expect(pm.response.headers.get('Pragma')).to.eql('no-cache');",
+              "    pm.collectionVariables.set('userAccessToken', body.accessToken);",
+              "    pm.collectionVariables.set('userRefreshToken', body.refreshToken);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{userRefreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/refresh"
+      }
+    },
+    {
+      "name": "Logout USER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Cierra la renovación y responde sin cuerpo', function () {",
+              "    pm.response.to.have.status(204);",
+              "    pm.expect(pm.response.text()).to.eql('');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{userRefreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/logout"
+      }
+    },
+    {
+      "name": "Rechazar refresh USER después del logout",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('El refresh revocado recibe el error genérico acordado', function () {",
+              "    pm.response.to.have.status(401);",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+              "    pm.expect(pm.response.json().code).to.eql('INVALID_REFRESH_TOKEN');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{userRefreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/refresh"
+      }
+    },
+    {
+      "name": "Logout ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Cierra la renovación y responde sin cuerpo', function () {",
+              "    pm.response.to.have.status(204);",
+              "    pm.expect(pm.response.text()).to.eql('');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{adminRefreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/logout"
+      }
+    }
+  ]
+}

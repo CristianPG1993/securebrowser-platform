@@ -1,7 +1,8 @@
 # Backend de SecureBrowser Platform
 
 Backend en Java y Spring Boot con dominio JPA, migraciones Flyway V1–V10,
-API de Company, validación JWT y tratamiento común de errores.
+API de Company, autenticación con rotación de tokens, perfil propio,
+datos demo y tratamiento común de errores.
 
 ## Requisitos
 
@@ -232,9 +233,9 @@ sin almacenar una columna de estado ni modificar el registro al caducar.
 
 El hash tiene unicidad global, mientras que varios registros pueden compartir
 `familyId`. El borrado permitido de User elimina sus refresh tokens en cascada.
-La generación del secreto, login, rotación, revocación de grupos y bloqueo de
-User se implementarán en los servicios. También les corresponde conservar el
-mismo usuario y la caducidad absoluta del grupo durante las renovaciones.
+AuthService implementa login, rotación, logout y revocación del grupo por
+reutilización. Todas las modificaciones de tokens bloquean previamente User.
+Las renovaciones conservan el mismo usuario y la caducidad absoluta del grupo.
 La duración inicial de 7 días es configurable y no se fija en la entidad.
 
 ## Compilar
@@ -304,8 +305,10 @@ petición siguiente con el mismo JWT. Las compañías son inmutables en el domin
 no se incorpora una operación de traslado de usuarios.
 
 `SecurityConfiguration` activa la seguridad de métodos y una cadena sin sesión
-HTTP. Solo permite GET y PATCH `/api/v1/companies/me` al rol ADMIN; deniega
-las demás rutas y métodos. Basic, formulario, logout y caché de peticiones están
+HTTP. Permite POST `/api/v1/auth/login`, `/api/v1/auth/refresh` y
+`/api/v1/auth/logout` sin JWT; GET `/api/v1/users/me` para ADMIN y USER;
+y GET/PATCH `/api/v1/companies/me` para ADMIN. Deniega las demás rutas y
+métodos. Basic, formulario, logout de Spring y caché de peticiones están
 deshabilitados. CSRF está deshabilitado porque la autenticación de esta API
 utiliza el encabezado Bearer y no cookies. El filtro Bearer y el proveedor JWT
 son los de Spring Security y se conectan expresamente sin abrir endpoints de
@@ -329,8 +332,8 @@ y SecurityAccessDeniedHandler delegan la escritura en ApiProblemDetailWriter.
 
 `CompanyController` implementa GET y PATCH de la compañía propia y delega en
 CompanyService utilizando el principal autenticado. Las pruebas específicas
-de esta API se incorporaron en #45. Login, comprobación BCrypt,
-emisión, refresh y logout siguen pendientes de sus flujos. El formato común
+de esta API se incorporaron en #45. AuthController publica el login con BCrypt,
+la emisión y renovación de tokens y el cierre de su grupo. El formato común
 de errores MVC/Security se implementa en #46 mediante Problem Details.
 
 ### Pruebas de seguridad
@@ -878,3 +881,106 @@ En Linux y macOS se utiliza ./mvnw en lugar de .\mvnw.cmd.
 - [Organización del backend](../docs/architecture/backend-structure.md).
 - [Modelo de dominio](../docs/architecture/domain-model.md).
 - [Contratos REST](../docs/architecture/rest-api-contracts.md).
+
+## Autenticación y datos demo: bloque 1
+
+Las rutas usan el prefijo `/api/v1`:
+
+| Operación | Entrada | Resultado |
+| --- | --- | --- |
+| POST /auth/login | email y password | 200: accessToken, tokenType Bearer, expiresIn y refreshToken. |
+| POST /auth/refresh | refreshToken vigente | 200: nuevo par; el anterior queda consumido. |
+| POST /auth/logout | refreshToken conocido | 204: revoca solo su grupo. Repetirlo es válido. |
+| GET /users/me | Authorization: Bearer JWT | Perfil propio; roles ADMIN y USER. |
+
+Las contraseñas se comprueban con BCrypt coste 12. La duración máxima del JWT
+es 900 segundos por defecto. El grupo de login vence a los siete días originales,
+configurables mediante `SBP_REFRESH_TOKEN_LIFETIME_SECONDS`. Renovar no amplía
+ese plazo; el JWT también se acorta si al grupo le queda menos tiempo.
+
+Cada refresh contiene 32 bytes aleatorios de SecureRandom representados como
+Base64 URL-safe sin relleno. Solo se persiste su SHA-256 hexadecimal.
+La búsqueda inicial proyecta el ID del usuario sin cargar una entidad del token;
+después se bloquea User y se relee el estado. Login, refresh y logout usan el mismo
+bloqueo de fila NOWAIT. Una contención produce 503 y no modifica los tokens.
+
+Reutilizar un refresh consumido revoca todos los miembros de su grupo y responde
+401 `INVALID_REFRESH_TOKEN`. Esa excepción específica permite confirmar la
+revocación antes de devolver el error. Un fallo imprevisto de emisión o persistencia
+revierte la operación. Logout acepta registros conocidos usados, revocados o
+caducados; un secreto desconocido o de un usuario eliminado produce el mismo 401.
+Cerrar la renovación no invalida inmediatamente los JWT: conservan su caducidad.
+
+Login incorrecto responde 401 `INVALID_CREDENTIALS`, con el mismo detalle para
+email desconocido y contraseña incorrecta. Los errores usan Problem Details y
+no reflejan contraseñas, secretos ni hashes. Login y refresh correctos devuelven
+`Cache-Control: no-store` y `Pragma: no-cache`.
+
+### Arrancar el demo desde PowerShell
+
+Prepara primero PostgreSQL y las variables `SBP_DB_*` y `SBP_JWT_*` como se
+explica arriba. El archivo [.env.example](../.env.example) enumera las variables;
+Spring y Maven no cargan automáticamente un archivo `.env`.
+
+Introduce las dos contraseñas iniciales —mínimo 12 caracteres y máximo 72 bytes
+UTF-8— en la misma terminal donde arrancarás el backend:
+
+```powershell
+$sbpDemoAdminPassword = Read-Host 'Contraseña inicial del ADMIN demo' -AsSecureString
+$env:SBP_DEMO_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new('', $sbpDemoAdminPassword).Password
+$sbpDemoUserPassword = Read-Host 'Contraseña inicial del USER demo' -AsSecureString
+$env:SBP_DEMO_USER_PASSWORD = [System.Net.NetworkCredential]::new('', $sbpDemoUserPassword).Password
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=demo" "-Dspring-boot.run.arguments=--server.address=127.0.0.1 --server.port=8080"
+```
+
+La API estará en `http://127.0.0.1:8080/api/v1`. Sin el perfil `demo` no se crean
+datos ni se requieren contraseñas demo. El inicializador crea, en una transacción:
+
+- Company `SBP Demo`, ADMIN `admin@demo.local` y USER `user@demo.local`.
+- License con capacidad para cinco instalaciones.
+- Policy con dominio `blocked.example` y extensión `exe` en sus listas de bloqueo.
+- Device activo `b7eacb45-4aba-4a5a-8c0c-633a61294af1`, propiedad del USER,
+  asociado a esa licencia y política y a un EnrollmentToken ya consumido.
+
+El UUID fijo del dispositivo permite reconocer una fixture existente sin recrearla.
+Reiniciar conserva nombres, contraseñas, reglas y demás ediciones. Cambiar las
+variables de contraseña no restablece usuarios ya creados. Si hay cuentas demo
+sin el dispositivo que identifica una fixture completa, el arranque falla sin
+sobrescribirlas ni crear una segunda fixture.
+
+### Comprobación con Postman
+
+Importa [auth-demo.postman_collection.json](../docs/postman/auth-demo.postman_collection.json).
+Define `demoAdminPassword` y `demoUserPassword` en un entorno local de Postman
+con las contraseñas iniciales que hayas elegido. `baseUrl` vale por defecto
+`http://127.0.0.1:8080/api/v1`.
+
+Ejecuta la colección en orden: login ADMIN, perfil ADMIN, login USER, perfil USER,
+renovaciones, logout y rechazo del refresh revocado. Los scripts conservan los
+tokens de ADMIN y USER en variables distintas. El archivo del repositorio no
+incluye contraseñas ni tokens reales.
+
+Esta colección cubre autenticación. Se ampliará con Policy, Device y SecurityEvent
+cuando estén cerrados sus bloques; el recorrido completo y Docker Compose
+corresponden a la entrega reproducible del bloque 5.
+
+### Alcance pendiente del MVP
+
+El bloque 1 no implementa el CRUD administrativo de User ni el cambio de contraseña
+por HTTP. Las tarjetas #59–#64 siguen pendientes y se replanifican fuera del backend
+mínimo; la consulta propia de perfil es solo la parte necesaria para autenticación.
+
+Quedan los bloques 2 (Policy), 3 (Device), 4 (SecurityEvent) y 5 (entrega reproducible).
+Cada bloque conserva una única PR y exige pruebas, `mvn verify` y CI en verde antes
+del siguiente. Al cerrarlos se congela el backend MVP y se pasa a C++/CEF.
+
+### Pruebas del bloque
+
+`AuthServicePersistenceTest` comprueba creación, rotación, caducidad absoluta,
+reutilización con revocación confirmada, aislamiento entre grupos, logout,
+rollback y bloqueo compartido con cambios de contraseña.
+`AuthApiPersistenceTest` recorre HTTP real mediante MockMvc, los filtros Bearer,
+validación estricta, respuestas de tokens y el perfil actual de ambos roles.
+`DemoDataPersistenceTest` comprueba la fixture y la conservación de ediciones
+al repetir el arranque; `DemoPropertiesTest` valida las contraseñas iniciales y
+que el demo está desactivado sin su perfil.

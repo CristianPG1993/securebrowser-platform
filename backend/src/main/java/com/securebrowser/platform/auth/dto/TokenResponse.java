@@ -11,6 +11,11 @@ public record TokenResponse(
         long expiresIn,
         String refreshToken) {
 
+    @Override
+    public String toString() {
+        return "TokenResponse[tokens=redacted]";
+    }
+
     /** Construye la respuesta usando la duración efectiva del JWT emitido por el backend. */
     public static TokenResponse from(Jwt accessToken, String refreshToken) {
         // Respeta también los JWT acortados por la caducidad del grupo de sesión.

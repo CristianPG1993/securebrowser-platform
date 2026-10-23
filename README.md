@@ -30,7 +30,10 @@ de la compañía propia con rol ADMIN.
 
 La seguridad valida JWT Bearer y obtiene la identidad, la compañía y el rol
 actuales desde PostgreSQL. El tratamiento común de errores utiliza Problem
-Details. Los flujos de login, emisión y renovación de tokens siguen pendientes.
+Details. La autenticación incluye login BCrypt, emisión JWT, rotación de refresh
+tokens, revocación del grupo por reutilización y logout. GET `/api/v1/users/me`
+devuelve el perfil propio. El perfil `demo` prepara datos reproducibles para
+ADMIN y USER sin restablecer sus modificaciones al reiniciar.
 
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).

@@ -84,6 +84,8 @@ class AuthServicePersistenceTest {
     private AccessTokenService accessTokenService;
     @MockitoSpyBean
     private AuthProperties authProperties;
+    @MockitoSpyBean(name = "authServiceTestClock")
+    private Clock clock;
 
     // Limita la limpieza a los datos creados por esta prueba.
     private Long companyId;
@@ -288,6 +290,189 @@ class AuthServicePersistenceTest {
         // Solo se confirma la sesión creada con las credenciales nuevas.
         assertThat(refreshTokenRepository.findByUser_IdAndRevokedAtIsNullOrderByIdAsc(user.getId()))
                 .hasSize(1);
+    }
+
+    @Test
+    void refreshRotatesSecretAndPreservesAbsoluteFamilyExpiry() {
+        User user = persistUser(UserRole.USER);
+        TokenResponse login = authService.login(new LoginRequest(user.getEmail(), PASSWORD));
+        RefreshToken first = storedToken(user, login.refreshToken());
+        doReturn(NOW.plusSeconds(86400)).when(clock).instant();
+
+        TokenResponse renewed = authService.refresh(login.refreshToken());
+        RefreshToken previous = storedToken(user, login.refreshToken());
+        RefreshToken next = storedToken(user, renewed.refreshToken());
+
+        // La rotación sustituye el secreto original.
+        assertThat(renewed.refreshToken()).isNotEqualTo(login.refreshToken());
+        // El consumo queda confirmado antes de devolver el nuevo par.
+        assertThat(previous.getUsedAt()).isEqualTo(NOW.plusSeconds(86400));
+        // La rotación pertenece al mismo grupo de login.
+        assertThat(next.getFamilyId()).isEqualTo(first.getFamilyId());
+        // Renovar un día después no añade otro día a la caducidad original.
+        assertThat(next.getExpiresAt()).isEqualTo(first.getExpiresAt());
+        // El JWT nuevo es verificable y corresponde al usuario original.
+        assertThat(jwtDecoder.decode(renewed.accessToken()).getSubject()).isEqualTo(user.getId().toString());
+    }
+
+    @Test
+    void reuseCommitsFamilyRevocationBeforeThrowingAndPreservesOtherFamilies() {
+        User user = persistUser(UserRole.USER);
+        LoginRequest credentials = new LoginRequest(user.getEmail(), PASSWORD);
+        TokenResponse first = authService.login(credentials);
+        TokenResponse otherFamily = authService.login(credentials);
+        TokenResponse latest = authService.refresh(first.refreshToken());
+
+        // El refresh consumido activa el rechazo específico de reutilización.
+        assertThatThrownBy(() -> authService.refresh(first.refreshToken()))
+                .isInstanceOf(InvalidRefreshTokenException.class);
+        // Esta lectura posterior al error demuestra que la revocación no sufrió rollback.
+        assertThat(storedToken(user, first.refreshToken()).getRevokedAt()).isEqualTo(NOW);
+        // También se revoca el descendiente más reciente del grupo comprometido.
+        assertThat(storedToken(user, latest.refreshToken()).getRevokedAt()).isEqualTo(NOW);
+        // Otro grupo del mismo usuario conserva su vigencia.
+        assertThat(storedToken(user, otherFamily.refreshToken()).isUsableAt(NOW)).isTrue();
+        // El descendiente revocado ya no permite renovar.
+        assertThatThrownBy(() -> authService.refresh(latest.refreshToken()))
+                .isInstanceOf(InvalidRefreshTokenException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "expired", "revoked", "unknown", "deleted" })
+    void refreshRejectsUnavailableTokenWithoutCreatingRows(String state) {
+        User user = persistUser(UserRole.USER);
+        TokenResponse login = authService.login(new LoginRequest(user.getEmail(), PASSWORD));
+        String secret = login.refreshToken();
+        if (state.equals("expired")) {
+            doReturn(NOW.plusSeconds(604800)).when(clock).instant();
+        } else if (state.equals("revoked")) {
+            authService.logout(secret);
+        } else if (state.equals("unknown")) {
+            secret = "unknown-secret";
+        } else {
+            userRepository.deleteById(user.getId());
+        }
+        Long before = jdbc.queryForObject("select count(*) from refresh_tokens where user_id = ?",
+                Long.class, user.getId());
+        String presentedSecret = secret;
+        // Todos los estados reciben el mismo error genérico de renovación.
+        assertThatThrownBy(() -> authService.refresh(presentedSecret))
+                .isInstanceOf(InvalidRefreshTokenException.class).hasMessage("Invalid refresh token");
+        // Un rechazo no crea registros adicionales.
+        assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id = ?",
+                Long.class, user.getId())).isEqualTo(before);
+    }
+
+    @Test
+    void refreshRejectsSubsecondRemainderWithoutConsumingToken() {
+        User user = persistUser(UserRole.USER);
+        doReturn(1L).when(authProperties).refreshTokenLifetimeSeconds();
+        doReturn(NOW.plusMillis(250)).when(clock).instant();
+        TokenResponse login = authService.login(new LoginRequest(user.getEmail(), PASSWORD));
+        doReturn(NOW.plusMillis(1050)).when(clock).instant();
+
+        // La sesión vence a 01.250 pero ya no cabe un exp entero posterior al iat de 01.000.
+        assertThatThrownBy(() -> authService.refresh(login.refreshToken()))
+                .isInstanceOf(InvalidRefreshTokenException.class);
+        // El rechazo temporal no consume el secreto ni se traduce en un error interno.
+        assertThat(storedToken(user, login.refreshToken()).getUsedAt()).isNull();
+    }
+
+    @Test
+    void failedRefreshIssuanceRollsBackAndOriginalSecretCanBeRetried() {
+        User user = persistUser(UserRole.USER);
+        TokenResponse login = authService.login(new LoginRequest(user.getEmail(), PASSWORD));
+        IllegalStateException failure = new IllegalStateException("Simulated refresh issuance failure");
+        doThrow(failure).doCallRealMethod().when(accessTokenService).issue(eq(user.getId()), any(Instant.class));
+
+        // Un fallo imprevisto mantiene la semántica de rollback normal.
+        assertThatThrownBy(() -> authService.refresh(login.refreshToken())).isSameAs(failure);
+        // El secreto anterior sigue sin consumir y no se ha revocado.
+        assertThat(storedToken(user, login.refreshToken()).isUsableAt(NOW)).isTrue();
+        TokenResponse retry = authService.refresh(login.refreshToken());
+        // El reintento emite un nuevo JWT real y un nuevo secreto.
+        assertThat(jwtDecoder.decode(retry.accessToken()).getSubject()).isEqualTo(user.getId().toString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "active", "used", "expired", "revoked" })
+    void logoutKnownTokenIsIdempotentAndOnlyRevokesItsFamily(String state) {
+        User user = persistUser(UserRole.USER);
+        LoginRequest request = new LoginRequest(user.getEmail(), PASSWORD);
+        TokenResponse login = authService.login(request);
+        TokenResponse other = authService.login(request);
+        if (state.equals("used")) {
+            authService.refresh(login.refreshToken());
+        } else if (state.equals("expired")) {
+            doReturn(NOW.plusSeconds(604800)).when(clock).instant();
+        } else if (state.equals("revoked")) {
+            authService.logout(login.refreshToken());
+        }
+        authService.logout(login.refreshToken());
+        Instant originalRevocation = storedToken(user, login.refreshToken()).getRevokedAt();
+        authService.logout(login.refreshToken());
+
+        // Repetir el cierre conserva la primera revocación.
+        assertThat(storedToken(user, login.refreshToken()).getRevokedAt()).isEqualTo(originalRevocation).isNotNull();
+        // Otro grupo no se revoca, aunque ambos puedan haber caducado por el reloj de esta prueba.
+        assertThat(storedToken(user, other.refreshToken()).getRevokedAt()).isNull();
+    }
+
+    @Test
+    void secretsAreNotNormalizedAndUnknownLogoutIsRejected() {
+        User user = persistUser(UserRole.USER);
+        TokenResponse login = authService.login(new LoginRequest(user.getEmail(), PASSWORD));
+        // Un espacio añadido convierte el texto en otro secreto.
+        assertThatThrownBy(() -> authService.refresh(" " + login.refreshToken()))
+                .isInstanceOf(InvalidRefreshTokenException.class);
+        // Logout tampoco recorta el secreto ni acepta uno desconocido.
+        assertThatThrownBy(() -> authService.logout(login.refreshToken() + " "))
+                .isInstanceOf(InvalidRefreshTokenException.class);
+        // El secreto original sigue vigente después de ambos rechazos.
+        assertThat(storedToken(user, login.refreshToken()).isUsableAt(NOW)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "refresh", "logout" })
+    void refreshAndLogoutRespectTheSharedUserLock(String operation) throws Exception {
+        User user = persistUser(UserRole.USER);
+        TokenResponse login = authService.login(new LoginRequest(user.getEmail(), PASSWORD));
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setTimeout(10);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var owner = executor.submit(() -> transaction.executeWithoutResult(status -> {
+                userRepository.findByIdAndCompanyIdForUpdate(user.getId(), companyId).orElseThrow();
+                locked.countDown();
+                awaitRelease(release);
+            }));
+            try {
+                // La operación competidora empieza solo cuando User ya está bloqueado.
+                assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+                // Las operaciones de renovación y cierre comparten el mismo bloqueo NOWAIT.
+                assertThatThrownBy(() -> {
+                    if (operation.equals("refresh")) {
+                        authService.refresh(login.refreshToken());
+                    } else {
+                        authService.logout(login.refreshToken());
+                    }
+                }).isInstanceOf(PessimisticLockingFailureException.class);
+                // El intento rechazado no consume ni revoca el secreto.
+                assertThat(storedToken(user, login.refreshToken()).isUsableAt(NOW)).isTrue();
+            } finally {
+                release.countDown();
+                owner.get(10, TimeUnit.SECONDS);
+            }
+        }
+        TokenResponse renewed = authService.refresh(login.refreshToken());
+        // Después de liberar el bloqueo el mismo secreto permite una renovación normal.
+        assertThat(jwtDecoder.decode(renewed.accessToken()).getSubject()).isEqualTo(user.getId().toString());
+    }
+
+    private RefreshToken storedToken(User user, String secret) {
+        return refreshTokenRepository.findByTokenHashAndUser_Id(refreshTokenHasher.hash(secret), user.getId())
+                .orElseThrow();
     }
 
     /** Prepara una identidad confirmada y una empresa exclusiva de la prueba. */

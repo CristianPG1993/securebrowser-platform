@@ -30,4 +30,9 @@ public record LoginRequest(
             email = email.strip().toLowerCase(Locale.ROOT);
         }
     }
+
+    @Override
+    public String toString() {
+        return "LoginRequest[credentials=redacted]";
+    }
 }

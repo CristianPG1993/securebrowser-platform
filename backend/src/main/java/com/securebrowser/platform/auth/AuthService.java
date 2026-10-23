@@ -73,4 +73,65 @@ public class AuthService {
         // Spring confirma la transacción antes de entregar el resultado al llamador del servicio.
         return TokenResponse.from(accessToken, refreshSecret);
     }
+
+    /** Rota un secreto vigente; la detección de reutilización confirma la revocación antes del error. */
+    @Transactional(noRollbackFor = InvalidRefreshTokenException.class)
+    public TokenResponse refresh(String rawToken) {
+        RefreshToken previous = lockRefreshToken(rawToken);
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+
+        if (previous.getUsedAt() != null) {
+            revokeFamily(previous, now);
+            throw new InvalidRefreshTokenException();
+        }
+        if (!previous.isUsableAt(now)
+                || !previous.getExpiresAt().truncatedTo(ChronoUnit.SECONDS)
+                        .isAfter(now.truncatedTo(ChronoUnit.SECONDS))) {
+            throw new InvalidRefreshTokenException();
+        }
+
+        // Firma antes de consumir el secreto; cualquier fallo imprevisto revierte toda la operación.
+        Jwt accessToken;
+        try {
+            accessToken = accessTokenService.issue(previous.getUser().getId(), previous.getExpiresAt());
+        } catch (IllegalArgumentException exception) {
+            // El límite puede alcanzarse entre la comprobación anterior y la emisión.
+            if (!previous.getExpiresAt().truncatedTo(ChronoUnit.SECONDS)
+                    .isAfter(clock.instant().truncatedTo(ChronoUnit.SECONDS))) {
+                throw new InvalidRefreshTokenException();
+            }
+            throw exception;
+        }
+        String nextSecret = refreshTokenGenerator.generate();
+        previous.markUsed(now);
+        refreshTokenRepository.save(new RefreshToken(previous.getUser(), refreshTokenHasher.hash(nextSecret),
+                previous.getFamilyId(), now, previous.getExpiresAt()));
+        return TokenResponse.from(accessToken, nextSecret);
+    }
+
+    /** Un secreto conocido cierra solo su grupo, incluso si ya fue consumido, revocado o caducó. */
+    @Transactional
+    public void logout(String rawToken) {
+        RefreshToken token = lockRefreshToken(rawToken);
+        revokeFamily(token, clock.instant().truncatedTo(ChronoUnit.MICROS));
+    }
+
+    /** Evita leer una entidad RefreshToken potencialmente obsoleta antes de obtener el bloqueo. */
+    private RefreshToken lockRefreshToken(String rawToken) {
+        if (rawToken == null || rawToken.isEmpty()) {
+            throw new InvalidRefreshTokenException();
+        }
+        String hash = refreshTokenHasher.hash(rawToken);
+        Long userId = refreshTokenRepository.findUserIdByTokenHash(hash)
+                .orElseThrow(InvalidRefreshTokenException::new);
+        User user = userRepository.findByIdForUpdate(userId)
+                .orElseThrow(InvalidRefreshTokenException::new);
+        return refreshTokenRepository.findByTokenHashAndUser_Id(hash, user.getId())
+                .orElseThrow(InvalidRefreshTokenException::new);
+    }
+
+    private void revokeFamily(RefreshToken token, Instant now) {
+        refreshTokenRepository.findByUser_IdAndFamilyIdAndRevokedAtIsNullOrderByIdAsc(
+                token.getUser().getId(), token.getFamilyId()).forEach(member -> member.revoke(now));
+    }
 }

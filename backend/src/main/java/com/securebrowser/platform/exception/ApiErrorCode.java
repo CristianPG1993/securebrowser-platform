@@ -7,6 +7,8 @@ public enum ApiErrorCode {
 
     VALIDATION_ERROR(HttpStatus.BAD_REQUEST, "La petición contiene datos no válidos."),
     AUTHENTICATION_REQUIRED(HttpStatus.UNAUTHORIZED, "Se requiere una autenticación válida."),
+    INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "Las credenciales no son válidas."),
+    INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "El token de renovación no es válido."),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "No tienes permiso para realizar esta operación."),
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "No se ha encontrado el recurso solicitado."),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "El método HTTP no está permitido para esta ruta."),

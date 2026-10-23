@@ -3,6 +3,8 @@ package com.securebrowser.platform.exception;
 import java.util.List;
 
 import com.securebrowser.platform.company.CompanyNotFoundException;
+import com.securebrowser.platform.auth.InvalidCredentialsException;
+import com.securebrowser.platform.auth.InvalidRefreshTokenException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -172,6 +174,16 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return publicProblem(ApiErrorCode.ACCESS_DENIED, request);
     }
 
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidCredentials(HttpServletRequest request) {
+        return publicProblem(ApiErrorCode.INVALID_CREDENTIALS, request);
+    }
+
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidRefreshToken(HttpServletRequest request) {
+        return publicProblem(ApiErrorCode.INVALID_REFRESH_TOKEN, request);
+    }
+
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ProblemDetail> handleAuthentication(HttpServletRequest request) {
         return publicProblem(ApiErrorCode.AUTHENTICATION_REQUIRED, request);
@@ -204,8 +216,12 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private ResponseEntity<ProblemDetail> publicProblem(ApiErrorCode code, HttpServletRequest request) {
         HttpHeaders headers = new HttpHeaders();
-        if (code == ApiErrorCode.AUTHENTICATION_REQUIRED) {
+        if (code.getStatus().value() == 401) {
             headers.set(HttpHeaders.WWW_AUTHENTICATE, "Bearer realm=\"sbp\"");
+        }
+        if (request.getRequestURI().startsWith("/api/v1/auth/")) {
+            headers.set(HttpHeaders.CACHE_CONTROL, "no-store");
+            headers.set(HttpHeaders.PRAGMA, "no-cache");
         }
         return ResponseEntity.status(code.getStatus()).headers(headers)
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problemFactory.create(code, request));

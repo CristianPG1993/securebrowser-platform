@@ -54,6 +54,9 @@ public class SecurityConfiguration {
                 .authorizeHttpRequests(authorize -> authorize
                         // Permite presentar errores internos conservando su estado HTTP original.
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/refresh",
+                                "/api/v1/auth/logout").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/users/me").hasAnyRole("ADMIN", "USER")
                         .requestMatchers(HttpMethod.GET, "/api/v1/companies/me").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/companies/me").hasRole("ADMIN")
                         .anyRequest().denyAll())
