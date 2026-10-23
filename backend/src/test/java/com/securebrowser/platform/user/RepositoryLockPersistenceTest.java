@@ -87,6 +87,14 @@ class RepositoryLockPersistenceTest {
                 user.getId(), user.getCompany().getId()).orElseThrow(), rollback);
     }
 
+    /** La búsqueda de login por email bloquea la fila y la libera al finalizar la transacción. */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void loginUserLockIsExclusiveAndReleasedAtTransactionEnd(boolean rollback) throws Exception {
+        User user = persistFixture();
+        verifyExclusiveLock(() -> userRepository.findByEmailForUpdate(user.getEmail()).orElseThrow(), rollback);
+    }
+
     /** Una compañía inexistente no puede bloquearse como si existiera. */
     @Test
     void missingCompanyReturnsEmpty() {

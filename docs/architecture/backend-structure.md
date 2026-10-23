@@ -60,7 +60,8 @@ su primera clase. La clase de arranque estará en el paquete base.
 | `device` | Device, política asignada, actividad y datos de la instalación. |
 | `policy` | Policy, FilterMode, UrlRule y DownloadRule, con sus reglas de configuración y normalización. |
 | `securityevent` | SecurityEvent, SecurityEventType, consulta, recepción y deduplicación de eventos. |
-| `auth` | Entrada y coordinación de login, renovación y logout, con controller, servicio y DTOs, además de RefreshToken y su repositorio cuando se implementen. |
+| `auth` | Login, renovación y logout implementados con controller, servicio, DTOs, generación de secretos, RefreshToken y repositorio. |
+| `demo` | Inicializador transaccional habilitado únicamente con el perfil demo; conserva datos y ediciones entre reinicios. |
 | `security` | Integración con Spring Security, validación del JWT y representación del usuario autenticado. |
 | `config` | Configuración técnica compartida que no corresponde a una funcionalidad concreta. La configuración de Spring Security se mantiene en `security`. |
 | `exception` | Traducción centralizada de excepciones a respuestas HTTP y excepciones compartidas por varias funcionalidades. |

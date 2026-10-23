@@ -259,6 +259,34 @@ class UserRepositoryPersistenceTest {
                 .isPresent();
     }
 
+    /** Busca la identidad por email sin solicitar una compañía durante el login. */
+    @Test
+    void findsLoginUsersByEmailAcrossCompanies() {
+        User userA = persistAdmin(persistCompany("Empresa A"));
+        User userB = persistAdmin(persistCompany("Empresa B"));
+        entityManager.flush();
+        entityManager.clear();
+
+        Optional<User> resultA = userRepository.findByEmail(userA.getEmail());
+        Optional<User> resultB = userRepository.findByEmail(userB.getEmail());
+
+        // El email del usuario A permite encontrar su identidad.
+        assertThat(resultA).isPresent();
+
+        // La identidad encontrada corresponde exactamente al usuario A.
+        assertThat(resultA.orElseThrow().getId()).isEqualTo(userA.getId());
+
+        // También encontramos al usuario B, aunque pertenece a otra compañía.
+        assertThat(resultB).isPresent();
+
+        // El email de B devuelve su usuario, sin confundirlo con A.
+        assertThat(resultB.orElseThrow().getId()).isEqualTo(userB.getId());
+
+        // Un email que no pertenece a ningún usuario devuelve Optional vacío.
+        assertThat(userRepository.findByEmail(UUID.randomUUID() + "@example.com"))
+                .isEmpty();
+    }
+
     /** Mantiene un ADMIN en cada compañía y evita colisiones de email entre pruebas. */
     private User persistAdmin(Company company) {
         return persistUser(company, UserRole.ADMIN);
