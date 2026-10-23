@@ -59,6 +59,8 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/users/me").hasAnyRole("ADMIN", "USER")
                         .requestMatchers(HttpMethod.GET, "/api/v1/companies/me").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/companies/me").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/policies", "/api/v1/policies/{id}").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/policies/{id}").hasRole("ADMIN")
                         .anyRequest().denyAll())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(entryPoint)

@@ -35,6 +35,10 @@ tokens, revocación del grupo por reutilización y logout. GET `/api/v1/users/me
 devuelve el perfil propio. El perfil `demo` prepara datos reproducibles para
 ADMIN y USER sin restablecer sus modificaciones al reiniciar.
 
+El ADMIN puede listar, consultar y actualizar las políticas de su compañía.
+El PATCH de Policy conserva los campos omitidos, reemplaza listas de reglas
+y confirma configuración y auditoría de forma atómica.
+
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).
 

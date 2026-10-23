@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "SBP — Autenticación y datos demo (bloque 1)",
-    "description": "Ejecuta en orden contra el perfil demo. Define demoAdminPassword y demoUserPassword en un entorno local, sin exportar secretos. La colección guarda por separado los tokens ADMIN y USER. Login crea una familia; refresh la rota sin ampliar su vencimiento; logout revoca la familia. Policy, Device y SecurityEvent se incorporarán en sus bloques posteriores.",
+    "name": "SBP — Autenticación y Policy (bloques 1 y 2)",
+    "description": "Ejecuta en orden contra el perfil demo. Define baseUrl y las dos contraseñas demo en un entorno local. Comprueba autenticación ADMIN/USER, consulta y PATCH de Policy, rechazo de un PATCH inválido sin cambios y acceso administrativo denegado a USER. Mantiene tokens separados y no exporta secretos. Device y SecurityEvent se incorporarán en sus bloques posteriores.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -36,6 +36,11 @@
     },
     {
       "key": "userRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminPolicyId",
       "value": "",
       "type": "string"
     }
@@ -142,6 +147,240 @@
       }
     },
     {
+      "name": "Listar Policy ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Lista políticas propias y selecciona la política demo', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['items', 'page', 'size', 'totalElements', 'totalPages'].sort());",
+              "    pm.expect(body.items).to.be.an('array').and.not.empty;",
+              "    pm.expect(body.page).to.eql(0);",
+              "    pm.expect(body.size).to.eql(100);",
+              "    pm.collectionVariables.set('adminPolicyId', body.items[0].id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/policies?size=100"
+      }
+    },
+    {
+      "name": "Consultar Policy ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Devuelve únicamente los campos públicos de la política', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['id', 'companyId', 'name', 'urlFilteringEnabled', 'urlFilteringMode', 'urlRules', 'downloadControlEnabled', 'downloadControlMode', 'downloadRules', 'createdAt', 'updatedAt'].sort());",
+              "    pm.expect(body.id).to.eql(Number(pm.collectionVariables.get('adminPolicyId')));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/policies/{{adminPolicyId}}"
+      }
+    },
+    {
+      "name": "Modificar Policy ADMIN",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('La política confirma los cambios y conserva el contrato', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.id).to.eql(Number(pm.collectionVariables.get('adminPolicyId')));",
+              "    pm.expect(body.name).to.eql('Política demo verificada');",
+              "    pm.expect(body.urlFilteringEnabled).to.eql(true);",
+              "    pm.expect(body.urlFilteringMode).to.eql('DENYLIST');",
+              "    pm.expect(body.urlRules).to.eql(['blocked.example', 'phishing.example']);",
+              "    pm.expect(body.downloadControlEnabled).to.eql(true);",
+              "    pm.expect(body.downloadControlMode).to.eql('DENYLIST');",
+              "    pm.expect(body.downloadRules).to.eql(['bat', 'exe']);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Política demo verificada\",\n  \"urlFilteringEnabled\": true,\n  \"urlFilteringMode\": \"DENYLIST\",\n  \"urlRules\": [\n    \"BLOCKED.EXAMPLE.\",\n    \"phishing.example\"\n  ],\n  \"downloadControlEnabled\": true,\n  \"downloadControlMode\": \"DENYLIST\",\n  \"downloadRules\": [\n    \".EXE\",\n    \"bat\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/policies/{{adminPolicyId}}"
+      }
+    },
+    {
+      "name": "Rechazar PATCH Policy inválido",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Rechaza reglas duplicadas tras normalizar', function () {",
+              "    pm.response.to.have.status(400);",
+              "    pm.expect(pm.response.json().code).to.eql('VALIDATION_ERROR');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"No debe guardarse\",\n  \"downloadRules\": [\n    \".EXE\",\n    \"exe\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/policies/{{adminPolicyId}}"
+      }
+    },
+    {
+      "name": "Verificar Policy confirmada y rechazo sin cambios",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('La política confirma los cambios y conserva el contrato', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.id).to.eql(Number(pm.collectionVariables.get('adminPolicyId')));",
+              "    pm.expect(body.name).to.eql('Política demo verificada');",
+              "    pm.expect(body.urlFilteringEnabled).to.eql(true);",
+              "    pm.expect(body.urlFilteringMode).to.eql('DENYLIST');",
+              "    pm.expect(body.urlRules).to.eql(['blocked.example', 'phishing.example']);",
+              "    pm.expect(body.downloadControlEnabled).to.eql(true);",
+              "    pm.expect(body.downloadControlMode).to.eql('DENYLIST');",
+              "    pm.expect(body.downloadRules).to.eql(['bat', 'exe']);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/policies/{{adminPolicyId}}"
+      }
+    },
+    {
       "name": "Login USER",
       "event": [
         {
@@ -239,6 +478,43 @@
           }
         ],
         "url": "{{baseUrl}}/users/me"
+      }
+    },
+    {
+      "name": "USER no accede al catálogo Policy",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('El catálogo administrativo requiere ADMIN', function () {",
+              "    pm.response.to.have.status(403);",
+              "    pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/policies"
       }
     },
     {

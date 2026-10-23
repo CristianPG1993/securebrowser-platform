@@ -5,6 +5,8 @@ import java.util.List;
 import com.securebrowser.platform.company.CompanyNotFoundException;
 import com.securebrowser.platform.auth.InvalidCredentialsException;
 import com.securebrowser.platform.auth.InvalidRefreshTokenException;
+import com.securebrowser.platform.policy.PolicyNotFoundException;
+import com.securebrowser.platform.policy.InvalidPolicyRequestException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -57,6 +59,18 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(problem.getStatus())
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(problem);
+    }
+
+    @ExceptionHandler(PolicyNotFoundException.class)
+    public ResponseEntity<ProblemDetail> handlePolicyNotFound(HttpServletRequest request) {
+        return publicProblem(ApiErrorCode.RESOURCE_NOT_FOUND, request);
+    }
+
+    @ExceptionHandler(InvalidPolicyRequestException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidPolicyRequest(HttpServletRequest request) {
+        ProblemDetail problem = problemFactory.create(ApiErrorCode.VALIDATION_ERROR, request);
+        problem.setProperty("errors", List.of(new ApiFieldError("request", "Los datos de la política no son válidos.")));
+        return ResponseEntity.status(problem.getStatus()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
     }
 
     /** Añade los campos inválidos al error 400 generado por la validación del DTO. */
