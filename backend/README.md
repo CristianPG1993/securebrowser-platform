@@ -1,7 +1,7 @@
 # Backend de SecureBrowser Platform
 
 Backend en Java y Spring Boot con dominio JPA, migraciones Flyway V1–V10,
-API de Company, autenticación con rotación de tokens, perfil propio,
+API de Company y Policy, autenticación con rotación de tokens, perfil propio,
 datos demo y tratamiento común de errores.
 
 ## Guía rápida de pruebas
@@ -38,8 +38,9 @@ hayas definido las variables de entorno. Maven no carga `.env` automáticamente.
    | demoUserPassword | Contraseña del USER demo. |
 
    Usa las contraseñas con las que se crearon las cuentas; reiniciar no las cambia.
-   Pulsa `Run`, conserva las diez peticiones en orden y una iteración, e inicia
-   la ejecución. Deben pasar las diez comprobaciones, sin fallos ni errores.
+   Pulsa `Run`, conserva las dieciséis peticiones en orden y una iteración, e inicia
+   la ejecución. Deben pasar las dieciséis comprobaciones, sin fallos ni errores:
+   diez de autenticación y seis de Policy.
    El 401 de «Rechazar refresh USER después del logout» es el resultado esperado.
 
 ## Requisitos
@@ -345,7 +346,8 @@ no se incorpora una operación de traslado de usuarios.
 `SecurityConfiguration` activa la seguridad de métodos y una cadena sin sesión
 HTTP. Permite POST `/api/v1/auth/login`, `/api/v1/auth/refresh` y
 `/api/v1/auth/logout` sin JWT; GET `/api/v1/users/me` para ADMIN y USER;
-y GET/PATCH `/api/v1/companies/me` para ADMIN. Deniega las demás rutas y
+y GET/PATCH `/api/v1/companies/me`, GET `/api/v1/policies` y
+GET/PATCH `/api/v1/policies/{id}` para ADMIN. Deniega las demás rutas y
 métodos. Basic, formulario, logout de Spring y caché de peticiones están
 deshabilitados. CSRF está deshabilitado porque la autenticación de esta API
 utiliza el encabezado Bearer y no cookies. El filtro Bearer y el proveedor JWT
@@ -993,12 +995,13 @@ Define `demoAdminPassword` y `demoUserPassword` en un entorno local de Postman
 con las contraseñas iniciales que hayas elegido. `baseUrl` vale por defecto
 `http://127.0.0.1:8080/api/v1`.
 
-Ejecuta la colección en orden: login ADMIN, perfil ADMIN, login USER, perfil USER,
+Ejecuta la colección en orden: login y perfil ADMIN, consultas y PATCH de Policy,
+login y perfil USER, rechazo de su acceso al catálogo administrativo,
 renovaciones, logout y rechazo del refresh revocado. Los scripts conservan los
 tokens de ADMIN y USER en variables distintas. El archivo del repositorio no
 incluye contraseñas ni tokens reales.
 
-Esta colección cubre autenticación. Se ampliará con Policy, Device y SecurityEvent
+Esta colección cubre autenticación y Policy. Se ampliará con Device y SecurityEvent
 cuando estén cerrados sus bloques; el recorrido completo y Docker Compose
 corresponden a la entrega reproducible del bloque 5.
 
@@ -1008,7 +1011,8 @@ El bloque 1 no implementa el CRUD administrativo de User ni el cambio de contras
 por HTTP. Las tarjetas #59–#64 siguen pendientes y se replanifican fuera del backend
 mínimo; la consulta propia de perfil es solo la parte necesaria para autenticación.
 
-Quedan los bloques 2 (Policy), 3 (Device), 4 (SecurityEvent) y 5 (entrega reproducible).
+El bloque 2 implementa las consultas y la edición de Policy descritas abajo.
+Quedan los bloques 3 (Device), 4 (SecurityEvent) y 5 (entrega reproducible).
 Cada bloque conserva una única PR y exige pruebas, `mvn verify` y CI en verde antes
 del siguiente. Al cerrarlos se congela el backend MVP y se pasa a C++/CEF.
 
@@ -1022,3 +1026,55 @@ validación estricta, respuestas de tokens y el perfil actual de ambos roles.
 `DemoDataPersistenceTest` comprueba la fixture y la conservación de ediciones
 al repetir el arranque; `DemoPropertiesTest` valida las contraseñas iniciales y
 que el demo está desactivado sin su perfil.
+
+## API de Policy: bloque 2
+
+Las tres operaciones requieren JWT y rol ADMIN; el ámbito procede del usuario
+actual de PostgreSQL, sin recibir una Company elegida por el cliente.
+
+| Ruta | Resultado |
+| --- | --- |
+| GET /api/v1/policies?page=0&size=20 | PageResponse<PolicyResponse>, solo de su Company, orden id ascendente. |
+| GET /api/v1/policies/{id} | PolicyResponse con configuración, reglas normalizadas y fechas. |
+| PATCH /api/v1/policies/{id} | PolicyResponse después de confirmar la actualización. |
+
+page debe ser no negativo y size entre 1 y 100. Se rechazan parámetros
+desconocidos, repetidos y sort libre. Un USER recibe 403; para ADMIN,
+una política inexistente y una de otra Company producen el mismo 404.
+JSON, IDs y datos inválidos producen 400 VALIDATION_ERROR; una contención
+del bloqueo produce 503 SERVICE_UNAVAILABLE.
+
+PATCH admite los siete campos de PolicyUpdateRequest del
+[contrato REST](../docs/architecture/rest-api-contracts.md#endpoints-de-políticas).
+Un campo omitido conserva su valor; null y el objeto vacío se rechazan.
+Cada lista presente sustituye la anterior y [] la vacía. Se rechazan tipos
+incorrectos y duplicados tras normalizar. Por ejemplo:
+
+```json
+{
+  "name": "Política revisada",
+  "urlRules": ["blocked.example", "phishing.example"],
+  "downloadRules": [".EXE", "bat"]
+}
+```
+
+PolicyService comprueba rol y pertenencia también en invocaciones directas.
+Las consultas construyen el DTO dentro de una transacción REPEATABLE_READ
+para leer configuración, reglas y fechas del mismo snapshot. El PATCH usa
+el bloqueo de escritura NOWAIT de Policy, valida todos los valores y confirma
+configuración, reglas y auditoría juntos. Las reglas comunes se conservan para
+evitar conflictos de unicidad al reemplazar listas parcialmente coincidentes.
+Un error imprevisto revierte la operación completa.
+
+La colección Postman selecciona una política del listado propio, la consulta,
+modifica su nombre y reglas, rechaza un PATCH con extensiones duplicadas y
+comprueba que el estado confirmado permanece intacto. También verifica el
+403 del USER al catálogo administrativo. Esta prueba modifica la política demo
+y puede repetirse. El usuario consultará la política de su Device en el bloque 3.
+
+PolicyUpdateRequestTest y PolicyServiceTest verifican lectura estricta y
+permisos directos. PolicyRepositoryPersistenceTest y PolicyApiPersistenceTest
+comprueban PostgreSQL real, paginación, aislamiento, confirmación, rollback
+después de flush, bloqueo y lecturas coherentes mientras otra transacción edita.
+POST, DELETE, asignaciones de Device y endpoints independientes de reglas
+quedan fuera de este bloque.
