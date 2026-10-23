@@ -4,6 +4,44 @@ Backend en Java y Spring Boot con dominio JPA, migraciones Flyway V1–V10,
 API de Company, autenticación con rotación de tokens, perfil propio,
 datos demo y tratamiento común de errores.
 
+## Guía rápida de pruebas
+
+Ejecuta los comandos desde la carpeta `backend`, en la misma terminal donde
+hayas definido las variables de entorno. Maven no carga `.env` automáticamente.
+
+1. **Pruebas automáticas del backend.** Con PostgreSQL y Docker Desktop activos,
+   configura la [conexión a PostgreSQL](#configurar-la-conexión-a-postgresql) y ejecuta:
+
+   ```powershell
+   .\mvnw.cmd --batch-mode --no-transfer-progress verify
+   ```
+
+   Debe terminar con `BUILD SUCCESS`, sin fallos, errores ni pruebas omitidas.
+   Este comando compila, ejecuta las pruebas y genera el JAR; no deja la API arrancada.
+
+2. **Pruebas manuales con Postman.** Prepara la [configuración JWT](#validación-jwt-y-usuario-autenticado)
+   y las [dos contraseñas demo](#arrancar-el-demo-desde-powershell): cada una requiere
+   al menos 12 caracteres y como máximo 72 bytes UTF-8. Arranca la API local en 8081:
+
+   ```powershell
+   .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=demo" "-Dspring-boot.run.arguments=--server.address=127.0.0.1 --server.port=8081"
+   ```
+
+   Deja esa terminal abierta. Arrastra el archivo
+   [auth-demo.postman_collection.json](../docs/postman/auth-demo.postman_collection.json)
+   a Postman para importarlo. Crea y selecciona el entorno `SBP local` con valores locales:
+
+   | Variable | Valor |
+   | --- | --- |
+   | baseUrl | http://127.0.0.1:8081/api/v1 |
+   | demoAdminPassword | Contraseña del ADMIN demo. |
+   | demoUserPassword | Contraseña del USER demo. |
+
+   Usa las contraseñas con las que se crearon las cuentas; reiniciar no las cambia.
+   Pulsa `Run`, conserva las diez peticiones en orden y una iteración, e inicia
+   la ejecución. Deben pasar las diez comprobaciones, sin fallos ni errores.
+   El 401 de «Rechazar refresh USER después del logout» es el resultado esperado.
+
 ## Requisitos
 
 - JDK 25.
