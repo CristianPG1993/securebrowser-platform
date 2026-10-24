@@ -19,6 +19,14 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "0"))
     Optional<Device> findByIdAndCompany_IdAndUser_Id(Long id, Long companyId, Long userId);
 
+    /** Resuelve filtros de historial sin bloquear ni simular una comunicación de instalación. */
+    @Query("""
+            select d from Device d where d.id = :id and d.company.id = :companyId
+              and (:userId is null or d.user.id = :userId)
+            """)
+    Optional<Device> findInScope(@Param("id") Long id, @Param("companyId") Long companyId,
+            @Param("userId") Long userId);
+
     /** La página y su total conservan Company y los filtros opcionales del caso de uso. */
     @Query(value = """
             select d from Device d

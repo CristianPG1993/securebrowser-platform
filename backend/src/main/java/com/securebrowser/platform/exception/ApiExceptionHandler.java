@@ -10,6 +10,8 @@ import com.securebrowser.platform.policy.InvalidPolicyRequestException;
 import com.securebrowser.platform.device.DeviceNotFoundException;
 import com.securebrowser.platform.device.DeviceInactiveException;
 import com.securebrowser.platform.device.InvalidDeviceRequestException;
+import com.securebrowser.platform.securityevent.EventUuidConflictException;
+import com.securebrowser.platform.securityevent.InvalidSecurityEventRequestException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -90,6 +92,18 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     public ResponseEntity<ProblemDetail> handleInvalidDeviceRequest(HttpServletRequest request) {
         ProblemDetail problem = problemFactory.create(ApiErrorCode.VALIDATION_ERROR, request);
         problem.setProperty("errors", List.of(new ApiFieldError("request", "Los datos del dispositivo no son válidos.")));
+        return ResponseEntity.status(problem.getStatus()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
+    }
+
+    @ExceptionHandler(EventUuidConflictException.class)
+    public ResponseEntity<ProblemDetail> handleEventUuidConflict(HttpServletRequest request) {
+        return publicProblem(ApiErrorCode.EVENT_UUID_CONFLICT, request);
+    }
+
+    @ExceptionHandler(InvalidSecurityEventRequestException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidSecurityEventRequest(HttpServletRequest request) {
+        ProblemDetail problem = problemFactory.create(ApiErrorCode.VALIDATION_ERROR, request);
+        problem.setProperty("errors", List.of(new ApiFieldError("request", "Los datos de los eventos no son válidos.")));
         return ResponseEntity.status(problem.getStatus()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
     }
 

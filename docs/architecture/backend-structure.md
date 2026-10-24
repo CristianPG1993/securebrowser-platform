@@ -60,7 +60,7 @@ su primera clase. La clase de arranque estará en el paquete base.
 | `device` | Listado paginado por Company y propietario, consulta de política de instalación activa y registro transaccional de lastSeenAt. |
 | `policy` | Consultas y PATCH administrativos de Policy, DTOs, reglas de URL y descargas, pertenencia por Company y bloqueo de edición. |
 | `api` | PageResponse, contrato compartido de páginas sin exponer la serialización interna de Spring Data. |
-| `securityevent` | SecurityEvent, SecurityEventType, consulta, recepción y deduplicación de eventos. |
+| `securityevent` | Recepción atómica de lotes de SecurityEvent, deduplicación global por UUID y consulta paginada por Company y propietario, con DTOs y pruebas de concurrencia. |
 | `auth` | Login, renovación y logout implementados con controller, servicio, DTOs, generación de secretos, RefreshToken y repositorio. |
 | `demo` | Inicializador transaccional habilitado únicamente con el perfil demo; conserva datos y ediciones entre reinicios. |
 | `security` | Integración con Spring Security, validación del JWT y representación del usuario autenticado. |

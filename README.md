@@ -43,6 +43,12 @@ El listado de Device limita al ADMIN a su compañía y al USER a sus instalacion
 El propietario de una instalación activa puede obtener su política y registrar
 su última comunicación con la hora del backend.
 
+Desktop puede enviar lotes atómicos de eventos desde sus instalaciones,
+incluidas las inactivas. El backend reconoce reenvíos por UUID, conserva la
+primera recepción y limita las consultas de historial a la compañía o al
+propietario. Postman demuestra el recorrido de autenticación, edición de Policy,
+consulta de Device/Policy y envío y consulta de SecurityEvent.
+
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).
 
