@@ -8,17 +8,20 @@ datos demo y tratamiento común de errores.
 ## Guía rápida de pruebas
 
 Ejecuta esta guía desde la raíz `securebrowser-platform`, con Docker Desktop
-en modo de contenedores Linux. Compose carga `.env`; Maven necesita las
-variables en la terminal y no carga ese archivo automáticamente.
+en modo de contenedores Linux. Compose carga `.env`; el comando de pruebas
+prepara automáticamente una base de datos temporal independiente.
 
-1. **Pruebas automáticas del backend.** Con PostgreSQL y Docker Desktop activos,
-   configura la [conexión a PostgreSQL](#configurar-la-conexión-a-postgresql) y ejecuta:
+1. **Pruebas automáticas del backend.** Con Java 25 y Docker Desktop disponibles,
+   ejecuta:
 
    ```powershell
-   .\backend\mvnw.cmd -f backend/pom.xml --batch-mode --no-transfer-progress verify
+   .\scripts\verify-backend.ps1
    ```
 
    Debe terminar con `BUILD SUCCESS`, sin fallos, errores ni pruebas omitidas.
+   El script crea un PostgreSQL desechable, ejecuta `mvn verify`, retira su
+   contenedor y restaura las variables de tu terminal. No requiere `.env` ni
+   PostgreSQL instalado en el host. El log queda en `backend/target/verify-backend.log`.
 
 2. **Arranque del demo con Compose.** Prepara `.env` con la
    [configuración de la entrega](#entrega-con-docker-compose-bloque-5).
@@ -142,8 +145,10 @@ primera ejecución debe seguir presente al comenzar la segunda.
 
 ## Requisitos
 
-Los siguientes requisitos corresponden al desarrollo y a `mvn verify` fuera
-de los contenedores; el arranque con Compose solo requiere Docker Desktop.
+Para el comando de pruebas se necesitan JDK 25 y Docker Desktop. Para arrancar
+el demo con Compose solo se necesita Docker Desktop. Si ejecutas Maven
+directamente, debes configurar `SBP_DB_*` en la terminal: Maven no lee `.env`.
+Los apartados siguientes describen también esa alternativa de desarrollo local.
 
 - JDK 25.
 - Spring Boot 4.1.1, definido en pom.xml.
