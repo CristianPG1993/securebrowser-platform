@@ -1,7 +1,8 @@
 # Backend de SecureBrowser Platform
 
 Backend en Java y Spring Boot con dominio JPA, migraciones Flyway V1–V10,
-API de Company, Policy y consultas de Device, autenticación con rotación de tokens, perfil propio,
+API de Company, Policy, consultas de Device y sincronización de SecurityEvent,
+autenticación con rotación de tokens, perfil propio,
 datos demo y tratamiento común de errores.
 
 ## Guía rápida de pruebas
@@ -38,12 +39,14 @@ hayas definido las variables de entorno. Maven no carga `.env` automáticamente.
    | demoUserPassword | Contraseña del USER demo. |
 
    Usa las contraseñas con las que se crearon las cuentas; reiniciar no las cambia.
-   Pulsa `Run`, conserva las veintidós peticiones en orden y una iteración, e inicia
-   la ejecución. Deben pasar las veintidós comprobaciones, sin fallos ni errores:
-   diez de autenticación, seis de Policy y seis de Device.
+   Pulsa `Run`, conserva las veintiocho peticiones en orden y una iteración, e inicia
+   la ejecución. Deben pasar las veintiocho comprobaciones, sin fallos ni errores:
+   diez de autenticación, seis de Policy, seis de Device y seis de SecurityEvent.
    El 401 de «Rechazar refresh USER después del logout» es el resultado esperado.
    También son esperados el 403 del USER al catálogo de Policy y el 404 del ADMIN
    que intenta consultar la política como instalación del USER.
+   En eventos se esperan un 409 por UUID con contenido distinto y un 404 cuando
+   ADMIN intenta enviar por la instalación del USER.
 
 ## Requisitos
 
@@ -351,7 +354,10 @@ HTTP. Permite POST `/api/v1/auth/login`, `/api/v1/auth/refresh` y
 y GET/PATCH `/api/v1/companies/me`, GET `/api/v1/policies` y
 GET/PATCH `/api/v1/policies/{id}` para ADMIN. Permite GET `/api/v1/devices`
 y GET `/api/v1/devices/{id}/policy` a ADMIN y USER; DeviceService limita el
-ámbito y exige propiedad para consultar la política de instalación. Deniega las demás rutas y
+ámbito y exige propiedad para consultar la política de instalación. También permite
+GET `/api/v1/security-events` y POST `/api/v1/devices/{id}/events/batch` a ambos roles;
+SecurityEventService limita las consultas y exige propiedad para recibir lotes.
+Deniega las demás rutas y
 métodos. Basic, formulario, logout de Spring y caché de peticiones están
 deshabilitados. CSRF está deshabilitado porque la autenticación de esta API
 utiliza el encabezado Bearer y no cookies. El filtro Bearer y el proveedor JWT
@@ -1001,14 +1007,16 @@ con las contraseñas iniciales que hayas elegido. `baseUrl` vale por defecto
 `http://127.0.0.1:8080/api/v1`.
 
 Ejecuta la colección en orden: login y perfil ADMIN, consultas y PATCH de Policy,
-login y perfil USER, rechazo de su acceso al catálogo administrativo,
+login y perfil USER, consulta de Device/Policy, envío de SecurityEvent y consulta
+como ADMIN, reenvío y conflicto, rechazo de su acceso al catálogo administrativo,
 renovaciones, logout y rechazo del refresh revocado. Los scripts conservan los
 tokens de ADMIN y USER en variables distintas. El archivo del repositorio no
 incluye contraseñas ni tokens reales.
 
-Esta colección cubre autenticación, Policy y Device. Se ampliará con SecurityEvent
-cuando estén cerrados sus bloques; el recorrido completo y Docker Compose
-corresponden a la entrega reproducible del bloque 5.
+Esta colección cubre autenticación, Policy, Device y SecurityEvent. Demuestra
+ADMIN login → modifica Policy → USER login → consulta Device/Policy → envía
+SecurityEvent → ADMIN consulta el evento. Docker Compose y la validación de
+la entrega reproducible corresponden al bloque 5.
 
 ### Alcance pendiente del MVP
 
@@ -1018,7 +1026,8 @@ mínimo; la consulta propia de perfil es solo la parte necesaria para autenticac
 
 El bloque 2 implementa las consultas y la edición de Policy descritas abajo.
 El bloque 3 incorpora el listado de Device y la consulta de política de instalación.
-Quedan los bloques 4 (SecurityEvent) y 5 (entrega reproducible).
+El bloque 4 incorpora la recepción y consulta de SecurityEvent descritas abajo.
+Queda el bloque 5 (entrega reproducible).
 Cada bloque conserva una única PR y exige pruebas, `mvn verify` y CI en verde antes
 del siguiente. Al cerrarlos se congela el backend MVP y se pasa a C++/CEF.
 
@@ -1114,7 +1123,7 @@ No se modifican la política, el propietario, la licencia ni el enrollment.
 Postman comprueba ADMIN lista Device → ADMIN no suplanta al propietario →
 USER lista sus instalaciones → obtiene la Policy modificada por ADMIN →
 verifica lastSeenAt y filtros. Importa de nuevo la colección actualizada antes
-de ejecutar sus 22 comprobaciones; conserva las contraseñas en tu entorno local.
+de ejecutar sus 28 comprobaciones; conserva las contraseñas en tu entorno local.
 Si el backend ya estaba arrancado con una versión anterior, reinícialo con el
 perfil demo para cargar las rutas nuevas.
 
@@ -1126,3 +1135,56 @@ coherente durante una edición administrativa concurrente.
 
 GET de detalle independiente, PATCH, POST y DELETE de Device, enrollments
 y administración de licencias quedan fuera de este bloque.
+
+## Eventos de seguridad: bloque 4
+
+| Ruta | Permiso y resultado |
+| --- | --- |
+| POST /api/v1/devices/{id}/events/batch | Propietario ADMIN o USER de la misma Company; Device activo o inactivo. SecurityEventBatchResponse. |
+| GET /api/v1/security-events | ADMIN: Devices de su Company; USER: propios. PageResponse<SecurityEventResponse>. |
+
+El lote contiene de 1 a 100 eventos con eventUuid, type y occurredAt UTC;
+details es opcional y nullable, con máximo de 2.000 caracteres Unicode.
+Desktop genera el UUID al crear el evento y conserva el mismo al reenviarlo.
+Los tipos son URL_BLOCKED, DOWNLOAD_BLOCKED y POLICY_UPDATED; este último
+lo comunica Desktop cuando aplica la política, no el PATCH administrativo.
+Device procede de la ruta autorizada y receivedAt del Clock del backend.
+Se admite un reloj Desktop adelantado y se conserva la precisión de microsegundos
+del dominio, sin recortar ni normalizar details.
+
+Un reenvío idéntico conserva el evento original y su primer receivedAt.
+Los duplicados idénticos dentro del lote se reconocen una vez, en orden de
+primera aparición. Reutilizar un UUID con distinto Device, tipo, details u
+occurredAt produce 409 EVENT_UUID_CONFLICT sin revelar el registro existente.
+Cualquier error revierte los eventos nuevos y los cambios de actividad del lote.
+Solo se devuelve acceptedEventUuids después de confirmar la transacción.
+
+La recepción bloquea el Device propio con NOWAIT y usa la unicidad global
+existente mediante INSERT ... ON CONFLICT DO NOTHING. READ_COMMITTED permite
+comparar con el ganador de una inserción concurrente cuando termina su commit.
+Los UUID se insertan en orden estable para evitar esperas cruzadas entre lotes,
+con un límite transaccional de diez segundos. La contención temporal produce
+503 SERVICE_UNAVAILABLE; Desktop conserva su cola y puede reenviar el lote.
+Un envío confirmado registra lastSeenAt y la auditoría en la misma transacción,
+sin reactivar el Device ni modificar sus referencias.
+
+El historial admite page (inicial 0), size (inicial 20, rango 1–100), deviceId,
+type, from y to. Las fechas deben ser UTC; from incluye su extremo y to lo
+excluye sobre occurredAt, con from anterior a to si aparecen ambos. Ordena
+por occurredAt descendente y después id descendente. REPEATABLE_READ mantiene
+coherentes la página y su total. El filtro deviceId se resuelve en el ámbito
+del actor; un Device ajeno y uno inexistente producen el mismo 404.
+Los listados no registran actividad. Entradas inválidas, campos desconocidos,
+tipos incorrectos y parámetros repetidos o desconocidos producen 400.
+
+Postman envía un evento con el token USER, lo consulta como ADMIN, reenvía el
+mismo UUID, comprueba el conflicto al cambiar el contenido y verifica que el
+historial propio conserva el id y receivedAt iniciales. También comprueba que
+ADMIN no envía eventos en nombre de la instalación de USER. Cada ejecución
+genera otro UUID y puede repetirse; el historial anterior se conserva.
+
+SecurityEventRepositoryPersistenceTest y SecurityEventApiPersistenceTest
+comprueban PostgreSQL real, contrato HTTP, validación, permisos, paginación,
+filtros, precisión temporal, rollback después de SQL y carreras de UUID entre
+Devices de la misma Company y de compañías diferentes. No se incorporan
+edición, borrado, estadísticas, alertas ni cambios de entidad o migración.

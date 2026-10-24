@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "SBP — Autenticación, Policy y Device (bloques 1–3)",
-    "description": "Ejecuta en orden contra el perfil demo con baseUrl y las dos contraseñas en un entorno local. ADMIN modifica Policy y consulta el catálogo de dispositivos; USER lista sus instalaciones y obtiene la Policy modificada. Comprueba propiedad, actividad, validación y autenticación. Los scripts guardan IDs y tokens por separado; el archivo no contiene secretos reales. SecurityEvent se incorporará en el bloque 4.",
+    "name": "SBP — Autenticación, Policy, Device y SecurityEvent (bloques 1–4)",
+    "description": "Ejecuta en orden contra el perfil demo. Define demoAdminPassword y demoUserPassword en un entorno local, sin exportar secretos. Recorrido ADMIN login → modifica Policy → USER login → consulta Device/Policy → envía SecurityEvent → ADMIN consulta el evento. Comprueba reenvíos idénticos, conflictos, aislamiento y cierre de los grupos de renovación. El UUID de prueba se genera en cada ejecución.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -61,6 +61,31 @@
     },
     {
       "key": "userDeviceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "demoEventUuid",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "demoEventOccurredAt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "demoEventReceivedAt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "demoEventId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "demoEventBody",
       "value": "",
       "type": "string"
     }
@@ -754,6 +779,324 @@
           }
         ],
         "url": "{{baseUrl}}/devices?active=false"
+      }
+    },
+    {
+      "name": "USER envía SecurityEvent",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const uuid = pm.variables.replaceIn('{{$guid}}');",
+              "const occurredAt = new Date().toISOString();",
+              "pm.collectionVariables.set('demoEventUuid', uuid);",
+              "pm.collectionVariables.set('demoEventOccurredAt', occurredAt);",
+              "pm.collectionVariables.set('demoEventBody', JSON.stringify({events: [{eventUuid: uuid, type: 'POLICY_UPDATED', occurredAt: occurredAt, details: 'Desktop aplica la política demo modificada por ADMIN.'}]}));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('El lote confirma el UUID generado por USER', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(Object.keys(body)).to.eql(['acceptedEventUuids']);",
+              "    pm.expect(body.acceptedEventUuids).to.eql([pm.collectionVariables.get('demoEventUuid')]);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices/{{userDeviceId}}/events/batch",
+        "body": {
+          "mode": "raw",
+          "raw": "{{demoEventBody}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "ADMIN consulta SecurityEvent enviado por USER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('ADMIN encuentra el evento de su Company con el contrato acordado', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const body = pm.response.json();",
+              "    pm.expect(Object.keys(body).sort()).to.eql(['items', 'page', 'size', 'totalElements', 'totalPages'].sort());",
+              "    const event = body.items.find(e => e.eventUuid === pm.collectionVariables.get('demoEventUuid'));",
+              "    pm.expect(event).to.be.an('object');",
+              "    pm.expect(Object.keys(event).sort()).to.eql(['id', 'eventUuid', 'deviceId', 'type', 'details', 'occurredAt', 'receivedAt'].sort());",
+              "    pm.expect(event.deviceId).to.eql(Number(pm.collectionVariables.get('userDeviceId')));",
+              "    pm.expect(event.type).to.eql('POLICY_UPDATED');",
+              "    pm.expect(event.details).to.eql('Desktop aplica la política demo modificada por ADMIN.');",
+              "    pm.expect(Date.parse(event.occurredAt)).to.eql(Date.parse(pm.collectionVariables.get('demoEventOccurredAt')));",
+              "    pm.expect(Number.isFinite(Date.parse(event.receivedAt))).to.eql(true);",
+              "    pm.collectionVariables.set('demoEventId', event.id);",
+              "    pm.collectionVariables.set('demoEventReceivedAt', event.receivedAt);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/security-events?deviceId={{userDeviceId}}&type=POLICY_UPDATED&from={{demoEventOccurredAt}}&size=100"
+      }
+    },
+    {
+      "name": "USER reenvía el mismo SecurityEvent",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('El reenvío idéntico reconoce el mismo UUID', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().acceptedEventUuids).to.eql([pm.collectionVariables.get('demoEventUuid')]);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices/{{userDeviceId}}/events/batch",
+        "body": {
+          "mode": "raw",
+          "raw": "{{demoEventBody}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Rechazar SecurityEvent con UUID y contenido distintos",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = JSON.parse(pm.collectionVariables.get('demoEventBody'));",
+              "body.events[0].details = 'Contenido distinto para el mismo UUID';",
+              "pm.variables.set('conflictingEventBody', JSON.stringify(body));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Un UUID reutilizado con contenido distinto produce conflicto', function () {",
+              "    pm.response.to.have.status(409);",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+              "    pm.expect(pm.response.json().code).to.eql('EVENT_UUID_CONFLICT');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices/{{userDeviceId}}/events/batch",
+        "body": {
+          "mode": "raw",
+          "raw": "{{conflictingEventBody}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "USER consulta historial y verifica primera recepción",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('El historial propio conserva un único registro y la primera recepción', function () {",
+              "    pm.response.to.have.status(200);",
+              "    const events = pm.response.json().items;",
+              "    const matches = events.filter(e => e.eventUuid === pm.collectionVariables.get('demoEventUuid'));",
+              "    pm.expect(matches.length).to.eql(1);",
+              "    pm.expect(matches[0].id).to.eql(Number(pm.collectionVariables.get('demoEventId')));",
+              "    pm.expect(matches[0].receivedAt).to.eql(pm.collectionVariables.get('demoEventReceivedAt'));",
+              "    pm.expect(matches[0].details).to.eql('Desktop aplica la política demo modificada por ADMIN.');",
+              "    events.forEach(e => pm.expect(e.deviceId).to.eql(Number(pm.collectionVariables.get('userDeviceId'))));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{userAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          }
+        ],
+        "url": "{{baseUrl}}/security-events?deviceId={{userDeviceId}}&type=POLICY_UPDATED&from={{demoEventOccurredAt}}&size=100"
+      }
+    },
+    {
+      "name": "ADMIN no envía eventos por la instalación USER",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('ADMIN necesita ser propietario para enviar eventos de instalación', function () {",
+              "    pm.response.to.have.status(404);",
+              "    pm.expect(pm.response.json().code).to.eql('RESOURCE_NOT_FOUND');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json, application/problem+json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/devices/{{userDeviceId}}/events/batch",
+        "body": {
+          "mode": "raw",
+          "raw": "{{demoEventBody}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
       }
     },
     {

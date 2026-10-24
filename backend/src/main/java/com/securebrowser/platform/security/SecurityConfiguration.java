@@ -63,6 +63,8 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/policies/{id}").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/devices", "/api/v1/devices/{id}/policy")
                                 .hasAnyRole("ADMIN", "USER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/security-events").hasAnyRole("ADMIN", "USER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/devices/{id}/events/batch").hasAnyRole("ADMIN", "USER")
                         .anyRequest().denyAll())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(entryPoint)
