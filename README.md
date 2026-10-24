@@ -58,8 +58,8 @@ configuración, el arranque y las 28 comprobaciones Postman.
 La entrega del bloque 5 cierra el backend MVP: su alcance queda congelado en
 autenticación y datos demo, Policy, consultas de Device, SecurityEvent y entrega
 reproducible. El siguiente desarrollo pasa a C++/CEF. No se incorporan CRUDs
-adicionales ni nuevas funcionalidades backend; las tarjetas #59–#64 siguen
-pendientes y fuera del alcance implementado.
+adicionales ni nuevas funcionalidades backend; las funcionalidades aplazadas
+quedan fuera del alcance implementado.
 
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).

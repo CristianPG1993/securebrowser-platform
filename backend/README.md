@@ -609,9 +609,9 @@ mediante Testcontainers y `@ServiceConnection`. No requieren las variables
   la revocación de los registros seleccionados, conservando grupos ajenos y
   fechas anteriores. Estos tests y los de consultas revierten sus fixtures.
 
-Los permisos, la regla del último ADMIN y el cambio completo de contraseña se
-implementarán en los servicios de las tareas #59–#61. No hay todavía endpoints
-REST de usuarios.
+Las operaciones administrativas de User, la garantía del último ADMIN en esos
+servicios y el cambio completo de contraseña por HTTP quedan fuera del alcance
+del backend MVP congelado.
 
 ## Servicio de Company
 
@@ -1134,8 +1134,8 @@ los contenedores conservando sus datos.
 ### Cierre y límites del backend MVP
 
 El bloque 1 no implementa el CRUD administrativo de User ni el cambio de contraseña
-por HTTP. Las tarjetas #59–#64 siguen pendientes y se replanifican fuera del backend
-mínimo; la consulta propia de perfil es solo la parte necesaria para autenticación.
+por HTTP. Estas funcionalidades quedan fuera del backend mínimo; la consulta
+propia de perfil es solo la parte necesaria para autenticación.
 
 El bloque 2 implementa las consultas y la edición de Policy descritas abajo.
 El bloque 3 incorpora el listado de Device y la consulta de política de instalación.
