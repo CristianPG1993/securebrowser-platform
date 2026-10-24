@@ -7,48 +7,148 @@ datos demo y tratamiento común de errores.
 
 ## Guía rápida de pruebas
 
-Ejecuta los comandos desde la carpeta `backend`, en la misma terminal donde
-hayas definido las variables de entorno. Maven no carga `.env` automáticamente.
+Ejecuta esta guía desde la raíz `securebrowser-platform`, con Docker Desktop
+en modo de contenedores Linux. Compose carga `.env`; el comando de pruebas
+prepara automáticamente una base de datos temporal independiente.
 
-1. **Pruebas automáticas del backend.** Con PostgreSQL y Docker Desktop activos,
-   configura la [conexión a PostgreSQL](#configurar-la-conexión-a-postgresql) y ejecuta:
+1. **Pruebas automáticas del backend.** Con Java 25 y Docker Desktop disponibles,
+   ejecuta:
 
    ```powershell
-   .\mvnw.cmd --batch-mode --no-transfer-progress verify
+   .\scripts\verify-backend.ps1
    ```
 
    Debe terminar con `BUILD SUCCESS`, sin fallos, errores ni pruebas omitidas.
-   Este comando compila, ejecuta las pruebas y genera el JAR; no deja la API arrancada.
+   El script crea un PostgreSQL desechable, ejecuta `mvn verify`, retira su
+   contenedor y restaura las variables de tu terminal. No requiere `.env` ni
+   PostgreSQL instalado en el host. El log queda en `backend/target/verify-backend.log`.
 
-2. **Pruebas manuales con Postman.** Prepara la [configuración JWT](#validación-jwt-y-usuario-autenticado)
-   y las [dos contraseñas demo](#arrancar-el-demo-desde-powershell): cada una requiere
-   al menos 12 caracteres y como máximo 72 bytes UTF-8. Arranca la API local en 8081:
+2. **Arranque del demo con Compose.** Prepara `.env` con la
+   [configuración de la entrega](#entrega-con-docker-compose-bloque-5).
+   Si aún no existe, copia la plantilla sin sobrescribir tu configuración:
 
    ```powershell
-   .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=demo" "-Dspring-boot.run.arguments=--server.address=127.0.0.1 --server.port=8081"
+   if (-not (Test-Path -LiteralPath .env)) { Copy-Item -LiteralPath .env.example -Destination .env }
    ```
 
-   Deja esa terminal abierta. Arrastra el archivo
+   Completa las contraseñas y la clave JWT. Mantén `SBP_HTTP_PORT=8080` o usa
+   `8081` si el puerto está ocupado. Después ejecuta:
+
+   ```powershell
+   docker compose up --build --detach --wait --wait-timeout 180
+   docker compose ps
+   ```
+
+   Ambos servicios deben aparecer como `healthy`.
+
+3. **Recorrido Postman.** Arrastra el archivo
    [auth-demo.postman_collection.json](../docs/postman/auth-demo.postman_collection.json)
    a Postman para importarlo. Crea y selecciona el entorno `SBP local` con valores locales:
 
    | Variable | Valor |
    | --- | --- |
-   | baseUrl | http://127.0.0.1:8081/api/v1 |
+   | baseUrl | http://127.0.0.1:8080/api/v1; usa 8081 si ese es tu SBP_HTTP_PORT. |
    | demoAdminPassword | Contraseña del ADMIN demo. |
    | demoUserPassword | Contraseña del USER demo. |
 
-   Usa las contraseñas con las que se crearon las cuentas; reiniciar no las cambia.
-   Pulsa `Run`, conserva las veintiocho peticiones en orden y una iteración, e inicia
-   la ejecución. Deben pasar las veintiocho comprobaciones, sin fallos ni errores:
-   diez de autenticación, seis de Policy, seis de Device y seis de SecurityEvent.
-   El 401 de «Rechazar refresh USER después del logout» es el resultado esperado.
-   También son esperados el 403 del USER al catálogo de Policy y el 404 del ADMIN
-   que intenta consultar la política como instalación del USER.
-   En eventos se esperan un 409 por UUID con contenido distinto y un 404 cuando
-   ADMIN intenta enviar por la instalación del USER.
+   Usa las contraseñas originales; reiniciar no las cambia. Pulsa `Run` con las
+   28 peticiones en orden y una iteración: deben pasar las 28 comprobaciones.
+   Los rechazos esperados se explican en [Comprobación con Postman](#comprobación-con-postman).
+
+## Entrega con Docker Compose: bloque 5
+
+Para arrancar el demo solo se necesita Docker Desktop con Compose y el motor
+Linux activo. La construcción utiliza el JDK 25 y el Maven Wrapper dentro de
+Docker; la imagen final ejecuta el JAR con JRE 25 y usuario `sbp` sin privilegios.
+El contexto de construcción admite únicamente los archivos necesarios de
+`backend`, excluyendo `.env`, pruebas y archivos generados.
+
+En `.env` deben estar definidos estos valores:
+
+| Variable | Contenido |
+| --- | --- |
+| SBP_DB_PASSWORD | Contraseña de la base de datos de Compose. |
+| SBP_JWT_SECRET_BASE64 | Clave aleatoria de al menos 32 bytes codificados en Base64. |
+| SBP_DEMO_ADMIN_PASSWORD | Contraseña inicial de admin@demo.local. |
+| SBP_DEMO_USER_PASSWORD | Contraseña inicial de user@demo.local. |
+| SBP_HTTP_PORT | 8080 por defecto; 8081 para un entorno local con 8080 ocupado. |
+
+Cada contraseña demo exige al menos 12 caracteres y como máximo 72 bytes UTF-8.
+Conserva los valores de emisor, audiencia y duraciones de la plantilla. Para
+generar la clave JWT en PowerShell y copiar el resultado a `.env`:
+
+```powershell
+$sbpKeyBytes = [byte[]]::new(32)
+$sbpRandom = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $sbpRandom.GetBytes($sbpKeyBytes)
+    [Convert]::ToBase64String($sbpKeyBytes)
+} finally {
+    $sbpRandom.Dispose()
+    [Array]::Clear($sbpKeyBytes, 0, $sbpKeyBytes.Length)
+}
+```
+
+La API se publica exclusivamente en `127.0.0.1`. Dentro del contenedor,
+Spring Boot escucha en `0.0.0.0:8080`; Compose conecta el puerto local elegido
+con ese puerto interno. PostgreSQL no publica puerto al host. El backend usa
+`jdbc:postgresql://sbp-postgres:5432/securebrowser_db`, independientemente del
+`SBP_DB_URL` destinado al arranque con Maven en la plantilla.
+
+Compose espera a que PostgreSQL esté disponible antes de arrancar el backend.
+Flyway aplica V1–V10 y Hibernate valida el esquema. La comprobación de salud
+del backend verifica que Tomcat acepte conexiones; Postman comprueba el flujo
+HTTP completo con autenticación y acceso a la base de datos.
+
+El perfil demo se activa explícitamente en Compose y crea la fixture una sola
+vez. Los datos se guardan en el volumen `sbp-postgres-data`: `docker compose down`
+retira los contenedores y conserva el volumen. Cambiar las contraseñas del
+archivo no restablece usuarios ya creados. `docker compose down --volumes`
+elimina los datos de esa entrega y permite empezar desde una base vacía.
+Compose usa una base distinta de la instalación PostgreSQL del host.
+
+Consulta el estado y los logs desde la raíz:
+
+```powershell
+docker compose ps
+docker compose logs --tail 80 sbp-backend
+docker compose logs --tail 80 sbp-postgres
+```
+
+Para detener y volver a arrancar conservando los datos, y después repetir Postman:
+
+```powershell
+docker compose down
+docker compose up --detach --wait --wait-timeout 180
+```
+
+La comprobación automática de entrega utiliza Bash, Docker Compose y Node.js
+con npx. Desde la raíz, en Bash o Git Bash:
+
+```bash
+bash scripts/verify-compose.sh
+```
+
+En un entorno local con 8080 ocupado:
+
+```bash
+SBP_HTTP_PORT=8081 bash scripts/verify-compose.sh
+```
+
+El script crea un proyecto Compose temporal con credenciales desechables,
+sin leer el `.env` local. Construye la imagen desde código, ejecuta las 28
+comprobaciones con Newman 6.2.2, recrea los contenedores conservando el volumen
+y compara el contenido íntegro de las diez tablas del dominio. Después repite
+Postman y retira únicamente sus recursos temporales. Los logs se guardan bajo
+`backend/target/compose-check`, excluido de Git. El historial de eventos de la
+primera ejecución debe seguir presente al comenzar la segunda.
 
 ## Requisitos
+
+Para el comando de pruebas se necesitan JDK 25 y Docker Desktop. Para arrancar
+el demo con Compose solo se necesita Docker Desktop. Si ejecutas Maven
+directamente, debes configurar `SBP_DB_*` en la terminal: Maven no lee `.env`.
+Los apartados siguientes describen también esa alternativa de desarrollo local.
 
 - JDK 25.
 - Spring Boot 4.1.1, definido en pom.xml.
@@ -894,6 +994,12 @@ Hibernate valida el esquema. La configuración JWT de pruebas procede de
 clave JWT de producción. No se omiten pruebas ni se ignoran sus fallos.
 Un error de compilación o de pruebas hace fallar el job.
 
+Después, desde la raíz, CI ejecuta `bash scripts/verify-compose.sh` con el
+puerto 8080. Esta fase construye y arranca la entrega real de Compose, verifica
+Postman antes y después de recrear los contenedores y exige conservar los datos
+del volumen. Un fallo en el arranque, la persistencia o las comprobaciones
+Postman también hace fallar `Backend build and tests`.
+
 Para ejecutar la misma verificación en PowerShell, configura primero las
 variables `SBP_DB_*` para tu PostgreSQL local como se explica arriba y
 mantén Docker Desktop disponible. Desde la carpeta backend:
@@ -1006,6 +1112,12 @@ Define `demoAdminPassword` y `demoUserPassword` en un entorno local de Postman
 con las contraseñas iniciales que hayas elegido. `baseUrl` vale por defecto
 `http://127.0.0.1:8080/api/v1`.
 
+Ejecuta las 28 peticiones en orden y una iteración: diez de autenticación, seis
+de Policy, seis de Device y seis de SecurityEvent. Todas las comprobaciones deben
+pasar. Son esperados el 401 del refresh revocado, el 403 del USER al catálogo
+Policy, el 404 del ADMIN al intentar consultar o enviar como instalación del
+USER y el 409 al reutilizar un UUID de evento con distinto contenido.
+
 Ejecuta la colección en orden: login y perfil ADMIN, consultas y PATCH de Policy,
 login y perfil USER, consulta de Device/Policy, envío de SecurityEvent y consulta
 como ADMIN, reenvío y conflicto, rechazo de su acceso al catálogo administrativo,
@@ -1015,10 +1127,11 @@ incluye contraseñas ni tokens reales.
 
 Esta colección cubre autenticación, Policy, Device y SecurityEvent. Demuestra
 ADMIN login → modifica Policy → USER login → consulta Device/Policy → envía
-SecurityEvent → ADMIN consulta el evento. Docker Compose y la validación de
-la entrega reproducible corresponden al bloque 5.
+SecurityEvent → ADMIN consulta el evento. El bloque 5 ejecuta esta misma
+colección contra la entrega de Docker Compose antes y después de recrear
+los contenedores conservando sus datos.
 
-### Alcance pendiente del MVP
+### Cierre y límites del backend MVP
 
 El bloque 1 no implementa el CRUD administrativo de User ni el cambio de contraseña
 por HTTP. Las tarjetas #59–#64 siguen pendientes y se replanifican fuera del backend
@@ -1027,9 +1140,10 @@ mínimo; la consulta propia de perfil es solo la parte necesaria para autenticac
 El bloque 2 implementa las consultas y la edición de Policy descritas abajo.
 El bloque 3 incorpora el listado de Device y la consulta de política de instalación.
 El bloque 4 incorpora la recepción y consulta de SecurityEvent descritas abajo.
-Queda el bloque 5 (entrega reproducible).
-Cada bloque conserva una única PR y exige pruebas, `mvn verify` y CI en verde antes
-del siguiente. Al cerrarlos se congela el backend MVP y se pasa a C++/CEF.
+El bloque 5 entrega Compose y su comprobación automática. Con su incorporación
+a main tras revisión y CI en verde quedan cerrados los cinco bloques y congelado
+el alcance del backend MVP. El siguiente desarrollo pasa inmediatamente a C++/CEF,
+sin continuar con CRUDs adicionales ni nuevas funcionalidades backend.
 
 ### Pruebas del bloque
 
