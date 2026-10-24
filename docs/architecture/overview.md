@@ -13,7 +13,9 @@ Este documento describe la arquitectura prevista para el MVP del TFG.
 
 ## Desktop
 
-Aplicación de navegación en C++ con Chromium Embedded Framework (CEF).
+Aplicación de navegación en C++ con Qt 6 Widgets para la ventana y los controles
+propios, y Chromium Embedded Framework (CEF) para cargar y renderizar las
+páginas web.
 
 - Aplica las políticas de filtrado de URL y control de descargas.
 - Registra eventos de seguridad.
@@ -58,10 +60,15 @@ Aplicación en Kotlin con Jetpack Compose y arquitectura MVVM.
 - Incluye pantallas de dispositivos, eventos y políticas.
 - Se comunica con la API del backend mediante Retrofit.
 
-## Decisiones pendientes
+## Decisiones de arquitectura
 
-La tecnología de interfaz desktop se decidirá tras un prototipo técnico
-que permita comparar Qt 6 Widgets y CEF Views.
+La elección de Qt 6 Widgets para la interfaz Desktop está aceptada en el
+[ADR-0002](../adr/0002-desktop-gui.md), por decisión directa del usuario y sin
+realizar un prototipo comparativo con CEF Views.
+
+La validación técnica de la integración Qt/CEF permanece pendiente y se
+realizará de forma incremental durante Desktop Foundation, desde una ventana
+mínima hasta la carga de una URL, el redimensionamiento y el cierre correcto.
 
 Las decisiones arquitectónicas relevantes se documentarán mediante ADR
 en `docs/adr/`.

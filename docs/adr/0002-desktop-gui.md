@@ -1,15 +1,20 @@
 # ADR-0002: Selección de la interfaz desktop
 
-- Estado: Propuesta
+- Estado: Aceptada
 - Fecha: 2026-10-02
+- Fecha de aceptación: 2026-10-24
 
 ## Contexto
 
 La aplicación Desktop de SBP utilizará C++ y Chromium Embedded Framework
 (CEF).
 
-La tecnología de interfaz está pendiente de decidir. Se compararán
-Qt 6 Widgets y CEF Views mediante un prototipo técnico.
+La propuesta inicial contemplaba comparar Qt 6 Widgets y CEF Views mediante
+un prototipo técnico antes de elegir la tecnología de interfaz.
+
+Al comenzar Desktop Foundation, el usuario decide adoptar directamente
+Qt 6 Widgets para construir una interfaz propia, atractiva, moderna y
+personalizable. Esta decisión sustituye la comparación prevista.
 
 ## Opciones consideradas
 
@@ -17,49 +22,71 @@ Qt 6 Widgets y CEF Views mediante un prototipo técnico.
 
 Utilizar Qt 6 Widgets para construir la interfaz e integrar el navegador CEF.
 
-La evaluación deberá comprobar la integración entre ambas tecnologías
-y las dependencias necesarias para compilar y distribuir la aplicación.
+Permite definir los controles, la distribución y el estilo visual de la
+aplicación. Requiere integrar los eventos y el ciclo de vida de Qt y CEF,
+y preparar las dependencias de ambas tecnologías para su distribución.
 
 ### CEF Views
 
 Utilizar el framework Views de CEF para construir la interfaz
 y alojar el navegador mediante sus componentes.
 
-La evaluación deberá comprobar si sus controles y posibilidades
-de personalización cubren las necesidades de SBP.
+Era la otra alternativa prevista. No se ha construido un prototipo ni se
+han medido sus controles, personalización o esfuerzo de integración frente
+a Qt 6 Widgets.
 
 ## Decisión
 
-La elección permanece pendiente.
+Adoptar Qt 6 Widgets para la ventana principal y los controles propios de
+SecureBrowser. CEF se integra directamente como motor de carga y renderizado
+de las páginas web dentro de la ventana Qt.
 
-Se decidirá después de comparar ambas alternativas mediante un prototipo
-técnico y documentar sus resultados.
+La elección responde a la prioridad de diseñar una interfaz con identidad
+visual propia. El aspecto moderno se construirá mediante el diseño de los
+controles, colores, tipografía, iconos y espaciado; no se obtiene
+automáticamente al utilizar Qt.
 
-Los criterios de evaluación siguientes son una propuesta inicial.
+La decisión se toma por elección expresa del usuario, sin realizar un spike
+comparativo con CEF Views. No acredita una superioridad medida ni una
+integración técnica ya validada.
+
+El desarrollo comienza con una ventana mínima y avanza hacia el navegador
+CEF embebido. La interfaz completa y su personalización visual se incorporarán
+de forma progresiva en sus tareas correspondientes.
 
 ## Consecuencias
 
-- La interfaz definitiva depende del resultado de la comparación.
-- El prototipo permitirá identificar dificultades de integración.
-- La evaluación incluirá las dependencias y sus condiciones de licencia.
+- La GUI queda definida como Qt 6 Widgets y se elimina el spike comparativo
+  con CEF Views del plan de Foundation.
+- La aplicación debe coordinar los eventos, los hilos y el ciclo de vida de
+  Qt y CEF, especialmente durante la creación y el cierre del browser.
+- La compilación y distribución deben contemplar las dependencias y los
+  recursos de Qt y CEF, junto con sus condiciones de licencia.
+- La versión exacta de Qt, la estrategia de eventos y los detalles de
+  construcción y runtime se concretarán antes de su implementación en la
+  tarea #78.
 
 ## Validación
 
-Se propone comparar ambas alternativas en Windows con un alcance equivalente:
+La elección de GUI está aceptada. La validación técnica permanece pendiente
+y se realizará de forma incremental con Qt 6 Widgets y CEF en Windows:
 
-- Mostrar una ventana con un navegador CEF.
+- Mostrar primero una ventana Qt mínima y después un navegador CEF embebido.
 - Cargar una URL introducida por el usuario.
 - Probar navegación básica, redimensionamiento y foco del teclado.
 - Comprobar el cierre de la ventana y de los procesos asociados.
-- Evaluar la compilación y distribución con CMake.
+- Comprobar la compilación y distribución con CMake en Debug y Release.
 - Registrar el esfuerzo de integración y las limitaciones encontradas.
 - Revisar las condiciones de licencia de las dependencias utilizadas.
 
 Se documentarán las versiones, las condiciones de las pruebas
-y los resultados antes de aceptar una alternativa.
+y los resultados conforme se completen las tareas. Este ADR no presenta
+esas verificaciones como realizadas.
 
 ## Referencias
 
 - [Arquitectura general](../architecture/overview.md).
 - [Qt Widgets](https://doc.qt.io/qt-6/qtwidgets-index.html).
 - [CEF Views: CefBrowserView](https://github.com/chromiumembedded/cef/blob/master/include/views/cef_browser_view.h).
+- [Tarea #77: elección de Qt 6 Widgets](https://github.com/CristianPG1993/securebrowser-platform/issues/77).
+- [Tarea #78: entorno e integración CEF](https://github.com/CristianPG1993/securebrowser-platform/issues/78).
