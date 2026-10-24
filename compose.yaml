@@ -1,0 +1,49 @@
+services:
+  sbp-postgres:
+    image: postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
+    environment:
+      POSTGRES_DB: securebrowser_db
+      POSTGRES_USER: ${SBP_DB_USERNAME:-sbp_app}
+      POSTGRES_PASSWORD: ${SBP_DB_PASSWORD:?Define SBP_DB_PASSWORD en tu entorno local}
+    volumes:
+      - sbp-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  sbp-backend:
+    build:
+      context: ./backend
+    depends_on:
+      sbp-postgres:
+        condition: service_healthy
+    environment:
+      # Dentro de la red de Compose se usa el nombre del servicio, no el localhost del host.
+      SBP_DB_URL: jdbc:postgresql://sbp-postgres:5432/securebrowser_db
+      SBP_DB_USERNAME: ${SBP_DB_USERNAME:-sbp_app}
+      SBP_DB_PASSWORD: ${SBP_DB_PASSWORD:?Define SBP_DB_PASSWORD en tu entorno local}
+      SBP_JWT_SECRET_BASE64: ${SBP_JWT_SECRET_BASE64:?Define una clave JWT Base64 valida}
+      SBP_JWT_ISSUER: ${SBP_JWT_ISSUER:-securebrowser-backend}
+      SBP_JWT_AUDIENCE: ${SBP_JWT_AUDIENCE:-securebrowser-api}
+      SBP_JWT_MAX_LIFETIME_SECONDS: ${SBP_JWT_MAX_LIFETIME_SECONDS:-900}
+      SBP_REFRESH_TOKEN_LIFETIME_SECONDS: ${SBP_REFRESH_TOKEN_LIFETIME_SECONDS:-604800}
+      SPRING_PROFILES_ACTIVE: demo
+      SBP_DEMO_ADMIN_PASSWORD: ${SBP_DEMO_ADMIN_PASSWORD:?Define la contrasena inicial del ADMIN demo}
+      SBP_DEMO_USER_PASSWORD: ${SBP_DEMO_USER_PASSWORD:?Define la contrasena inicial del USER demo}
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: 8080
+    ports:
+      - "127.0.0.1:${SBP_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      # Comprueba que Tomcat acepta conexiones locales en el puerto de la API.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+volumes:
+  sbp-postgres-data:

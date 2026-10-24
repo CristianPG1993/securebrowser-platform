@@ -65,3 +65,9 @@ jobs:
 
       - name: Build, test and package backend
         run: ./mvnw --batch-mode --no-transfer-progress verify
+
+      - name: Verify Compose delivery and Postman after recreation
+        working-directory: .
+        env:
+          SBP_HTTP_PORT: '8080'
+        run: bash scripts/verify-compose.sh

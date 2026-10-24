@@ -1,0 +1,12 @@
+# Solo se envían al constructor los archivos necesarios para generar el JAR.
+**
+!Dockerfile
+!.dockerignore
+!pom.xml
+!mvnw
+!.mvn/
+!.mvn/wrapper/
+!.mvn/wrapper/maven-wrapper.properties
+!src/
+!src/main/
+!src/main/**

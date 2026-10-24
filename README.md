@@ -49,6 +49,18 @@ primera recepción y limita las consultas de historial a la compañía o al
 propietario. Postman demuestra el recorrido de autenticación, edición de Policy,
 consulta de Device/Policy y envío y consulta de SecurityEvent.
 
+La entrega local utiliza [Docker Compose](compose.yaml) para construir el backend
+desde código y arrancarlo junto a PostgreSQL 17, con datos persistentes y API en
+`http://127.0.0.1:8080`. El puerto local puede configurarse como 8081 si está ocupado.
+La [guía rápida de pruebas](backend/README.md#guía-rápida-de-pruebas) incluye la
+configuración, el arranque y las 28 comprobaciones Postman.
+
+La entrega del bloque 5 cierra el backend MVP: su alcance queda congelado en
+autenticación y datos demo, Policy, consultas de Device, SecurityEvent y entrega
+reproducible. El siguiente desarrollo pasa a C++/CEF. No se incorporan CRUDs
+adicionales ni nuevas funcionalidades backend; las tarjetas #59–#64 siguen
+pendientes y fuera del alcance implementado.
+
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).
 
@@ -57,6 +69,8 @@ Los requisitos y comandos de ejecución están disponibles en el
 El workflow [Backend CI](.github/workflows/backend.yml) compila el backend,
 ejecuta todas sus pruebas y genera el JAR mediante Maven Wrapper. Utiliza
 Java 25, PostgreSQL 17 y Docker para las pruebas con Testcontainers.
+También comprueba la entrega de Compose en 8080 y el recorrido Postman antes y
+después de recrear los contenedores conservando sus datos.
 Se ejecuta en las Pull Requests hacia `main` y con los pushes a `main`,
 incluidos los cambios de documentación.
 
