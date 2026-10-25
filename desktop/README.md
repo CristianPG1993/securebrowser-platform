@@ -8,6 +8,8 @@ El ejecutable temporal `sbp_toolchain_check` abre una ventana Qt con el título
 sin padre actúa como ventana independiente. Al cerrar la última ventana,
 termina el bucle de eventos y el proceso devuelve su código de salida.
 La integración CEF (Chromium Embedded Framework) se realizará más adelante.
+La preparación independiente de su SDK ya está disponible mediante
+[`setup-cef.ps1`](../scripts/setup-cef.ps1).
 
 ## Requisitos
 
@@ -19,6 +21,8 @@ La integración CEF (Chromium Embedded Framework) se realizará más adelante.
   paquete `10.0.28000.2270`. El identificador de instalación utilizado por
   CMake es `10.0.28000.0`.
 - Qt 6.12.0, kit `msvc2022_64`, con las bibliotecas Debug y Release.
+- Para preparar CEF: Windows PowerShell 5.1 y `tar.exe`, incluido en Windows 11.
+  La primera descarga requiere conexión a Internet.
 
 Las decisiones de integración están recogidas en el
 [ADR-0011 (Architecture Decision Record, registro de decisión arquitectónica)](../docs/adr/0011-desktop-cef-integration.md).
@@ -47,6 +51,69 @@ Para consultar la versión instalada desde PowerShell:
 El resultado esperado es `6.12.0`. Se usa la ruta completa para seleccionar
 este kit aunque exista otra versión de Qt en el `PATH` (variable de entorno
 de búsqueda de ejecutables).
+
+## Preparar CEF
+
+El manifiesto [`cef-sdk.json`](cef-sdk.json) fija la versión
+`156.0.14+g4fa4ab5+chromium-156.0.8078.48`, distribución Standard `windows64`,
+junto con el archivo, la URL (Uniform Resource Locator), el tamaño y el
+SHA-1 (Secure Hash Algorithm 1) publicados. La preparación usa esos valores;
+no selecciona automáticamente otra versión.
+
+Desde PowerShell, en la raíz del repositorio:
+
+```powershell
+.\scripts\setup-cef.ps1
+```
+
+En una primera preparación, el script descarga aproximadamente 367 MB,
+comprueba el tamaño y el SHA-1 del archivo y extrae el paquete completo.
+Utiliza ubicaciones temporales durante la descarga y extracción; el SDK
+pasa a su ruta definitiva después de comprobar los archivos esenciales,
+la versión de `include/cef_version.h` y la arquitectura x64 del bootstrap
+y `libcef.dll` de Debug y Release.
+
+Las rutas predeterminadas son:
+
+| Ruta | Contenido |
+| --- | --- |
+| `desktop/.deps/downloads/` | Archivo comprimido verificado. |
+| `desktop/.deps/cef/<directorio-del-paquete>/` | SDK completo: cabeceras, módulos CMake, fuentes del adaptador, binarios, recursos y avisos. |
+
+Para repetir la preparación, ejecutar el mismo comando. Si el SDK existente
+supera las comprobaciones de archivos esenciales, versión y arquitectura,
+se reutiliza sin descargar ni extraer. Si solo existe el archivo comprimido,
+se comprueba su tamaño y SHA-1 antes de extraerlo. La reutilización del SDK
+no recalcula un hash de cada archivo extraído.
+
+Para elegir otra ubicación, por ejemplo fuera del repositorio:
+
+```powershell
+.\scripts\setup-cef.ps1 -DependenciesDirectory "C:/SBP-deps"
+```
+
+El directorio indicado contendrá las subcarpetas `downloads/` y `cef/`.
+Las rutas relativas proporcionadas por el usuario se resuelven desde la
+carpeta actual de PowerShell. La ubicación predeterminada y la del manifiesto
+se calculan desde la carpeta del script, por lo que no dependen de esa carpeta
+actual.
+
+Al terminar se muestra `CEF_ROOT: <ruta-completa-del-SDK>`. Esa ruta se
+proporcionará a CMake en #83; la construcción actual sigue correspondiendo
+a la ventana Qt. La preparación se ejecuta explícitamente, separada de la
+configuración CMake.
+
+Si el manifiesto es inválido, el archivo comprimido tiene un tamaño o SHA-1
+incorrecto, o el SDK existente está incompleto o no corresponde a la versión
+y arquitectura requeridas, el script termina con un diagnóstico. Los archivos
+incorrectos ya presentes en la caché y los SDK existentes se conservan para
+revisión. Corregir o apartar el elemento indicado antes de repetir el comando.
+Los temporales creados por el intento se limpian al finalizar.
+
+`desktop/.deps/` está excluido de Git. Al utilizar otro destino dentro del
+repositorio, elegir también una carpeta excluida. Se versionan el manifiesto,
+el script y estas instrucciones; los paquetes, SDK y símbolos descargados
+permanecen locales.
 
 ## Configurar
 
@@ -179,3 +246,7 @@ La preparación de la distribución en #84 conservará los textos de licencia
 y avisos correspondientes a los componentes realmente redistribuidos,
 conforme al ADR-0011. Esta tarea prepara el entorno de desarrollo; todavía
 no genera un paquete para entregar a otros equipos.
+
+La extracción CEF conserva `LICENSE.txt`, `CREDITS.html` y los README del
+paquete. Estos archivos se mantendrán con los componentes redistribuidos
+al preparar la salida de ejecución en #84.

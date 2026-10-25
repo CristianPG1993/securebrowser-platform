@@ -13,6 +13,9 @@ CMakeCache.txt
 cmake-build-*/
 CMakeUserPresets.json
 
+# Desktop dependencies
+/desktop/.deps/
+
 # Android / Gradle
 .gradle/
 .cxx/
