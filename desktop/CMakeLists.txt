@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.29)
 
 project(SecureBrowser LANGUAGES CXX)
 
+# CMake identifica el sistema, el compilador y la arquitectura al ejecutar project().
+if(NOT WIN32 OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
+    OR NOT CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+    message(FATAL_ERROR "SecureBrowser requires MSVC targeting Windows x64. Select the x64 toolchain.")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -19,6 +25,99 @@ if(NOT Qt6_DIR OR NOT EXISTS "${Qt6_DIR}/Qt6Config.cmake")
 endif()
 
 find_package(Qt6 6.12.0 EXACT REQUIRED CONFIG COMPONENTS Widgets NO_DEFAULT_PATH)
+
+# El SDK se prepara con setup-cef.ps1 y se selecciona mediante una ruta local.
+set(CEF_ROOT "" CACHE PATH "Root directory of the approved CEF binary distribution")
+if(NOT CEF_ROOT OR NOT IS_DIRECTORY "${CEF_ROOT}")
+    message(FATAL_ERROR
+        "CEF SDK not found. Run scripts/setup-cef.ps1 and configure with "
+        "-DCEF_ROOT=<the SDK root printed by the script>."
+    )
+endif()
+
+foreach(CEF_REQUIRED_FILE IN ITEMS
+    include/cef_app.h include/cef_version.h include/cef_sandbox_win.h
+    cmake/FindCEF.cmake cmake/cef_variables.cmake cmake/cef_macros.cmake
+    libcef_dll/CMakeLists.txt
+    Debug/libcef.lib Debug/bootstrap.exe Debug/libcef.dll
+    Release/libcef.lib Release/bootstrap.exe Release/libcef.dll
+)
+    if(NOT EXISTS "${CEF_ROOT}/${CEF_REQUIRED_FILE}")
+        message(FATAL_ERROR "CEF SDK is incomplete: missing ${CEF_ROOT}/${CEF_REQUIRED_FILE}")
+    endif()
+endforeach()
+
+# La versión esperada procede del mismo manifiesto que utiliza la preparación.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/cef-sdk.json" SBP_CEF_MANIFEST)
+string(JSON SBP_CEF_VERSION GET "${SBP_CEF_MANIFEST}" version)
+file(STRINGS "${CEF_ROOT}/include/cef_version.h" SBP_CEF_VERSION_DEFINE
+    REGEX "^#define CEF_VERSION "
+)
+if(NOT SBP_CEF_VERSION_DEFINE STREQUAL "#define CEF_VERSION \"${SBP_CEF_VERSION}\"")
+    message(FATAL_ERROR "CEF SDK version does not match cef-sdk.json: expected ${SBP_CEF_VERSION}")
+endif()
+
+# Comprueba las cabeceras PE (Portable Executable) del SDK sin ejecutar sus binarios.
+function(sbp_require_x64_binary SBP_BINARY_PATH)
+    file(SIZE "${SBP_BINARY_PATH}" SBP_BINARY_SIZE)
+    if(SBP_BINARY_SIZE LESS 64)
+        message(FATAL_ERROR "CEF binary has an incomplete Windows header: ${SBP_BINARY_PATH}")
+    endif()
+    file(READ "${SBP_BINARY_PATH}" SBP_DOS_HEADER LIMIT 64 HEX)
+    if(NOT SBP_DOS_HEADER MATCHES "^4d5a")
+        message(FATAL_ERROR "CEF binary is not a Windows PE file: ${SBP_BINARY_PATH}")
+    endif()
+
+    # Los cuatro bytes de la posición 0x3C indican dónde comienza la cabecera PE.
+    string(SUBSTRING "${SBP_DOS_HEADER}" 120 8 SBP_PE_OFFSET_HEX)
+    string(REGEX REPLACE "^(..)(..)(..)(..)$" "\\4\\3\\2\\1" SBP_PE_OFFSET_HEX "${SBP_PE_OFFSET_HEX}")
+    math(EXPR SBP_PE_OFFSET "0x${SBP_PE_OFFSET_HEX}")
+    math(EXPR SBP_MAX_PE_OFFSET "${SBP_BINARY_SIZE} - 6")
+    if(SBP_PE_OFFSET LESS 64 OR SBP_PE_OFFSET GREATER SBP_MAX_PE_OFFSET)
+        message(FATAL_ERROR "CEF binary has an invalid PE header offset: ${SBP_BINARY_PATH}")
+    endif()
+
+    # Firma PE seguida del identificador x64 (0x8664), en el orden de bytes del archivo.
+    file(READ "${SBP_BINARY_PATH}" SBP_PE_HEADER OFFSET ${SBP_PE_OFFSET} LIMIT 6 HEX)
+    if(NOT SBP_PE_HEADER STREQUAL "504500006486")
+        message(FATAL_ERROR "CEF SDK binary must be Windows x64: ${SBP_BINARY_PATH}")
+    endif()
+endfunction()
+
+foreach(SBP_CEF_CONFIGURATION IN ITEMS Debug Release)
+    foreach(SBP_CEF_BINARY IN ITEMS bootstrap.exe libcef.dll)
+        sbp_require_x64_binary("${CEF_ROOT}/${SBP_CEF_CONFIGURATION}/${SBP_CEF_BINARY}")
+    endforeach()
+endforeach()
+
+# Debe fijarse antes de cargar CEF: sus reglas añaden la variante /MDd en Debug.
+set(CEF_RUNTIME_LIBRARY_FLAG "/MD" CACHE STRING "MSVC runtime used by the CEF wrapper" FORCE)
+list(PREPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
+find_package(CEF REQUIRED)
+
+# Compila el adaptador oficial y mantiene sus salidas dentro del directorio de construcción.
+add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}"
+    "${CMAKE_CURRENT_BINARY_DIR}/libcef_dll_wrapper"
+)
+
+# Selecciona la biblioteca de enlace del motor precompilado según la configuración.
+ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+
+# Nuestra DLL implementa la entrada que invoca el bootstrap.
+add_library(SecureBrowser SHARED app_entry_win.cpp)
+target_include_directories(SecureBrowser PRIVATE "${CEF_INCLUDE_PATH}")
+target_link_libraries(SecureBrowser PRIVATE
+    Qt6::Widgets
+    libcef_dll_wrapper
+    libcef_lib
+    ${CEF_STANDARD_LIBS}
+)
+
+# Copia el bootstrap de la configuración elegida junto a nuestra DLL y lo renombra.
+COPY_SINGLE_FILE(SecureBrowser
+    "${CEF_BINARY_DIR}/bootstrap.exe"
+    "$<TARGET_FILE_DIR:SecureBrowser>/SecureBrowser.exe"
+)
 
 add_executable(sbp_toolchain_check main.cpp)
 target_link_libraries(sbp_toolchain_check PRIVATE Qt6::Widgets)
