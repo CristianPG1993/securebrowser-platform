@@ -2,11 +2,12 @@
 
 ## Estado actual
 
-`sbp_toolchain_check` es un ejecutable temporal para comprobar la cadena de
-herramientas C++. Su entrada `main` devuelve `0`, sin mostrar texto ni abrir
-ventanas. La tarea #80 incorpora la localización de Qt y el enlace con
-`Qt6::Widgets`. Todavía no se utilizan clases Qt ni se integra CEF
-(Chromium Embedded Framework).
+El ejecutable temporal `sbp_toolchain_check` abre una ventana Qt con el título
+**SecureBrowser** y un tamaño inicial de 1024 por 768 unidades lógicas.
+`QApplication` inicializa Qt Widgets y procesa los eventos; un `QWidget`
+sin padre actúa como ventana independiente. Al cerrar la última ventana,
+termina el bucle de eventos y el proceso devuelve su código de salida.
+La integración CEF (Chromium Embedded Framework) se realizará más adelante.
 
 ## Requisitos
 
@@ -86,25 +87,51 @@ Las fuentes permanecen fuera del directorio de construcción. La exclusión
 
 ## Compilar y ejecutar
 
-Debug:
+Desde la raíz del repositorio, añadir primero el directorio `bin` del kit
+Qt al `PATH` de la terminal PowerShell actual:
+
+```powershell
+$env:PATH = "C:\Qt\6.12.0\msvc2022_64\bin;$env:PATH"
+```
+
+`Qt6_DIR` indica a CMake cómo configurar y enlazar el proyecto. Este ajuste
+de `PATH` permite que Windows encuentre las bibliotecas Qt al ejecutar el
+programa durante el desarrollo. El kit instalado proporciona también el
+plugin de plataforma. La preparación de una carpeta de ejecución con todas
+sus dependencias se implementará en #84.
+
+Compilar Debug y ejecutar desde su directorio de salida:
 
 ```powershell
 cmake --build desktop/build --config Debug --target sbp_toolchain_check
-.\desktop\build\Debug\sbp_toolchain_check.exe
+Push-Location desktop/build/Debug
+.\sbp_toolchain_check.exe
 $LASTEXITCODE
+Pop-Location
 ```
 
-Release:
+Desde la raíz del repositorio, repetir para Release en la misma terminal:
 
 ```powershell
 cmake --build desktop/build --config Release --target sbp_toolchain_check
-.\desktop\build\Release\sbp_toolchain_check.exe
+Push-Location desktop/build/Release
+.\sbp_toolchain_check.exe
 $LASTEXITCODE
+Pop-Location
 ```
 
 Comprobar que cada comando de CMake termina sin errores antes de continuar.
 El código de salida inmediatamente después de ejecutar cada programa debe
-ser `0`. El programa no produce salida visible.
+ser `0`. La ejecución permanece activa hasta cerrar la ventana; no imprime
+texto en la terminal.
+
+En ambas configuraciones, comprobar manualmente:
+
+- La ventana aparece con el título **SecureBrowser** y el contenido vacío.
+- Se puede redimensionar y sigue respondiendo.
+- Se puede minimizar, restaurar, maximizar y volver al tamaño anterior.
+- Al cerrarla, desaparece la ventana, termina el proceso y la terminal
+  vuelve a estar disponible con código de salida `0`.
 
 `--config` selecciona la configuración y `--target` el ejecutable que se
 construye. El generador Visual Studio admite ambas configuraciones dentro
@@ -122,7 +149,7 @@ y `/MD` en Release, mediante `CMAKE_MSVC_RUNTIME_LIBRARY`.
 | `include/`, `lib/cmake/` y bibliotecas de enlace `.lib` en `lib/` | Configurar y compilar en el equipo de desarrollo. |
 | `bin/windeployqt.exe` | Preparar las dependencias Qt de una salida de ejecución. Se utiliza desde el mismo kit. |
 | `Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll` | Bibliotecas Release necesarias cuando la aplicación utiliza esos módulos. Las variantes Debug llevan sufijo `d`. |
-| `plugins/platforms/qwindows.dll` y su variante Debug `qwindowsd.dll` | Plugin de plataforma para la futura ventana Qt, situado en `platforms/` dentro de la salida. |
+| `plugins/platforms/qwindows.dll` y su variante Debug `qwindowsd.dll` | Plugin de plataforma para la ventana Qt, situado en `platforms/` dentro de la salida que se preparará en #84. |
 
 La copia de las DLL (Dynamic-Link Library, bibliotecas de enlace dinámico),
 plugins y dependencias adicionales se implementará en #84 conforme al
@@ -130,9 +157,10 @@ ADR-0011 y a la
 [guía de distribución en Windows](https://doc.qt.io/qt-6/windows-deployment.html).
 El SDK de desarrollo completo no forma parte de la carpeta de ejecución.
 
-El `main` actual no llama a funciones Qt. Su salida `0` comprueba el programa
-mínimo, pero todavía no acredita la carga de bibliotecas Qt ni del plugin
-de plataforma. La ventana y su ejecución se comprobarán en #81.
+Se han comprobado la apertura y el cierre normal en Debug y Release, con
+código de salida `0`, cargando las bibliotecas Qt y el plugin de plataforma
+desde el kit instalado. Esta verificación corresponde al entorno de
+desarrollo; la distribución independiente del SDK se comprobará en #84.
 
 La instalación Qt queda fuera del repositorio; `build/`, `CMakeCache.txt`
 y `CMakeUserPresets.json` están excluidos por `.gitignore`. Solo se versionan
