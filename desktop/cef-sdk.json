@@ -1,0 +1,9 @@
+{
+  "version": "156.0.14+g4fa4ab5+chromium-156.0.8078.48",
+  "platform": "windows64",
+  "distribution": "standard",
+  "archive": "cef_binary_156.0.14+g4fa4ab5+chromium-156.0.8078.48_windows64.tar.bz2",
+  "url": "https://cef-builds.spotifycdn.com/cef_binary_156.0.14+g4fa4ab5+chromium-156.0.8078.48_windows64.tar.bz2",
+  "sizeBytes": 367176591,
+  "sha1": "7a1049f0facf3b6ce9efc4d683cf1bac72691ba6"
+}
