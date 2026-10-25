@@ -10,6 +10,8 @@ termina el bucle de eventos y el proceso devuelve su código de salida.
 El target `SecureBrowser` construye nuestra DLL (Dynamic-Link Library,
 biblioteca de enlace dinámico), enlazada con Qt y CEF (Chromium Embedded
 Framework). Junto a ella copia el bootstrap oficial como `SecureBrowser.exe`.
+La construcción prepara también los binarios y recursos CEF, las dependencias
+Qt, los avisos de terceros y los permisos de la carpeta de ejecución.
 La entrada `RunWinMain` de [`app_entry_win.cpp`](app_entry_win.cpp) es mínima
 y devuelve `0`; la inicialización de CEF se implementará en #85.
 La preparación independiente del SDK CEF está disponible mediante
@@ -25,6 +27,9 @@ La preparación independiente del SDK CEF está disponible mediante
   paquete `10.0.28000.2270`. El identificador de instalación utilizado por
   CMake es `10.0.28000.0`.
 - Qt 6.12.0, kit `msvc2022_64`, con las bibliotecas Debug y Release.
+- Textos `Licenses/` del instalador Qt e inventarios `sbom/` del kit.
+- Runtime de Microsoft Visual C++ v143 x64 compatible para ejecutar Release.
+  Debug requiere las bibliotecas de depuración del entorno de desarrollo.
 - Para preparar CEF: Windows PowerShell 5.1 y `tar.exe`, incluido en Windows 11.
   La primera descarga requiere conexión a Internet.
 
@@ -161,6 +166,13 @@ CMake carga `FindCEF.cmake` desde `CEF_ROOT/cmake/`. Ese módulo carga
 oficiales. El adaptador se construye desde `CEF_ROOT/libcef_dll/`, con sus
 salidas en `desktop/build/libcef_dll_wrapper/`.
 
+Los avisos Qt se localizan a partir de `Qt6_DIR`: la raíz del kit está tres
+niveles por encima y contiene `sbom/`. Para la instalación del ejemplo, los
+textos comunes están en `C:/Qt/Licenses`. Si se guardaron en otro lugar,
+añadir `"-DSBP_QT_LICENSE_DIR=<carpeta-que-contiene-LICENSE>"` al comando de
+configuración. CMake diagnostica la ausencia de ese archivo o de cualquiera
+de los tres inventarios Qt requeridos.
+
 El aviso `Could NOT find WrapVulkanHeaders` indica que no se han encontrado
 las cabeceras de desarrollo de Vulkan. El programa actual no las necesita;
 si aparecen `Configuring done` y `Generating done` sin errores, la
@@ -174,7 +186,7 @@ la prueba desde cero sin borrar la construcción anterior, se puede sustituir
 Las fuentes permanecen fuera del directorio de construcción. La exclusión
 `build/` del repositorio mantiene los archivos generados fuera de Git.
 
-## Construir la DLL y el bootstrap
+## Construir y preparar la carpeta de ejecución
 
 Desde la raíz del repositorio, después de configurar:
 
@@ -183,21 +195,85 @@ cmake --build desktop/build --config Debug --target SecureBrowser --parallel 4
 cmake --build desktop/build --config Release --target SecureBrowser --parallel 4
 ```
 
-El target compila `app_entry_win.cpp` como biblioteca dinámica. Construye
-`libcef_dll_wrapper` como dependencia y enlaza con Qt Widgets, el adaptador,
-el `libcef.lib` correspondiente a la configuración y las bibliotecas de
-Windows declaradas por CEF. Después copia el bootstrap de esa configuración
-y lo renombra:
+El flujo de construcción es:
+
+1. Construir `libcef_dll_wrapper` y el ejecutable temporal
+   `sbp_toolchain_check`, dependencias del target `SecureBrowser`.
+2. Compilar `app_entry_win.cpp` y enlazar `SecureBrowser.dll` con Qt Widgets,
+   el adaptador, el `libcef.lib` correspondiente y las bibliotecas de Windows
+   declaradas por CEF.
+3. Copiar el bootstrap de esa configuración como `SecureBrowser.exe`, los
+   binarios de `CEF_BINARY_FILES` y los recursos de `CEF_RESOURCE_FILES`.
+   Ambas listas proceden de `cef_variables.cmake`; `COPY_FILES` y
+   `COPY_SINGLE_FILE` proceden de `cef_macros.cmake`.
+4. Ejecutar `Qt6::windeployqt`, herramienta del kit seleccionado, con su
+   `Qt6::qtpaths`, modo Debug o Release explícito y destino junto a la DLL.
+   Se analizan `SecureBrowser.dll` y `sbp_toolchain_check.exe`: la entrada
+   mínima de nuestra DLL todavía no utiliza funciones Qt y el ejecutable
+   temporal aporta esas dependencias durante esta etapa.
+5. Conservar los avisos CEF y Qt, y aplicar los permisos de lectura y
+   ejecución necesarios para el sandbox mediante `SET_LPAC_ACLS`.
+
+Cada configuración tiene su propia salida. Ejemplo de Release:
 
 ```text
-desktop/build/
-├── Debug/
-│   ├── SecureBrowser.dll
-│   └── SecureBrowser.exe
-└── Release/
-    ├── SecureBrowser.dll
-    └── SecureBrowser.exe
+desktop/build/Release/
+├── SecureBrowser.exe
+├── SecureBrowser.dll
+├── sbp_toolchain_check.exe
+├── libcef.dll
+├── chrome_elf.dll
+├── d3dcompiler_47.dll
+├── dxcompiler.dll
+├── v8_context_snapshot.bin
+├── vk_swiftshader.dll
+├── vk_swiftshader_icd.json
+├── vulkan-1.dll
+├── icudtl.dat
+├── chrome_100_percent.pak
+├── chrome_200_percent.pak
+├── resources.pak
+├── locales/
+├── Qt6Core.dll
+├── Qt6Gui.dll
+├── Qt6Widgets.dll
+├── platforms/qwindows.dll
+├── ...otras dependencias, plugins y traducciones Qt
+├── README.txt
+├── LICENSE.txt
+├── CREDITS.html
+└── qt-notices/
+    ├── licenses/
+    └── sbom/
 ```
+
+En Debug, las DLL y plugins Qt utilizan sus variantes con sufijo `d`.
+`locales/` se conserva completo; los recursos CEF se copian junto al
+ejecutable, sin crear un nivel adicional `Resources/`.
+
+`windeployqt` incorpora las dependencias adicionales que detecta, como Qt
+Network, Qt SVG, plugins y traducciones. Las opciones
+`--no-system-d3d-compiler` y `--no-system-dxc-compiler` conservan las versiones
+gráficas copiadas desde CEF. `--no-compiler-runtime` deja el runtime de
+Microsoft como requisito del equipo y evita añadir un instalador a la salida.
+
+`CEF_TARGET_OUT_DIR` se fija a `$<TARGET_FILE_DIR:SecureBrowser>` antes de
+llamar a `SET_LPAC_ACLS`. Esa macro del SDK ejecuta `icacls` sobre la carpeta
+de la configuración y concede lectura y ejecución heredables al identificador
+`S-1-15-2-2`, requerido por LPAC (Less Privileged AppContainer). ACL significa
+Access Control List (lista de control de acceso).
+
+Estas operaciones se ejecutan después de construir el target. Construir
+directamente `sbp_toolchain_check` no prepara la distribución. Si se borran
+archivos de una salida ya construida, repetir la preparación con:
+
+```powershell
+cmake --build desktop/build --config Debug --target SecureBrowser --clean-first --parallel 4
+```
+
+Para Release, sustituir `Debug` por `Release`. Para verificar una construcción
+desde cero, configurar y construir en otra carpeta vacía según las
+instrucciones anteriores; no es necesario copiar dependencias a mano.
 
 `SecureBrowser.exe` conserva los bytes del `bootstrap.exe` oficial. Nuestro
 código está en `SecureBrowser.dll`, que exporta `RunWinMain` con la firma
@@ -212,44 +288,52 @@ dumpbin /exports desktop/build/Release/SecureBrowser.dll
 ```
 
 En ambos resultados debe aparecer el nombre exacto `RunWinMain`.
-Esta etapa comprueba construcción, enlace, exportación y copia del bootstrap.
-La carpeta completa de ejecución con DLL, recursos y permisos se prepara en
-#84; la inicialización CEF y los subprocesos, en #85.
+La preparación de la carpeta no inicializa CEF. `SecureBrowser.exe` utiliza
+todavía una entrada que devuelve `0`, sin abrir una ventana. La inicialización
+CEF y los subprocesos se implementarán en #85. La ventana disponible se
+comprueba con el ejecutable temporal, como se explica a continuación.
 
 ## Compilar y ejecutar la ventana Qt de comprobación
 
-Desde la raíz del repositorio, añadir primero el directorio `bin` del kit
-Qt al `PATH` de la terminal PowerShell actual:
+Construir el target `SecureBrowser` para preparar también las dependencias.
+Después, ejecutar la ventana temporal sin añadir Qt al `PATH` (variable de
+entorno de búsqueda de ejecutables). Desde la raíz del repositorio:
 
 ```powershell
-$env:PATH = "C:\Qt\6.12.0\msvc2022_64\bin;$env:PATH"
-```
-
-`Qt6_DIR` indica a CMake cómo configurar y enlazar el proyecto. Este ajuste
-de `PATH` permite que Windows encuentre las bibliotecas Qt al ejecutar el
-programa durante el desarrollo. El kit instalado proporciona también el
-plugin de plataforma. La preparación de una carpeta de ejecución con todas
-sus dependencias se implementará en #84.
-
-Compilar Debug y ejecutar desde su directorio de salida:
-
-```powershell
-cmake --build desktop/build --config Debug --target sbp_toolchain_check
-Push-Location desktop/build/Debug
-.\sbp_toolchain_check.exe
+cmake --build desktop/build --config Debug --target SecureBrowser --parallel 4
+.\desktop\build\Debug\sbp_toolchain_check.exe
 $LASTEXITCODE
-Pop-Location
 ```
 
 Desde la raíz del repositorio, repetir para Release en la misma terminal:
 
 ```powershell
-cmake --build desktop/build --config Release --target sbp_toolchain_check
-Push-Location desktop/build/Release
-.\sbp_toolchain_check.exe
+cmake --build desktop/build --config Release --target SecureBrowser --parallel 4
+.\desktop\build\Release\sbp_toolchain_check.exe
 $LASTEXITCODE
-Pop-Location
 ```
+
+Para comprobar que no depende de la carpeta de trabajo ni de Qt en el `PATH`,
+utilizar una terminal PowerShell de prueba. Guardar primero la ruta completa
+y ejecutar desde la carpeta temporal, restaurando el entorno al terminar:
+
+```powershell
+$windowExe = (Resolve-Path -LiteralPath "desktop/build/Release/sbp_toolchain_check.exe").Path
+$previousPath = $env:PATH
+Push-Location $env:TEMP
+try {
+    $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+    & $windowExe
+    $LASTEXITCODE
+} finally {
+    $env:PATH = $previousPath
+    Pop-Location
+}
+```
+
+Repetir con `Debug` en la ruta. La terminal de prueba no debe tener variables
+Qt personalizadas que redirijan los plugins, como `QT_PLUGIN_PATH` o
+`QT_QPA_PLATFORM_PLUGIN_PATH`.
 
 Comprobar que cada comando de CMake termina sin errores antes de continuar.
 El código de salida inmediatamente después de ejecutar cada programa debe
@@ -283,25 +367,24 @@ y `/MD` en Release. Los targets propios la seleccionan mediante
 | `include/`, `lib/cmake/` y bibliotecas de enlace `.lib` en `lib/` | Configurar y compilar en el equipo de desarrollo. |
 | `bin/windeployqt.exe` | Preparar las dependencias Qt de una salida de ejecución. Se utiliza desde el mismo kit. |
 | `Qt6Core.dll`, `Qt6Gui.dll`, `Qt6Widgets.dll` | Bibliotecas Release necesarias cuando la aplicación utiliza esos módulos. Las variantes Debug llevan sufijo `d`. |
-| `plugins/platforms/qwindows.dll` y su variante Debug `qwindowsd.dll` | Plugin de plataforma para la ventana Qt, situado en `platforms/` dentro de la salida que se preparará en #84. |
+| `plugins/platforms/qwindows.dll` y su variante Debug `qwindowsd.dll` | Plugin de plataforma para la ventana Qt, copiado a `platforms/` dentro de la salida. |
 
 | Elementos de CEF | Uso |
 | --- | --- |
 | Cabeceras, módulos CMake y fuentes de `libcef_dll/` | Configurar y compilar con el SDK. |
 | `libcef.lib` y `libcef_dll_wrapper.lib` | Bibliotecas de enlace utilizadas al construir nuestra DLL. |
 | `bootstrap.exe` | Se copia como `SecureBrowser.exe` junto a nuestra DLL. |
-| `libcef.dll`, otros binarios CEF y `Resources/` | Dependencias de ejecución que se prepararán en #84. |
+| `libcef.dll`, otros binarios CEF y `Resources/` | Dependencias de ejecución copiadas automáticamente junto al ejecutable. |
 
-La copia de las DLL, plugins y dependencias adicionales se implementará en
-#84 conforme al
-ADR-0011 y a la
+La preparación sigue el ADR-0011 y utiliza la herramienta de la
 [guía de distribución en Windows](https://doc.qt.io/qt-6/windows-deployment.html).
 El SDK de desarrollo completo no forma parte de la carpeta de ejecución.
 
-Se han comprobado la apertura y el cierre normal en Debug y Release, con
-código de salida `0`, cargando las bibliotecas Qt y el plugin de plataforma
-desde el kit instalado. Esta verificación corresponde al entorno de
-desarrollo; la distribución independiente del SDK se comprobará en #84.
+Se han comprobado la apertura y el cierre normal de la ventana en Debug y
+Release desde la carpeta temporal, con `PATH` limitado a Windows y código
+de salida `0`. Las bibliotecas Qt y el plugin de plataforma se cargan desde
+la salida preparada. Esto verifica la ventana Qt en el equipo de desarrollo;
+la ejecución CEF con sandbox se comprobará al implementar su inicialización.
 
 La instalación Qt queda fuera del repositorio; `build/`, `CMakeCache.txt`
 y `CMakeUserPresets.json` están excluidos por `.gitignore`. Solo se versionan
@@ -313,14 +396,24 @@ Las condiciones de Qt dependen de los módulos y de la opción de licencia
 utilizada. Las referencias son la
 [documentación de licencias Qt](https://doc.qt.io/qt-6/licensing.html) y el
 [inventario de código de terceros](https://doc.qt.io/qt-6/licenses-used-in-qt.html).
-El kit instalado también contiene el directorio `sbom/` con el inventario
-de componentes y sus licencias.
+La salida conserva los siguientes archivos sin modificar sus textos:
 
-La preparación de la distribución en #84 conservará los textos de licencia
-y avisos correspondientes a los componentes realmente redistribuidos,
-conforme al ADR-0011. Esta tarea prepara el entorno de desarrollo; todavía
-no genera un paquete para entregar a otros equipos.
+| Destino | Origen y contenido |
+| --- | --- |
+| `README.txt`, `LICENSE.txt`, `CREDITS.html` | Instrucciones, licencia y créditos de la distribución CEF fijada. |
+| `qt-notices/licenses/` | Textos comunes del instalador, desde `SBP_QT_LICENSE_DIR`; incluye `LICENSE` con los textos GNU GPL (General Public License) y LGPL (Lesser General Public License). |
+| `qt-notices/sbom/qtbase-6.12.0.spdx.json` | Inventario del kit para Qt Core, Gui, Widgets, Network y plugins asociados. |
+| `qt-notices/sbom/qtsvg-6.12.0.spdx.json` | Inventario del kit para Qt SVG y sus plugins. |
+| `qt-notices/sbom/qttranslations-6.12.0.spdx.json` | Inventario del kit para las traducciones. |
 
-La extracción CEF conserva `LICENSE.txt`, `CREDITS.html` y los README del
-paquete. Estos archivos se mantendrán con los componentes redistribuidos
-al preparar la salida de ejecución en #84.
+SBOM significa Software Bill of Materials (inventario de componentes de
+software); SPDX significa Software Package Data Exchange. Los documentos
+conservan versiones, copyright, identificadores de licencia y textos de
+licencias específicas proporcionados por Qt. Se copian completos por módulo
+y también describen archivos de desarrollo o componentes que no se despliegan.
+Si se incorporan otros módulos en el futuro, revisar sus inventarios y avisos.
+
+Los avisos se copian desde las instalaciones locales seleccionadas; la
+configuración y construcción no descargan textos. Esta etapa prepara una
+carpeta de ejecución local; el instalador y la publicación siguen fuera del
+alcance de Foundation.

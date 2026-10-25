@@ -119,5 +119,69 @@ COPY_SINGLE_FILE(SecureBrowser
     "$<TARGET_FILE_DIR:SecureBrowser>/SecureBrowser.exe"
 )
 
+# Las listas y carpetas proceden de cef_variables.cmake; COPY_FILES, de cef_macros.cmake.
+# Copia los binarios de Debug/Release y los recursos comunes junto a nuestra DLL.
+COPY_FILES(SecureBrowser "${CEF_BINARY_FILES}"
+    "${CEF_BINARY_DIR}" "$<TARGET_FILE_DIR:SecureBrowser>"
+)
+COPY_FILES(SecureBrowser "${CEF_RESOURCE_FILES}"
+    "${CEF_RESOURCE_DIR}" "$<TARGET_FILE_DIR:SecureBrowser>"
+)
+
+# Conserva las instrucciones, la licencia y los créditos de la distribución CEF.
+COPY_FILES(SecureBrowser "README.txt;LICENSE.txt;CREDITS.html"
+    "${CEF_ROOT}" "$<TARGET_FILE_DIR:SecureBrowser>"
+)
+
 add_executable(sbp_toolchain_check main.cpp)
 target_link_libraries(sbp_toolchain_check PRIVATE Qt6::Widgets)
+
+# La entrada de nuestra DLL aún no usa Qt; el ejecutable temporal aporta esas dependencias.
+add_dependencies(SecureBrowser sbp_toolchain_check)
+
+# Estos targets de herramientas proceden del kit cargado por find_package(Qt6).
+# Analiza ambos binarios y prepara Qt después de construir nuestra DLL.
+add_custom_command(TARGET SecureBrowser POST_BUILD
+    COMMAND Qt6::windeployqt
+        --qtpaths "$<TARGET_FILE:Qt6::qtpaths>"
+        "$<IF:$<CONFIG:Debug>,--debug,--release>"
+        --no-compiler-runtime
+        --no-system-d3d-compiler
+        --no-system-dxc-compiler
+        --dir "$<TARGET_FILE_DIR:SecureBrowser>"
+        "$<TARGET_FILE:SecureBrowser>"
+        "$<TARGET_FILE:sbp_toolchain_check>"
+    COMMENT "Deploying Qt libraries and plugins..."
+    VERBATIM
+)
+
+# Qt6_DIR apunta a <kit>/lib/cmake/Qt6; tres niveles arriba está la raíz del kit.
+get_filename_component(SBP_QT_KIT_ROOT "${Qt6_DIR}/../../.." ABSOLUTE)
+# El instalador oficial conserva sus textos comunes en <instalación-Qt>/Licenses.
+get_filename_component(SBP_QT_DEFAULT_LICENSE_DIR "${SBP_QT_KIT_ROOT}/../../Licenses" ABSOLUTE)
+set(SBP_QT_LICENSE_DIR "${SBP_QT_DEFAULT_LICENSE_DIR}" CACHE PATH "Directory containing Qt installer license texts")
+if(NOT EXISTS "${SBP_QT_LICENSE_DIR}/LICENSE")
+    message(FATAL_ERROR "Qt license texts not found. Set -DSBP_QT_LICENSE_DIR=<Qt installation>/Licenses.")
+endif()
+COPY_SINGLE_FILE(SecureBrowser
+    "${SBP_QT_LICENSE_DIR}" "$<TARGET_FILE_DIR:SecureBrowser>/qt-notices/licenses"
+)
+
+# SBOM (Software Bill of Materials) conserva componentes, versiones, copyright y licencias.
+# Estos módulos corresponden a las bibliotecas, plugins y traducciones desplegados.
+foreach(SBP_QT_MODULE IN ITEMS qtbase qtsvg qttranslations)
+    set(SBP_QT_SBOM_NAME "${SBP_QT_MODULE}-${Qt6_VERSION}.spdx.json")
+    if(NOT EXISTS "${SBP_QT_KIT_ROOT}/sbom/${SBP_QT_SBOM_NAME}")
+        message(FATAL_ERROR "Qt SBOM not found: ${SBP_QT_KIT_ROOT}/sbom/${SBP_QT_SBOM_NAME}")
+    endif()
+    COPY_SINGLE_FILE(SecureBrowser
+        "${SBP_QT_KIT_ROOT}/sbom/${SBP_QT_SBOM_NAME}"
+        "$<TARGET_FILE_DIR:SecureBrowser>/qt-notices/sbom/${SBP_QT_SBOM_NAME}"
+    )
+endforeach()
+
+# La macro oficial de CEF consulta esta variable para localizar la salida del target.
+set(CEF_TARGET_OUT_DIR "$<TARGET_FILE_DIR:SecureBrowser>")
+# Permite lectura y ejecución a LPAC (Less Privileged AppContainer), con herencia.
+# ACL significa Access Control List (lista de control de acceso).
+SET_LPAC_ACLS(SecureBrowser)
