@@ -20,6 +20,9 @@ inicializar CEF. Tras una inicialización correcta, muestra el `QWidget` y
 ejecuta `qt_app.exec()`. Todavía no crea instancias `CefBrowser` ni carga
 contenido web. `sbp_toolchain_check` conserva una ventana Qt independiente
 como comprobación básica del kit.
+`BrowserApp` recibe el aviso de contexto preparado y `BrowserClient` contiene
+los handlers (receptores de avisos) de creación y cierre para el navegador
+que incorporaremos en #88. Ambos objetos utilizan referencias de CEF.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
 
@@ -328,16 +331,29 @@ try {
 
 Mantener la ventana abierta durante 30-60 segundos: moverla, cambiar su tamaño,
 minimizarla, restaurarla y maximizarla. Debe seguir respondiendo. Después,
-cerrarla con la X. La terminal debe mostrar este diagnóstico y código `0`:
+cerrarla con la X. Los mensajes del hilo principal deben seguir este orden,
+con código final `0`:
 
 ```text
 Qt application created in the main process.
 CEF initialized successfully with bootstrap sandbox context.
+CEF browser client prepared; no browser instance created.
 Qt event loop starting with CEF initialized.
 Qt window destroyed; event loop exit code 0.
 CEF shutdown completed.
 0
 ```
+
+Además, debe aparecer una única vez el aviso del contexto:
+
+```text
+CEF context initialized; CEF UI thread: 1.
+```
+
+Ese mensaje se escribe desde el hilo UI (User Interface, interfaz de usuario)
+de CEF, por lo que puede intercalarse con los mensajes del hilo principal.
+El valor `1` confirma `CefCurrentlyOn(TID_UI)` tanto en Debug como en Release;
+la macro `CEF_REQUIRE_UI_THREAD` añade una comprobación de desarrollo en Debug.
 
 La espera manual no tiene timeout porque la ventana permanece abierta hasta
 que se solicita cerrarla. En una comprobación automatizada, limitar el tiempo
@@ -376,11 +392,15 @@ La entrada sigue este flujo:
 3. Obtener la carpeta local del usuario con `SHGetKnownFolderPath`, construir
    una ruta absoluta propia y copiarla a `settings.root_cache_path`. Liberar
    mediante `CoTaskMemFree` la memoria recibida de Windows.
-4. Llamar a `CefInitialize` una vez en el hilo principal. Si devuelve `false`,
+4. Llamar a `CefInitialize` una vez en el hilo principal con el `BrowserApp`
+   conservado por `cef_app`. CEF obtiene su `CefBrowserProcessHandler` y llama
+   a `OnContextInitialized` en su hilo UI cuando el contexto está preparado.
+   Si la inicialización devuelve `false`,
    devolver `CefGetExitCode` sin llamar a `CefShutdown`. CEF puede indicar un
    error o una salida anticipada normal; se conserva su código.
-5. Tras una inicialización correcta, crear y mostrar la ventana en el hilo
-   principal, y entrar en `qt_app.exec()`. CEF mantiene su propio bucle; no
+5. Tras una inicialización correcta, conservar un `BrowserClient` dentro del
+   ámbito de la ventana, crear y mostrar el widget en el hilo principal y
+   entrar en `qt_app.exec()`. CEF mantiene su propio bucle; no
    se llama a `CefRunMessageLoop`, `CefDoMessageLoopWork` ni se hace espera
    activa para procesar sus eventos.
 6. Al cerrar la última ventana, `exec()` devuelve el código Qt. Las llaves
@@ -460,6 +480,50 @@ con versiones anteriores. La inspección Win32 del propietario de la ventana y
 de las descripciones de los hilos confirmó que Qt y `CrBrowserMain` tenían
 identificadores distintos. En ambas configuraciones el cierre devolvió `0`
 y no quedaron auxiliares tras el margen de cinco segundos.
+
+## Objetos CEF y propiedad de sus referencias
+
+Las clases propias se definen en [`browser_app.h`](browser_app.h) y
+[`browser_client.h`](browser_client.h), dentro del namespace `sbp`.
+Sus métodos están implementados en los headers y no crean objetos Qt.
+
+| Objeto | Papeles | Avisos preparados |
+| --- | --- | --- |
+| `BrowserApp` | `CefApp` y `CefBrowserProcessHandler` | `OnContextInitialized`: contexto global preparado, sin argumentos, en el hilo UI de CEF. |
+| `BrowserClient` | `CefClient` y `CefLifeSpanHandler` | `OnAfterCreated`: navegador ya creado; `OnBeforeClose`: fase final del cierre. Reciben un `CefRefPtr<CefBrowser>`. |
+
+`GetBrowserProcessHandler` y `GetLifeSpanHandler` devuelven `this` mediante
+`CefRefPtr`: el mismo objeto visto como receptor de avisos, sin construir ni
+copiar otro objeto. CEF llama a los callbacks; no son funciones que debamos
+invocar manualmente para inicializar o cerrar el navegador.
+
+La propiedad y liberación de referencias es la siguiente:
+
+| Referencia | Quién la conserva | Cuándo se libera |
+| --- | --- | --- |
+| `cef_app` | Variable local `CefRefPtr<BrowserApp>` en `RunWinMain`. | Al salir de `RunWinMain`, después de `CefShutdown` y antes de destruir `QApplication`. |
+| Referencias de CEF al objeto de aplicación y a su handler | CEF durante la vida del contexto. | Durante su limpieza; la referencia local mantiene vivo nuestro objeto mientras dura el arranque y apagado. |
+| `browser_client` | Variable local `CefRefPtr<BrowserClient>` dentro del ámbito de la ventana. | Al salir de ese ámbito; actualmente se destruye después del widget y antes de `CefShutdown`. |
+| Parámetro `browser` de los callbacks | Referencia administrada durante cada llamada. | Al terminar la llamada. El cliente no la almacena en ningún miembro. |
+
+`IMPLEMENT_REFCOUNTING` proporciona `AddRef`, `Release` y el contador que
+utiliza `CefRefPtr`. Los destructores privados impiden un `delete` externo;
+la última referencia destruye el objeto. Las operaciones de copia del objeto
+están prohibidas, pero se pueden copiar sus referencias administradas.
+`.get()` entrega el puntero conservando nuestra referencia; al recibirlo como
+`CefRefPtr`, la API de CEF gestiona las referencias que necesite mantener.
+
+Ninguna de las clases almacena referencias a sí misma, a la otra clase, al
+widget Qt ni a un navegador. Así no se introduce un ciclo de propiedad.
+`OnContextInitialized`, `OnAfterCreated` y `OnBeforeClose` no modifican widgets
+desde el hilo CEF; únicamente comprueban el hilo o escriben un diagnóstico.
+
+En esta etapa se verifica que el aviso de contexto llega una vez en el hilo
+esperado, que se prepara el cliente y que la ventana abre y cierra con salida
+`0`. Los avisos `OnAfterCreated` y `OnBeforeClose` todavía no se ejecutan:
+se validarán con una instancia real en #88. No se simulan sus llamadas desde
+el hilo Qt. La creación y el cierre coordinado del navegador seguirán
+respetando las responsabilidades descritas en el ADR-0011.
 
 ## Ventana Qt independiente de comprobación del kit
 

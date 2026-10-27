@@ -1,3 +1,6 @@
+#include "browser_app.h"
+#include "browser_client.h"
+
 #include "include/cef_app.h"
 #include "include/cef_sandbox_win.h"
 
@@ -41,6 +44,9 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
     QApplication qt_app(qt_argc, qt_argv);
     std::fputs("Qt application created in the main process.\n", stderr);
 
+    // La referencia local vive hasta salir de RunWinMain; CEF puede conservar sus propias referencias.
+    CefRefPtr<sbp::BrowserApp> cef_app(new sbp::BrowserApp);
+
     // CefSettings contiene las opciones globales del motor. Conservamos el sandbox activado.
     CefSettings settings;
     settings.no_sandbox = false;
@@ -66,7 +72,8 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
     CefString(&settings.root_cache_path) = root_cache_path;
 
     // Inicializa el motor una sola vez en este proceso, con el contexto recibido del bootstrap.
-    if (!CefInitialize(main_args, settings, nullptr, sandbox_info)) {
+    // get() entrega el puntero sin abandonar la referencia que conserva cef_app.
+    if (!CefInitialize(main_args, settings, cef_app.get(), sandbox_info)) {
         // CEF puede indicar un fallo o una salida anticipada normal: conservamos su código.
         // Esta rama termina sin llamar a CefShutdown, porque la inicialización no continúa.
         const int initialization_exit_code = CefGetExitCode();
@@ -80,6 +87,11 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
     int qt_exit_code = 0;
     // Estas llaves crean un ámbito local que limita la vida del objeto window.
     {
+        // Conservamos el cliente durante la vida de la ventana; se utilizará al crear el navegador.
+        // Por ahora no almacena referencias a CefBrowser ni a objetos Qt, evitando ciclos de propiedad.
+        CefRefPtr<sbp::BrowserClient> browser_client(new sbp::BrowserClient);
+        std::fputs("CEF browser client prepared; no browser instance created.\n", stderr);
+
         // Reutilizamos la ventana mínima, ahora con CEF activo durante toda su vida.
         QWidget window;
         window.setWindowTitle("SecureBrowser");
