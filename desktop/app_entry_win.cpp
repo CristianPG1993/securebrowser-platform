@@ -1,4 +1,10 @@
+#include "include/cef_app.h"
 #include "include/cef_sandbox_win.h"
+
+#include <shlobj.h>
+
+#include <cstdio>
+#include <string>
 
 // Entrada que el bootstrap llama al cargar nuestra DLL (Dynamic-Link Library).
 CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
@@ -6,6 +12,62 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
                                   int nCmdShow,
                                   void* sandbox_info,
                                   cef_version_info_t* version_info) {
-    // Implementación mínima para comprobar el contrato de entrada.
+    // Prepara los argumentos de CEF con la instancia de Windows recibida del bootstrap.
+    CefMainArgs main_args(hInstance);
+
+    // El mismo ejecutable sirve al proceso principal y a los subprocesos de CEF.
+    // CEF consulta la línea de comandos y ejecuta el trabajo del subproceso si corresponde.
+    // nullptr deja los callbacks de CefApp vacíos; el contexto de sandbox se pasa sin modificar.
+    const int exit_code = CefExecuteProcess(main_args, nullptr, sandbox_info);
+    if (exit_code >= 0) {
+        // El subproceso ha terminado: devuelve su código sin crear objetos ni ventanas Qt.
+        return exit_code;
+    }
+
+    // Solo el proceso principal llega aquí. El bootstrap debe aportar el contexto de aislamiento.
+    if (sandbox_info == nullptr) {
+        std::fputs("CEF startup failed: missing bootstrap sandbox context.\n", stderr);
+        return 1;
+    }
+
+    // CefSettings contiene las opciones globales del motor. Conservamos el sandbox activado.
+    CefSettings settings;
+    settings.no_sandbox = false;
+    // CEF procesa sus eventos en un hilo propio; el bucle Qt se integrará en la siguiente tarea.
+    settings.multi_threaded_message_loop = true;
+    settings.external_message_pump = false;
+
+    // Windows obtiene la carpeta AppData\Local del usuario actual, sin fijar su nombre ni unidad.
+    PWSTR local_app_data = nullptr;
+    const HRESULT path_result = SHGetKnownFolderPath(
+        FOLDERID_LocalAppData, 0, nullptr, &local_app_data);
+    if (FAILED(path_result) || local_app_data == nullptr) {
+        // La API exige liberar el resultado también si falla; acepta un puntero nulo.
+        CoTaskMemFree(local_app_data);
+        std::fputs("CEF startup failed: could not locate the local application data directory.\n", stderr);
+        return 1;
+    }
+
+    // Copiamos la ruta antes de liberar la memoria que nos ha entregado Windows.
+    const std::wstring root_cache_path = std::wstring(local_app_data) + L"\\SecureBrowser\\CEF";
+    CoTaskMemFree(local_app_data);
+    // CEF recibe su propia copia de la cadena y crea sus datos internos bajo esta raíz absoluta.
+    CefString(&settings.root_cache_path) = root_cache_path;
+
+    // Inicializa el motor una sola vez en este proceso, con el contexto recibido del bootstrap.
+    if (!CefInitialize(main_args, settings, nullptr, sandbox_info)) {
+        // CEF puede indicar un fallo o una salida anticipada normal: conservamos su código.
+        // Esta rama termina sin llamar a CefShutdown, porque la inicialización no continúa.
+        const int initialization_exit_code = CefGetExitCode();
+        std::fprintf(stderr, "CEF initialization did not continue: exit code %d.\n",
+                     initialization_exit_code);
+        return initialization_exit_code;
+    }
+
+    // Prueba acotada: todavía no creamos navegadores ni ventanas Qt en esta entrada.
+    std::fputs("CEF initialized successfully with bootstrap sandbox context.\n", stderr);
+    // Solo apagamos el motor tras una inicialización correcta, desde el mismo hilo principal.
+    CefShutdown();
+    std::fputs("CEF shutdown completed.\n", stderr);
     return 0;
 }

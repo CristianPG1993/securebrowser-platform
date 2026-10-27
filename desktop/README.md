@@ -12,8 +12,11 @@ biblioteca de enlace dinámico), enlazada con Qt y CEF (Chromium Embedded
 Framework). Junto a ella copia el bootstrap oficial como `SecureBrowser.exe`.
 La construcción prepara también los binarios y recursos CEF, las dependencias
 Qt, los avisos de terceros y los permisos de la carpeta de ejecución.
-La entrada `RunWinMain` de [`app_entry_win.cpp`](app_entry_win.cpp) es mínima
-y devuelve `0`; la inicialización de CEF se implementará en #85.
+La entrada `RunWinMain` de [`app_entry_win.cpp`](app_entry_win.cpp) distingue
+el proceso principal de los subprocesos antes de crear objetos Qt. En el
+principal comprueba el contexto de sandbox, inicializa CEF y lo apaga como
+prueba acotada. Todavía no crea navegadores ni ventanas Qt en esa entrada;
+la coordinación con el bucle Qt se implementará en #86.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
 
@@ -288,10 +291,107 @@ dumpbin /exports desktop/build/Release/SecureBrowser.dll
 ```
 
 En ambos resultados debe aparecer el nombre exacto `RunWinMain`.
-La preparación de la carpeta no inicializa CEF. `SecureBrowser.exe` utiliza
-todavía una entrada que devuelve `0`, sin abrir una ventana. La inicialización
-CEF y los subprocesos se implementarán en #85. La ventana disponible se
-comprueba con el ejecutable temporal, como se explica a continuación.
+`SecureBrowser.exe` realiza ahora la comprobación CEF descrita a continuación.
+La ventana Qt sigue disponible mediante el ejecutable temporal.
+
+## Comprobar la inicialización y el apagado de CEF
+
+Desde PowerShell, en la raíz del repositorio, ejecutar una configuración cada
+vez. Esta prueba no abre una ventana: el proceso principal inicializa y apaga
+CEF, mientras que los subprocesos ejecutan únicamente el recorrido CEF.
+
+```powershell
+# Cambiar a "Release" para repetir la misma prueba en esa configuración.
+$configuration = "Debug"
+cmake --build desktop/build --config $configuration --target SecureBrowser --parallel 4
+if ($LASTEXITCODE -ne 0) { throw "La construcción ha fallado; no ejecutar la prueba." }
+
+# Usar rutas completas y guardar el diagnóstico de stderr (salida de errores).
+$cefExe = (Resolve-Path -LiteralPath "desktop/build/$configuration/SecureBrowser.exe").Path
+$startupLog = Join-Path $env:TEMP "sbp-cef-startup-$configuration.log"
+$process = Start-Process -FilePath $cefExe -WorkingDirectory $env:TEMP `
+    -RedirectStandardError $startupLog -PassThru
+try {
+    # Conservar el handle para leer el código aunque el proceso termine rápidamente en PowerShell 5.1.
+    $null = $process.Handle
+    # Esperar como máximo 20 segundos; terminar solo esta instancia si se bloquea.
+    if (-not $process.WaitForExit(20000)) {
+        & taskkill /PID $process.Id /T /F
+        throw "La comprobación CEF ha superado el timeout."
+    }
+    Get-Content -LiteralPath $startupLog
+    $process.ExitCode
+} finally {
+    $process.Dispose()
+}
+```
+
+El resultado esperado de una instancia nueva es este diagnóstico y código `0`:
+
+```text
+CEF initialized successfully with bootstrap sandbox context.
+CEF shutdown completed.
+0
+```
+
+Se utiliza el objeto devuelto por `Start-Process` para consultar `ExitCode`
+después de esperar. `$LASTEXITCODE` se comprueba inmediatamente después de
+compilar: ejecutar otro programa sustituiría ese valor y podría ocultar un
+fallo de construcción.
+
+Con ninguna otra instancia abierta, comprobar al terminar que no quedan
+procesos de la prueba:
+
+```powershell
+Get-Process -Name SecureBrowser -ErrorAction SilentlyContinue
+```
+
+El comando debe terminar sin listar procesos. `sbp_toolchain_check` es un
+ejecutable distinto y su ventana no forma parte de esta comprobación CEF.
+
+La entrada sigue este flujo:
+
+1. Crear `CefMainArgs` y llamar a `CefExecuteProcess` con el contexto recibido
+   del bootstrap. Un resultado mayor o igual que cero termina el subproceso
+   devolviendo ese mismo código, antes de crear cualquier objeto Qt.
+2. En el principal, exigir un contexto de sandbox no nulo y preparar
+   `CefSettings`: sandbox activado, `multi_threaded_message_loop = true` y
+   `external_message_pump = false`.
+3. Obtener la carpeta local del usuario con `SHGetKnownFolderPath`, construir
+   una ruta absoluta propia y copiarla a `settings.root_cache_path`. Liberar
+   mediante `CoTaskMemFree` la memoria recibida de Windows.
+4. Llamar a `CefInitialize` una vez en el hilo principal. Si devuelve `false`,
+   devolver `CefGetExitCode` sin llamar a `CefShutdown`. CEF puede indicar un
+   error o una salida anticipada normal; se conserva su código.
+5. Tras una inicialización correcta, llamar a `CefShutdown` desde el mismo
+   hilo principal y terminar con `0`. Esta prueba no crea browsers ni ejecuta
+   un segundo bucle bloqueante.
+
+La falta de contexto de sandbox o un fallo al localizar la carpeta del
+usuario producen un diagnóstico y código `1`, antes de inicializar el motor.
+El diagnóstico propio se escribe en `stderr`. CEF también puede escribir su
+log interno en `debug.log`, junto al ejecutable.
+
+Los datos internos de CEF se guardan bajo `%LOCALAPPDATA%\SecureBrowser\CEF`,
+normalmente `C:\Users\<usuario>\AppData\Local\SecureBrowser\CEF`. Windows
+resuelve esa ubicación para el usuario actual; no se fija un nombre de
+usuario, una unidad ni una ruta relativa al directorio de trabajo. CEF crea
+los directorios necesarios. Esta raíz evita utilizar la carpeta genérica de
+otras aplicaciones CEF; no implementa la persistencia de SBP con SQLite.
+Debug y Release utilizan la misma raíz: ejecutar las comprobaciones de forma
+secuencial y cerrar la instancia anterior antes de repetirlas.
+Si otra instancia sigue activa, CEF puede devolver `24`
+(`CEF_RESULT_CODE_NORMAL_EXIT_PROCESS_NOTIFIED` en el SDK fijado): ha avisado
+a la instancia existente y solicita terminar esta ejecución. En ese caso se
+verá `CEF initialization did not continue: exit code 24.`, sin los mensajes
+de inicialización correcta ni de apagado; se conserva ese código normal de
+salida anticipada.
+
+En CMake, `NOMINMAX` impide que las macros de Windows interfieran con
+`std::min` y `std::max` de las cabeceras CEF. Las opciones de enlace
+`/DELAYLOAD:shell32.dll` y `/DELAYLOAD:ole32.dll` retrasan la carga solicitada
+por nuestra DLL hasta usar las funciones para localizar la carpeta y liberar
+su memoria, después de distinguir el tipo de proceso.
 
 ## Compilar y ejecutar la ventana Qt de comprobación
 
@@ -301,6 +401,7 @@ entorno de búsqueda de ejecutables). Desde la raíz del repositorio:
 
 ```powershell
 cmake --build desktop/build --config Debug --target SecureBrowser --parallel 4
+if ($LASTEXITCODE -ne 0) { throw "La construcción Debug ha fallado." }
 .\desktop\build\Debug\sbp_toolchain_check.exe
 $LASTEXITCODE
 ```
@@ -309,6 +410,7 @@ Desde la raíz del repositorio, repetir para Release en la misma terminal:
 
 ```powershell
 cmake --build desktop/build --config Release --target SecureBrowser --parallel 4
+if ($LASTEXITCODE -ne 0) { throw "La construcción Release ha fallado." }
 .\desktop\build\Release\sbp_toolchain_check.exe
 $LASTEXITCODE
 ```
@@ -384,7 +486,9 @@ Se han comprobado la apertura y el cierre normal de la ventana en Debug y
 Release desde la carpeta temporal, con `PATH` limitado a Windows y código
 de salida `0`. Las bibliotecas Qt y el plugin de plataforma se cargan desde
 la salida preparada. Esto verifica la ventana Qt en el equipo de desarrollo;
-la ejecución CEF con sandbox se comprobará al implementar su inicialización.
+el arranque y apagado CEF se han comprobado por separado en ambas
+configuraciones, pasando el contexto de sandbox del bootstrap y sin crear
+navegadores. La integración de la ventana Qt con CEF sigue pendiente.
 
 La instalación Qt queda fuera del repositorio; `build/`, `CMakeCache.txt`
 y `CMakeUserPresets.json` están excluidos por `.gitignore`. Solo se versionan
