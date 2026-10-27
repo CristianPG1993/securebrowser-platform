@@ -485,7 +485,9 @@ y no quedaron auxiliares tras el margen de cinco segundos.
 
 Las clases propias se definen en [`browser_app.h`](browser_app.h) y
 [`browser_client.h`](browser_client.h), dentro del namespace `sbp`.
-Sus métodos están implementados en los headers y no crean objetos Qt.
+`BrowserApp` mantiene sus métodos en el header. `BrowserClient` declara sus
+métodos en el header y los implementa en [`browser_client.cpp`](browser_client.cpp).
+Ninguna de las dos clases crea objetos Qt.
 
 | Objeto | Papeles | Avisos preparados |
 | --- | --- | --- |
@@ -503,7 +505,7 @@ La propiedad y liberación de referencias es la siguiente:
 | --- | --- | --- |
 | `cef_app` | Variable local `CefRefPtr<BrowserApp>` en `RunWinMain`. | Al salir de `RunWinMain`, después de `CefShutdown` y antes de destruir `QApplication`. |
 | Referencias de CEF al objeto de aplicación y a su handler | CEF durante la vida del contexto. | Durante su limpieza; la referencia local mantiene vivo nuestro objeto mientras dura el arranque y apagado. |
-| `browser_client` | Variable local `CefRefPtr<BrowserClient>` dentro del ámbito de la ventana. | Al salir de ese ámbito; actualmente se destruye después del widget y antes de `CefShutdown`. |
+| `browser_client` | Variable local `CefRefPtr<BrowserClient>` dentro del ámbito de la ventana. | Al salir de ese ámbito; su referencia local se libera antes de destruir la ventana principal y antes de `CefShutdown`. |
 | Parámetro `browser` de los callbacks | Referencia administrada durante cada llamada. | Al terminar la llamada. El cliente no la almacena en ningún miembro. |
 
 `IMPLEMENT_REFCOUNTING` proporciona `AddRef`, `Release` y el contador que
@@ -513,8 +515,11 @@ están prohibidas, pero se pueden copiar sus referencias administradas.
 `.get()` entrega el puntero conservando nuestra referencia; al recibirlo como
 `CefRefPtr`, la API de CEF gestiona las referencias que necesite mantener.
 
-Ninguna de las clases almacena referencias a sí misma, a la otra clase, al
-widget Qt ni a un navegador. Así no se introduce un ciclo de propiedad.
+Ninguna de las clases conserva una referencia administrada a sí misma, a la
+otra clase ni a un navegador. Los callbacks de `BrowserClient` capturan la
+ventana Qt por referencia para encolar avisos, sin adquirir su propiedad.
+La ventana se mantiene viva hasta la confirmación del cierre; estas capturas
+no crean un ciclo de propiedad.
 `OnContextInitialized`, `OnAfterCreated` y `OnBeforeClose` no modifican widgets
 desde el hilo CEF. `BrowserApp` conserva una función proporcionada al construirlo;
 tras el diagnóstico de contexto preparado, la ejecuta en el hilo CEF. Esa función
@@ -556,16 +561,23 @@ directamente hacia la propia ventana Qt. El diagnóstico debe seguir este orden:
 
 ```text
 Qt close requested; native host remains alive.
-Qt close confirmed without browser; native host valid: 1.
+Qt close confirmed; native host valid: 1.
 Qt close accepted after confirmation.
 Qt window destroyed; event loop exit code 0.
 CEF shutdown completed.
 ```
 
-Esta comprobación verifica el cierre diferido de la ventana Qt. Todavía no
-verifica el cierre de un `CefBrowser`: al incorporar la instancia, la
-confirmación se conectará con su callback `OnBeforeClose` y con la liberación
-de las referencias correspondientes, antes del apagado global de CEF.
+`BrowserClient` ya recibe dos funciones al construirse. `OnAfterCreated`
+entrega únicamente el identificador del navegador a la primera, que encola
+su diagnóstico en Qt. `OnBeforeClose` ejecuta la segunda, que encola
+`ConfirmClose` en la ventana principal. El cliente no guarda un `CefBrowser`
+ni transfiere esa referencia a las funciones encoladas.
+
+Esta comprobación sigue verificando el cierre de una ventana sin navegador:
+su solicitud utiliza directamente la función de confirmación encolada. Los
+callbacks CEF de creación y cierre todavía no se ejecutan. Al incorporar la
+instancia, se sustituirá esa confirmación directa por la solicitud de cierre
+CEF y la espera de `OnBeforeClose`, antes de terminar Qt y apagar CEF.
 
 En esta etapa se verifica que el aviso de contexto llega una vez en el hilo
 esperado, que se prepara el cliente y que la ventana abre y cierra con salida

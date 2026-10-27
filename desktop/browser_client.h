@@ -2,9 +2,7 @@
 
 #include "include/cef_client.h"
 #include "include/cef_life_span_handler.h"
-#include "include/wrapper/cef_helpers.h"
-
-#include <cstdio>
+#include <functional>
 
 namespace sbp {
 
@@ -12,34 +10,30 @@ namespace sbp {
 // Sus callbacks de vida se ejecutan en el hilo UI de CEF, distinto del hilo principal de Qt.
 class BrowserClient final : public CefClient, public CefLifeSpanHandler {
 public:
-    BrowserClient() = default;
+    // Conservamos las funciones que recibirán el identificador creado y el aviso de cierre.
+    explicit BrowserClient(std::function<void(int)> on_browser_created,
+                           std::function<void()> on_browser_closed);
 
     // Compartimos referencias al cliente, sin copiar el objeto ni su contador.
     BrowserClient(const BrowserClient&) = delete;
     BrowserClient& operator=(const BrowserClient&) = delete;
 
     // Este mismo objeto atiende los avisos del ciclo de vida del navegador.
-    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override {
-        return this;
-    }
+    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
 
     // CEF notificará aquí que una instancia del navegador ya ha sido creada.
-    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
-        CEF_REQUIRE_UI_THREAD();
-        // La referencia recibida vive durante el callback; no la guardamos en un miembro.
-        std::fprintf(stderr, "CEF browser created: id %d.\n", browser->GetIdentifier());
-    }
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
 
     // Este aviso forma parte del cierre; no sustituye la solicitud de cerrar el navegador.
-    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
-        CEF_REQUIRE_UI_THREAD();
-        // Solo observamos su identificador, sin conservar el navegador ni acceder a widgets Qt.
-        std::fprintf(stderr, "CEF browser closing: id %d.\n", browser->GetIdentifier());
-    }
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
 
 private:
     // La última referencia libera el cliente; su vida se gestiona mediante CefRefPtr.
-    ~BrowserClient() override = default;
+    ~BrowserClient() override;
+
+    // Se fijan al construir el cliente; quien las proporciona controla la vida de sus capturas.
+    const std::function<void(int)> on_browser_created_;
+    const std::function<void()> on_browser_closed_;
 
     // CEF implementa el contador que utilizan las referencias administradas al cliente.
     IMPLEMENT_REFCOUNTING(BrowserClient);

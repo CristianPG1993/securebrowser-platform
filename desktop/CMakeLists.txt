@@ -107,6 +107,7 @@ ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
 add_library(SecureBrowser SHARED
     app_entry_win.cpp
     browser_app.h
+    browser_client.cpp
     browser_client.h
     browser_window.cpp
     browser_window.h

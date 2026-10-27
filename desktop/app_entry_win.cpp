@@ -145,26 +145,40 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
     int qt_exit_code = 0;
     // Estas llaves crean un ámbito local que limita la vida del objeto window.
     {
-        // Conservamos el cliente durante la vida de la ventana; se utilizará al crear el navegador.
-        // Por ahora no almacena referencias a CefBrowser ni a objetos Qt, evitando ciclos de propiedad.
-        CefRefPtr<sbp::BrowserClient> browser_client(new sbp::BrowserClient);
-        std::fputs("CEF browser client prepared; no browser instance created.\n", stderr);
-
         // La ventana principal contendrá un widget hijo reservado al contenido web.
         sbp::BrowserWindow window;
-        // Todavía no existe un navegador: comprobamos la confirmación interna mediante la cola Qt.
-        // Al crearlo, la confirmación esperará el cierre CEF en lugar de enviarse inmediatamente.
-        window.SetCloseRequestHandler([&window, &browser_host_handle] {
+        // Esta función puede recibir el aviso de cierre CEF y trasladarlo a la propia ventana Qt.
+        // La ventana debe seguir viva hasta recibir la confirmación; su closeEvent la conserva.
+        const auto confirm_close_on_qt = [&window, &browser_host_handle] {
             const bool queued = QMetaObject::invokeMethod(&window, [&window, &browser_host_handle] {
                 // El receptor es window, que sigue vivo; no se muestra ningún diálogo al usuario.
-                std::fprintf(stderr, "Qt close confirmed without browser; native host valid: %d.\n",
+                std::fprintf(stderr, "Qt close confirmed; native host valid: %d.\n",
                              IsWindow(browser_host_handle) != FALSE);
                 window.ConfirmClose();
             }, Qt::QueuedConnection);
             if (!queued) {
                 std::fputs("Qt close confirmation could not be queued.\n", stderr);
             }
-        });
+        };
+
+        // El cliente no conserva CefBrowser: sus funciones notifican a Qt sin transferir esa referencia.
+        CefRefPtr<sbp::BrowserClient> browser_client(new sbp::BrowserClient(
+            [&window](int browser_id) {
+                // CEF invoca esta función en su hilo UI; el identificador se copia a la cola Qt.
+                const bool queued = QMetaObject::invokeMethod(&window, [browser_id] {
+                    std::fprintf(stderr, "Qt received browser creation: id %d; Qt main thread: %d.\n",
+                                 browser_id, QThread::isMainThread());
+                }, Qt::QueuedConnection);
+                if (!queued) {
+                    std::fputs("CEF browser creation notification could not be queued to Qt.\n", stderr);
+                }
+            },
+            confirm_close_on_qt));
+        std::fputs("CEF browser client prepared; no browser instance created.\n", stderr);
+
+        // Aún no hay navegador: la solicitud usa directamente la misma confirmación encolada.
+        // Al crearlo, solicitaremos su cierre y esperaremos OnBeforeClose en lugar de confirmar aquí.
+        window.SetCloseRequestHandler(confirm_close_on_qt);
         window.setWindowTitle("SecureBrowser");
         window.resize(1024, 768);
 
