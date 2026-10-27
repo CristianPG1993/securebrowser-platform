@@ -5,6 +5,7 @@
 #include "include/cef_sandbox_win.h"
 
 #include <QApplication>
+#include <QVBoxLayout>
 #include <QWidget>
 
 #include <shlobj.h>
@@ -92,11 +93,26 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         CefRefPtr<sbp::BrowserClient> browser_client(new sbp::BrowserClient);
         std::fputs("CEF browser client prepared; no browser instance created.\n", stderr);
 
-        // Reutilizamos la ventana mínima, ahora con CEF activo durante toda su vida.
+        // La ventana principal contendrá un widget hijo reservado al contenido web.
         QWidget window;
         window.setWindowTitle("SecureBrowser");
         window.resize(1024, 768);
+
+        // El layout distribuye el espacio interior; sin márgenes, el anfitrión ocupa toda el área.
+        QVBoxLayout window_layout(&window);
+        window_layout.setContentsMargins(0, 0, 0, 0);
+
+        // El padre es window. El atributo exige una ventana nativa propia para alojar CEF después.
+        QWidget browser_host(&window);
+        browser_host.setAttribute(Qt::WA_NativeWindow);
+        window_layout.addWidget(&browser_host);
         window.show();
+
+        // winId() se consulta en el hilo Qt; en Windows identifica la ventana mediante un HWND.
+        // Solo registramos ese identificador: todavía no creamos ni asociamos un CefBrowser.
+        const HWND browser_host_handle = reinterpret_cast<HWND>(browser_host.winId());
+        std::fprintf(stderr, "Qt native browser host ready: %p.\n",
+                     static_cast<void*>(browser_host_handle));
 
         // Qt espera y despacha eventos en el principal; CEF mantiene su bucle en su propio hilo.
         // Al cerrar la última ventana, exec() termina y conserva el código de salida de Qt.
