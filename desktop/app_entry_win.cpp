@@ -5,6 +5,8 @@
 #include "include/cef_sandbox_win.h"
 
 #include <QApplication>
+#include <QMetaObject>
+#include <QThread>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -46,7 +48,19 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
     std::fputs("Qt application created in the main process.\n", stderr);
 
     // La referencia local vive hasta salir de RunWinMain; CEF puede conservar sus propias referencias.
-    CefRefPtr<sbp::BrowserApp> cef_app(new sbp::BrowserApp);
+    // La captura &qt_app permite encolar el aviso; QApplication permanece vivo hasta después de CefShutdown.
+    CefRefPtr<sbp::BrowserApp> cef_app(new sbp::BrowserApp([&qt_app] {
+        // CEF ejecuta esta función en su hilo UI. invokeMethod publica el trabajo en la cola de Qt.
+        const bool queued = QMetaObject::invokeMethod(&qt_app, [] {
+            // Esta función interior se ejecuta al procesar eventos en el hilo principal de Qt.
+            std::fprintf(stderr, "CEF context notification received; Qt main thread: %d.\n",
+                         QThread::isMainThread());
+        }, Qt::QueuedConnection);
+        // Comprobamos que Qt ha aceptado el envío; no bloqueamos el hilo CEF esperando la recepción.
+        if (!queued) {
+            std::fputs("CEF context notification could not be queued to Qt.\n", stderr);
+        }
+    }));
 
     // CefSettings contiene las opciones globales del motor. Conservamos el sandbox activado.
     CefSettings settings;

@@ -516,7 +516,18 @@ están prohibidas, pero se pueden copiar sus referencias administradas.
 Ninguna de las clases almacena referencias a sí misma, a la otra clase, al
 widget Qt ni a un navegador. Así no se introduce un ciclo de propiedad.
 `OnContextInitialized`, `OnAfterCreated` y `OnBeforeClose` no modifican widgets
-desde el hilo CEF; únicamente comprueban el hilo o escriben un diagnóstico.
+desde el hilo CEF. `BrowserApp` conserva una función proporcionada al construirlo;
+tras el diagnóstico de contexto preparado, la ejecuta en el hilo CEF. Esa función
+utiliza `QMetaObject::invokeMethod` con `Qt::QueuedConnection` para enviar el aviso
+al hilo de `QApplication`, sin bloquear el hilo CEF. Su captura de `qt_app` es
+válida porque `QApplication` permanece vivo hasta después de `CefShutdown` y de
+liberar nuestra referencia a `BrowserApp`.
+
+El receptor todavía solo escribe `CEF context notification received; Qt main
+thread: 1.`. Debe aparecer una vez al procesar el bucle Qt; `1` confirma el hilo
+principal tanto en Debug como en Release. El mensaje de contexto CEF original
+sigue procediendo de su propio hilo UI. Todavía no se crea un navegador al
+recibir el aviso.
 
 En esta etapa se verifica que el aviso de contexto llega una vez en el hilo
 esperado, que se prepara el cliente y que la ventana abre y cierra con salida
