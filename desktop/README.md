@@ -2,21 +2,24 @@
 
 ## Estado actual
 
-El ejecutable temporal `sbp_toolchain_check` abre una ventana Qt con el título
-**SecureBrowser** y un tamaño inicial de 1024 por 768 unidades lógicas.
-`QApplication` inicializa Qt Widgets y procesa los eventos; un `QWidget`
-sin padre actúa como ventana independiente. Al cerrar la última ventana,
-termina el bucle de eventos y el proceso devuelve su código de salida.
+`SecureBrowser.exe` abre una ventana Qt con el título **SecureBrowser** y un
+tamaño inicial de 1024 por 768 unidades lógicas, mientras CEF (Chromium Embedded
+Framework) permanece inicializado. `QApplication` y los widgets viven en el hilo principal;
+CEF procesa sus eventos en su propio hilo de interfaz. Al cerrar la última
+ventana, termina el bucle Qt, se destruye la ventana y se apaga CEF antes de
+destruir `QApplication`.
 El target `SecureBrowser` construye nuestra DLL (Dynamic-Link Library,
-biblioteca de enlace dinámico), enlazada con Qt y CEF (Chromium Embedded
-Framework). Junto a ella copia el bootstrap oficial como `SecureBrowser.exe`.
+biblioteca de enlace dinámico), enlazada con Qt y CEF. Junto a ella copia el
+bootstrap oficial como `SecureBrowser.exe`.
 La construcción prepara también los binarios y recursos CEF, las dependencias
 Qt, los avisos de terceros y los permisos de la carpeta de ejecución.
 La entrada `RunWinMain` de [`app_entry_win.cpp`](app_entry_win.cpp) distingue
 el proceso principal de los subprocesos antes de crear objetos Qt. En el
-principal comprueba el contexto de sandbox, inicializa CEF y lo apaga como
-prueba acotada. Todavía no crea navegadores ni ventanas Qt en esa entrada;
-la coordinación con el bucle Qt se implementará en #86.
+principal comprueba el contexto de sandbox y crea `QApplication` antes de
+inicializar CEF. Tras una inicialización correcta, muestra el `QWidget` y
+ejecuta `qt_app.exec()`. Todavía no crea instancias `CefBrowser` ni carga
+contenido web. `sbp_toolchain_check` conserva una ventana Qt independiente
+como comprobación básica del kit.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
 
@@ -211,9 +214,9 @@ El flujo de construcción es:
    `COPY_SINGLE_FILE` proceden de `cef_macros.cmake`.
 4. Ejecutar `Qt6::windeployqt`, herramienta del kit seleccionado, con su
    `Qt6::qtpaths`, modo Debug o Release explícito y destino junto a la DLL.
-   Se analizan `SecureBrowser.dll` y `sbp_toolchain_check.exe`: la entrada
-   mínima de nuestra DLL todavía no utiliza funciones Qt y el ejecutable
-   temporal aporta esas dependencias durante esta etapa.
+   Se analizan `SecureBrowser.dll` y `sbp_toolchain_check.exe`; la primera
+   contiene ahora la ventana principal y el segundo conserva la comprobación
+   independiente de Qt.
 5. Conservar los avisos CEF y Qt, y aplicar los permisos de lectura y
    ejecución necesarios para el sandbox mediante `SET_LPAC_ACLS`.
 
@@ -291,14 +294,14 @@ dumpbin /exports desktop/build/Release/SecureBrowser.dll
 ```
 
 En ambos resultados debe aparecer el nombre exacto `RunWinMain`.
-`SecureBrowser.exe` realiza ahora la comprobación CEF descrita a continuación.
-La ventana Qt sigue disponible mediante el ejecutable temporal.
+`SecureBrowser.exe` ejecuta la ventana Qt con CEF inicializado, como se
+describe a continuación. El ejecutable temporal conserva su prueba básica.
 
-## Comprobar la inicialización y el apagado de CEF
+## Ejecutar la ventana con Qt y CEF
 
 Desde PowerShell, en la raíz del repositorio, ejecutar una configuración cada
-vez. Esta prueba no abre una ventana: el proceso principal inicializa y apaga
-CEF, mientras que los subprocesos ejecutan únicamente el recorrido CEF.
+vez. El proceso principal abre la ventana y mantiene CEF activo hasta que se
+cierra; los subprocesos ejecutan únicamente el recorrido CEF.
 
 ```powershell
 # Cambiar a "Release" para repetir la misma prueba en esa configuración.
@@ -314,11 +317,8 @@ $process = Start-Process -FilePath $cefExe -WorkingDirectory $env:TEMP `
 try {
     # Conservar el handle para leer el código aunque el proceso termine rápidamente en PowerShell 5.1.
     $null = $process.Handle
-    # Esperar como máximo 20 segundos; terminar solo esta instancia si se bloquea.
-    if (-not $process.WaitForExit(20000)) {
-        & taskkill /PID $process.Id /T /F
-        throw "La comprobación CEF ha superado el timeout."
-    }
+    # Interactuar con la ventana y cerrarla con la X; la terminal espera hasta entonces.
+    $process.WaitForExit()
     Get-Content -LiteralPath $startupLog
     $process.ExitCode
 } finally {
@@ -326,36 +326,52 @@ try {
 }
 ```
 
-El resultado esperado de una instancia nueva es este diagnóstico y código `0`:
+Mantener la ventana abierta durante 30-60 segundos: moverla, cambiar su tamaño,
+minimizarla, restaurarla y maximizarla. Debe seguir respondiendo. Después,
+cerrarla con la X. La terminal debe mostrar este diagnóstico y código `0`:
 
 ```text
+Qt application created in the main process.
 CEF initialized successfully with bootstrap sandbox context.
+Qt event loop starting with CEF initialized.
+Qt window destroyed; event loop exit code 0.
 CEF shutdown completed.
 0
 ```
+
+La espera manual no tiene timeout porque la ventana permanece abierta hasta
+que se solicita cerrarla. En una comprobación automatizada, limitar el tiempo
+de aparición y cierre y terminar solo los procesos creados por esa prueba
+si se supera el plazo. Distinguir el plazo de aparición de la ventana del
+tiempo de interacción que necesita la prueba.
 
 Se utiliza el objeto devuelto por `Start-Process` para consultar `ExitCode`
 después de esperar. `$LASTEXITCODE` se comprueba inmediatamente después de
 compilar: ejecutar otro programa sustituiría ese valor y podría ocultar un
 fallo de construcción.
 
-Con ninguna otra instancia abierta, comprobar al terminar que no quedan
-procesos de la prueba:
+Con ninguna otra instancia abierta, comprobar unos segundos después del
+cierre que no quedan procesos de la prueba:
 
 ```powershell
 Get-Process -Name SecureBrowser -ErrorAction SilentlyContinue
 ```
 
-El comando debe terminar sin listar procesos. `sbp_toolchain_check` es un
-ejecutable distinto y su ventana no forma parte de esta comprobación CEF.
+El comando debe terminar sin listar procesos. Los auxiliares CEF pueden tardar
+brevemente en finalizar después del proceso principal; la comprobación local
+les concede un máximo de cinco segundos. `sbp_toolchain_check` es otro
+ejecutable y su ventana no forma parte de esta comprobación Qt/CEF.
 
 La entrada sigue este flujo:
 
 1. Crear `CefMainArgs` y llamar a `CefExecuteProcess` con el contexto recibido
    del bootstrap. Un resultado mayor o igual que cero termina el subproceso
    devolviendo ese mismo código, antes de crear cualquier objeto Qt.
-2. En el principal, exigir un contexto de sandbox no nulo y preparar
-   `CefSettings`: sandbox activado, `multi_threaded_message_loop = true` y
+2. En el principal, exigir un contexto de sandbox no nulo y crear
+   `QApplication`. Esta etapa entrega a Qt argumentos mínimos con el nombre
+   del programa; sus buffers permanecen vivos hasta destruir la aplicación.
+   CEF sigue consultando la línea de comandos nativa. Preparar `CefSettings`
+   con sandbox activado, `multi_threaded_message_loop = true` y
    `external_message_pump = false`.
 3. Obtener la carpeta local del usuario con `SHGetKnownFolderPath`, construir
    una ruta absoluta propia y copiarla a `settings.root_cache_path`. Liberar
@@ -363,9 +379,20 @@ La entrada sigue este flujo:
 4. Llamar a `CefInitialize` una vez en el hilo principal. Si devuelve `false`,
    devolver `CefGetExitCode` sin llamar a `CefShutdown`. CEF puede indicar un
    error o una salida anticipada normal; se conserva su código.
-5. Tras una inicialización correcta, llamar a `CefShutdown` desde el mismo
-   hilo principal y terminar con `0`. Esta prueba no crea browsers ni ejecuta
-   un segundo bucle bloqueante.
+5. Tras una inicialización correcta, crear y mostrar la ventana en el hilo
+   principal, y entrar en `qt_app.exec()`. CEF mantiene su propio bucle; no
+   se llama a `CefRunMessageLoop`, `CefDoMessageLoopWork` ni se hace espera
+   activa para procesar sus eventos.
+6. Al cerrar la última ventana, `exec()` devuelve el código Qt. Las llaves
+   delimitan el ámbito de `window`: su destructor se ejecuta al salir del
+   bloque, antes de `CefShutdown`. Apagar CEF desde el hilo principal y devolver
+   el código Qt. `QApplication` se destruye al salir de `RunWinMain`.
+
+Este orden corresponde a la ventana vacía actual. Cuando exista un navegador
+incrustado se coordinará su cierre asíncrono, esperando los callbacks
+`OnBeforeClose` y liberando sus referencias antes de completar el cierre de
+la aplicación. `CefShutdown` apaga el motor global; no sustituye al cierre
+de cada instancia `CefBrowser`.
 
 La falta de contexto de sandbox o un fallo al localizar la carpeta del
 usuario producen un diagnóstico y código `1`, antes de inicializar el motor.
@@ -393,7 +420,48 @@ En CMake, `NOMINMAX` impide que las macros de Windows interfieran con
 por nuestra DLL hasta usar las funciones para localizar la carpeta y liberar
 su memoria, después de distinguir el tipo de proceso.
 
-## Compilar y ejecutar la ventana Qt de comprobación
+También se difiere la carga de las DLL Qt Core y Qt Widgets mediante
+`$<TARGET_FILE_NAME:Qt6::Core>` y `$<TARGET_FILE_NAME:Qt6::Widgets>`, que
+seleccionan el nombre Debug o Release del kit. Así no se solicitan esas DLL
+desde las importaciones normales de nuestra entrada antes del despacho CEF.
+`QT_NO_VERSION_TAGGING` evita la importación de datos de la etiqueta de versión
+Qt, incompatible con esta carga diferida en MSVC. La versión exacta del kit
+continúa fijada por `find_package(Qt6 6.12.0 EXACT ...)` y las dependencias se
+copian desde ese mismo kit.
+
+Para revisar los hilos en Visual Studio, depurar el ejecutable principal de
+la configuración elegida y detenerse antes de `qt_app.exec()` y antes de
+`CefShutdown()`. Ambos puntos deben alcanzarse desde el hilo principal.
+Durante la ejecución, comprobar en la ventana Threads que CEF mantiene su
+hilo `CrBrowserMain` separado del hilo propietario de la ventana Qt. Los
+widgets se crean y destruyen únicamente en el principal. Todavía no hay
+callbacks propios que accedan a widgets desde CEF.
+
+Para observar el reposo, dejar la ventana quieta tras el arranque y consultar
+el proceso principal en el Administrador de tareas. Registrar configuración,
+duración y condiciones; las actividades internas iniciales de Chromium pueden
+generar picos y una muestra local no representa todos los equipos.
+
+La comprobación local en Windows 11 x64, Qt 6.12.0 y CEF
+`156.0.14+g4fa4ab5+chromium-156.0.8078.48` registró una ventana vacía, sin
+browser, con tres segundos de calentamiento y unos diez segundos de reposo.
+Se comprobó su respuesta con un mensaje Windows por segundo, desde otra
+carpeta de trabajo y con `PATH` limitado a Windows:
+
+| Configuración | Muestra | CPU del proceso principal respecto a un núcleo |
+| --- | --- | --- |
+| Debug | 10,103 s | 0,928 % |
+| Release | 10,089 s | 0,619 % |
+
+Estos porcentajes incluyen los hilos del proceso principal, no los procesos
+auxiliares, y no equivalen al porcentaje global normalizado del Administrador
+de tareas. Son una observación de esta muestra, sin comparación de rendimiento
+con versiones anteriores. La inspección Win32 del propietario de la ventana y
+de las descripciones de los hilos confirmó que Qt y `CrBrowserMain` tenían
+identificadores distintos. En ambas configuraciones el cierre devolvió `0`
+y no quedaron auxiliares tras el margen de cinco segundos.
+
+## Ventana Qt independiente de comprobación del kit
 
 Construir el target `SecureBrowser` para preparar también las dependencias.
 Después, ejecutar la ventana temporal sin añadir Qt al `PATH` (variable de
@@ -486,9 +554,9 @@ Se han comprobado la apertura y el cierre normal de la ventana en Debug y
 Release desde la carpeta temporal, con `PATH` limitado a Windows y código
 de salida `0`. Las bibliotecas Qt y el plugin de plataforma se cargan desde
 la salida preparada. Esto verifica la ventana Qt en el equipo de desarrollo;
-el arranque y apagado CEF se han comprobado por separado en ambas
-configuraciones, pasando el contexto de sandbox del bootstrap y sin crear
-navegadores. La integración de la ventana Qt con CEF sigue pendiente.
+la ventana principal con CEF activo se verifica mediante `SecureBrowser.exe`,
+incluyendo el orden de cierre y el fin de los procesos auxiliares. El navegador
+CEF incrustado y su coordinación de cierre se incorporarán en tareas posteriores.
 
 La instalación Qt queda fuera del repositorio; `build/`, `CMakeCache.txt`
 y `CMakeUserPresets.json` están excluidos por `.gitignore`. Solo se versionan
