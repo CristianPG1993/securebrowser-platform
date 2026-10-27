@@ -104,7 +104,11 @@ add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}"
 ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
 
 # Nuestra DLL implementa la entrada que invoca el bootstrap.
-add_library(SecureBrowser SHARED app_entry_win.cpp)
+add_library(SecureBrowser SHARED
+    app_entry_win.cpp
+    browser_app.h
+    browser_client.h
+)
 target_include_directories(SecureBrowser PRIVATE "${CEF_INCLUDE_PATH}")
 # Evita que las macros min/max de Windows interfieran con las funciones estándar usadas por CEF.
 target_compile_definitions(SecureBrowser PRIVATE NOMINMAX)
