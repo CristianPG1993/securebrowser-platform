@@ -106,6 +106,11 @@ ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
 # Nuestra DLL implementa la entrada que invoca el bootstrap.
 add_library(SecureBrowser SHARED app_entry_win.cpp)
 target_include_directories(SecureBrowser PRIVATE "${CEF_INCLUDE_PATH}")
+# Evita que las macros min/max de Windows interfieran con las funciones estándar usadas por CEF.
+target_compile_definitions(SecureBrowser PRIVATE NOMINMAX)
+# Carga estas DLL de Windows al usarlas, después de distinguir los subprocesos de CEF.
+# Contienen las funciones para obtener la carpeta del usuario y liberar su resultado.
+target_link_options(SecureBrowser PRIVATE /DELAYLOAD:shell32.dll /DELAYLOAD:ole32.dll)
 target_link_libraries(SecureBrowser PRIVATE
     Qt6::Widgets
     libcef_dll_wrapper
