@@ -1,5 +1,6 @@
 #include "browser_app.h"
 #include "browser_client.h"
+#include "browser_window.h"
 
 #include "include/cef_app.h"
 #include "include/cef_sandbox_win.h"
@@ -150,7 +151,20 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         std::fputs("CEF browser client prepared; no browser instance created.\n", stderr);
 
         // La ventana principal contendrá un widget hijo reservado al contenido web.
-        QWidget window;
+        sbp::BrowserWindow window;
+        // Todavía no existe un navegador: comprobamos la confirmación interna mediante la cola Qt.
+        // Al crearlo, la confirmación esperará el cierre CEF en lugar de enviarse inmediatamente.
+        window.SetCloseRequestHandler([&window, &browser_host_handle] {
+            const bool queued = QMetaObject::invokeMethod(&window, [&window, &browser_host_handle] {
+                // El receptor es window, que sigue vivo; no se muestra ningún diálogo al usuario.
+                std::fprintf(stderr, "Qt close confirmed without browser; native host valid: %d.\n",
+                             IsWindow(browser_host_handle) != FALSE);
+                window.ConfirmClose();
+            }, Qt::QueuedConnection);
+            if (!queued) {
+                std::fputs("Qt close confirmation could not be queued.\n", stderr);
+            }
+        });
         window.setWindowTitle("SecureBrowser");
         window.resize(1024, 768);
 

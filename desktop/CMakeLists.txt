@@ -108,6 +108,8 @@ add_library(SecureBrowser SHARED
     app_entry_win.cpp
     browser_app.h
     browser_client.h
+    browser_window.cpp
+    browser_window.h
 )
 target_include_directories(SecureBrowser PRIVATE "${CEF_INCLUDE_PATH}")
 # Evita que las macros min/max de Windows interfieran con las funciones estándar usadas por CEF.

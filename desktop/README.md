@@ -542,6 +542,31 @@ incorporará con la instancia real. Al salir del bucle Qt se retiran el `HWND`
 y los parámetros antes de destruir los widgets; una notificación posterior
 ya no encontrará un anfitrión disponible.
 
+La ventana principal utiliza [`BrowserWindow`](browser_window.h), una subclase
+de `QWidget`. El header declara la clase y sus métodos; su implementación está
+en [`browser_window.cpp`](browser_window.cpp), que se compila como parte del
+target `SecureBrowser`. Su `closeEvent` rechaza el cierre inmediato y comunica una única
+solicitud mediante el callback registrado con `SetCloseRequestHandler`.
+`ConfirmClose` permite después aceptar el cierre, conservando los widgets
+hasta ese momento. Todos estos pasos se ejecutan en el hilo Qt y no muestran
+un diálogo de confirmación al usuario.
+
+Como todavía no existe un navegador, la solicitud encola la confirmación
+directamente hacia la propia ventana Qt. El diagnóstico debe seguir este orden:
+
+```text
+Qt close requested; native host remains alive.
+Qt close confirmed without browser; native host valid: 1.
+Qt close accepted after confirmation.
+Qt window destroyed; event loop exit code 0.
+CEF shutdown completed.
+```
+
+Esta comprobación verifica el cierre diferido de la ventana Qt. Todavía no
+verifica el cierre de un `CefBrowser`: al incorporar la instancia, la
+confirmación se conectará con su callback `OnBeforeClose` y con la liberación
+de las referencias correspondientes, antes del apagado global de CEF.
+
 En esta etapa se verifica que el aviso de contexto llega una vez en el hilo
 esperado, que se prepara el cliente y que la ventana abre y cierra con salida
 `0`. Los avisos `OnAfterCreated` y `OnBeforeClose` todavía no se ejecutan:
