@@ -1,6 +1,6 @@
-#include "browser_app.h"
-#include "browser_client.h"
-#include "browser_window.h"
+#include "browser/browser_app.h"
+#include "browser/browser_client.h"
+#include "ui/browser_window.h"
 
 #include "include/cef_app.h"
 #include "include/cef_sandbox_win.h"

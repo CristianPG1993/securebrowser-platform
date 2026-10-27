@@ -13,7 +13,7 @@ biblioteca de enlace dinámico), enlazada con Qt y CEF. Junto a ella copia el
 bootstrap oficial como `SecureBrowser.exe`.
 La construcción prepara también los binarios y recursos CEF, las dependencias
 Qt, los avisos de terceros y los permisos de la carpeta de ejecución.
-La entrada `RunWinMain` de [`app_entry_win.cpp`](app_entry_win.cpp) distingue
+La entrada `RunWinMain` de [`app_entry_win.cpp`](src/app/app_entry_win.cpp) distingue
 el proceso principal de los subprocesos antes de crear objetos Qt. En el
 principal comprueba el contexto de sandbox y crea `QApplication` antes de
 inicializar CEF. Tras una inicialización correcta, muestra el `QWidget` y
@@ -25,6 +25,23 @@ los handlers (receptores de avisos) de creación y cierre para el navegador
 que incorporaremos en #88. Ambos objetos utilizan referencias de CEF.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
+
+## Organización del código
+
+El código de la aplicación se agrupa dentro de `src/`, conservando cada header
+junto a su implementación:
+
+| Carpeta | Responsabilidad | Archivos actuales |
+| --- | --- | --- |
+| `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp` |
+| `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h`, `browser_client.h` y `browser_client.cpp` |
+| `src/ui/` | Ventana y comportamiento de la interfaz Qt. | `browser_window.h` y `browser_window.cpp` |
+
+`CMakeLists.txt` incorpora esos archivos al target `SecureBrowser` y utiliza
+`src/` como raíz de los includes propios. `main.cpp` sigue siendo la
+comprobación independiente del kit Qt (`sbp_toolchain_check`). Las carpetas de
+políticas, Security Engine, persistencia y comunicación REST se añadirán al
+incorporar sus primeras clases.
 
 ## Requisitos
 
@@ -208,7 +225,7 @@ El flujo de construcción es:
 
 1. Construir `libcef_dll_wrapper` y el ejecutable temporal
    `sbp_toolchain_check`, dependencias del target `SecureBrowser`.
-2. Compilar `app_entry_win.cpp` y enlazar `SecureBrowser.dll` con Qt Widgets,
+2. Compilar `src/app/app_entry_win.cpp` y enlazar `SecureBrowser.dll` con Qt Widgets,
    el adaptador, el `libcef.lib` correspondiente y las bibliotecas de Windows
    declaradas por CEF.
 3. Copiar el bootstrap de esa configuración como `SecureBrowser.exe`, los
@@ -483,10 +500,10 @@ y no quedaron auxiliares tras el margen de cinco segundos.
 
 ## Objetos CEF y propiedad de sus referencias
 
-Las clases propias se definen en [`browser_app.h`](browser_app.h) y
-[`browser_client.h`](browser_client.h), dentro del namespace `sbp`.
+Las clases propias se definen en [`browser_app.h`](src/browser/browser_app.h) y
+[`browser_client.h`](src/browser/browser_client.h), dentro del namespace `sbp`.
 `BrowserApp` mantiene sus métodos en el header. `BrowserClient` declara sus
-métodos en el header y los implementa en [`browser_client.cpp`](browser_client.cpp).
+métodos en el header y los implementa en [`browser_client.cpp`](src/browser/browser_client.cpp).
 Ninguna de las dos clases crea objetos Qt.
 
 | Objeto | Papeles | Avisos preparados |
@@ -547,9 +564,9 @@ incorporará con la instancia real. Al salir del bucle Qt se retiran el `HWND`
 y los parámetros antes de destruir los widgets; una notificación posterior
 ya no encontrará un anfitrión disponible.
 
-La ventana principal utiliza [`BrowserWindow`](browser_window.h), una subclase
+La ventana principal utiliza [`BrowserWindow`](src/ui/browser_window.h), una subclase
 de `QWidget`. El header declara la clase y sus métodos; su implementación está
-en [`browser_window.cpp`](browser_window.cpp), que se compila como parte del
+en [`browser_window.cpp`](src/ui/browser_window.cpp), que se compila como parte del
 target `SecureBrowser`. Su `closeEvent` rechaza el cierre inmediato y comunica una única
 solicitud mediante el callback registrado con `SetCloseRequestHandler`.
 `ConfirmClose` permite después aceptar el cierre, conservando los widgets
