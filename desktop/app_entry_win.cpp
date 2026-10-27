@@ -1,6 +1,9 @@
 #include "include/cef_app.h"
 #include "include/cef_sandbox_win.h"
 
+#include <QApplication>
+#include <QWidget>
+
 #include <shlobj.h>
 
 #include <cstdio>
@@ -30,10 +33,18 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         return 1;
     }
 
+    // Qt necesita argumentos vivos hasta destruir QApplication; empezamos con el nombre del programa.
+    int qt_argc = 1;
+    char qt_program_name[] = "SecureBrowser";
+    char* qt_argv[] = {qt_program_name, nullptr};
+    // Solo el proceso principal crea Qt, antes de inicializar CEF y cualquier ventana.
+    QApplication qt_app(qt_argc, qt_argv);
+    std::fputs("Qt application created in the main process.\n", stderr);
+
     // CefSettings contiene las opciones globales del motor. Conservamos el sandbox activado.
     CefSettings settings;
     settings.no_sandbox = false;
-    // CEF procesa sus eventos en un hilo propio; el bucle Qt se integrará en la siguiente tarea.
+    // CEF procesa sus eventos en un hilo propio, mientras Qt atiende la ventana en el principal.
     settings.multi_threaded_message_loop = true;
     settings.external_message_pump = false;
 
@@ -64,10 +75,27 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         return initialization_exit_code;
     }
 
-    // Prueba acotada: todavía no creamos navegadores ni ventanas Qt en esta entrada.
     std::fputs("CEF initialized successfully with bootstrap sandbox context.\n", stderr);
+
+    int qt_exit_code = 0;
+    // Estas llaves crean un ámbito local que limita la vida del objeto window.
+    {
+        // Reutilizamos la ventana mínima, ahora con CEF activo durante toda su vida.
+        QWidget window;
+        window.setWindowTitle("SecureBrowser");
+        window.resize(1024, 768);
+        window.show();
+
+        // Qt espera y despacha eventos en el principal; CEF mantiene su bucle en su propio hilo.
+        // Al cerrar la última ventana, exec() termina y conserva el código de salida de Qt.
+        std::fputs("Qt event loop starting with CEF initialized.\n", stderr);
+        qt_exit_code = qt_app.exec();
+    }
+    // Al salir del bloque se destruye la ventana, antes de apagar el motor.
+    // Esta ventana aún no contiene un CefBrowser; al incrustarlo coordinaremos su cierre primero.
+    std::fprintf(stderr, "Qt window destroyed; event loop exit code %d.\n", qt_exit_code);
     // Solo apagamos el motor tras una inicialización correcta, desde el mismo hilo principal.
     CefShutdown();
     std::fputs("CEF shutdown completed.\n", stderr);
-    return 0;
+    return qt_exit_code;
 }

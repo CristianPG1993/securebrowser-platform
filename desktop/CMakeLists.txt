@@ -108,6 +108,14 @@ add_library(SecureBrowser SHARED app_entry_win.cpp)
 target_include_directories(SecureBrowser PRIVATE "${CEF_INCLUDE_PATH}")
 # Evita que las macros min/max de Windows interfieran con las funciones estándar usadas por CEF.
 target_compile_definitions(SecureBrowser PRIVATE NOMINMAX)
+# La etiqueta de versión Qt importa datos de QtCore e impide su carga diferida en MSVC.
+# La versión del kit ya se exige mediante find_package(Qt6 ... EXACT).
+target_compile_definitions(SecureBrowser PRIVATE QT_NO_VERSION_TAGGING)
+# Carga Qt al crear QApplication en el principal, después de CefExecuteProcess.
+target_link_options(SecureBrowser PRIVATE
+    "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Core>"
+    "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Widgets>"
+)
 # Carga estas DLL de Windows al usarlas, después de distinguir los subprocesos de CEF.
 # Contienen las funciones para obtener la carpeta del usuario y liberar su resultado.
 target_link_options(SecureBrowser PRIVATE /DELAYLOAD:shell32.dll /DELAYLOAD:ole32.dll)
@@ -141,7 +149,7 @@ COPY_FILES(SecureBrowser "README.txt;LICENSE.txt;CREDITS.html"
 add_executable(sbp_toolchain_check main.cpp)
 target_link_libraries(sbp_toolchain_check PRIVATE Qt6::Widgets)
 
-# La entrada de nuestra DLL aún no usa Qt; el ejecutable temporal aporta esas dependencias.
+# Conserva la comprobación independiente del kit junto a la aplicación principal.
 add_dependencies(SecureBrowser sbp_toolchain_check)
 
 # Estos targets de herramientas proceden del kit cargado por find_package(Qt6).
