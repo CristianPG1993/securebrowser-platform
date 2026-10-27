@@ -519,15 +519,28 @@ widget Qt ni a un navegador. Así no se introduce un ciclo de propiedad.
 desde el hilo CEF. `BrowserApp` conserva una función proporcionada al construirlo;
 tras el diagnóstico de contexto preparado, la ejecuta en el hilo CEF. Esa función
 utiliza `QMetaObject::invokeMethod` con `Qt::QueuedConnection` para enviar el aviso
-al hilo de `QApplication`, sin bloquear el hilo CEF. Su captura de `qt_app` es
-válida porque `QApplication` permanece vivo hasta después de `CefShutdown` y de
-liberar nuestra referencia a `BrowserApp`.
+al hilo de `QApplication`, sin bloquear el hilo CEF. Las variables capturadas
+permanecen vivas hasta después de `CefShutdown` y de liberar nuestra referencia
+a `BrowserApp`.
 
-El receptor todavía solo escribe `CEF context notification received; Qt main
+El receptor escribe `CEF context notification received; Qt main
 thread: 1.`. Debe aparecer una vez al procesar el bucle Qt; `1` confirma el hilo
 principal tanto en Debug como en Release. El mensaje de contexto CEF original
-sigue procediendo de su propio hilo UI. Todavía no se crea un navegador al
-recibir el aviso.
+sigue procediendo de su propio hilo UI.
+
+En el hilo Qt se coordinan dos condiciones: aviso de contexto recibido y
+`HWND` (identificador de ventana de Windows) del widget anfitrión disponible.
+Cuando ambas se cumplen, se prepara una vez `CefWindowInfo`: `SetAsChild`
+configura la ventana hija, `GetClientRect` obtiene su área nativa en píxeles
+y `CEF_RUNTIME_STYLE_ALLOY` selecciona el estilo acordado. Se mantiene
+`windowless_rendering_enabled = false`. El diagnóstico muestra el padre,
+el tamaño y el estilo (`2` identifica Alloy en este SDK).
+
+Esta preparación todavía no llama a `CefBrowserHost::CreateBrowser`. El tamaño
+es una captura inicial; el ajuste del contenido CEF al redimensionar se
+incorporará con la instancia real. Al salir del bucle Qt se retiran el `HWND`
+y los parámetros antes de destruir los widgets; una notificación posterior
+ya no encontrará un anfitrión disponible.
 
 En esta etapa se verifica que el aviso de contexto llega una vez en el hilo
 esperado, que se prepara el cliente y que la ventana abre y cierra con salida
