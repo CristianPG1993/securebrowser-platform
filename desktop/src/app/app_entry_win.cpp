@@ -17,6 +17,7 @@
 #include <shlobj.h>
 
 #include <cstdio>
+#include <functional>
 #include <string>
 
 // Entrada que el bootstrap llama al cargar nuestra DLL (Dynamic-Link Library).
@@ -56,11 +57,16 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
     HWND browser_host_handle = nullptr;
     CefWindowInfo browser_window_info;
     bool browser_window_info_ready = false;
+    bool qt_close_requested = false;
+    // Se conectará al cliente después de construir la ventana; solo se ejecuta desde Qt.
+    std::function<void(const CefWindowInfo&)> request_browser_creation;
 
     // Podemos llegar por el aviso de CEF o por la creación del anfitrión, en cualquier orden.
     const auto prepare_browser_window_info = [&cef_context_ready, &browser_host_handle,
-                                             &browser_window_info, &browser_window_info_ready] {
-        if (!cef_context_ready || browser_host_handle == nullptr || browser_window_info_ready) {
+                                             &browser_window_info, &browser_window_info_ready,
+                                             &qt_close_requested, &request_browser_creation] {
+        if (!cef_context_ready || browser_host_handle == nullptr || browser_window_info_ready
+            || qt_close_requested) {
             return;
         }
 
@@ -84,6 +90,8 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
                      static_cast<void*>(browser_window_info.parent_window),
                      browser_window_info.bounds.width, browser_window_info.bounds.height,
                      static_cast<int>(browser_window_info.runtime_style), QThread::isMainThread());
+        // Solo ahora están preparados tanto CEF como el anfitrión nativo de Qt.
+        request_browser_creation(browser_window_info);
     };
 
     // La referencia local vive hasta salir de RunWinMain; CEF puede conservar sus propias referencias.
@@ -176,9 +184,24 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
                 }
             },
             confirm_close_on_qt));
-        std::fputs("CEF browser client prepared; no browser instance created.\n", stderr);
+        std::fputs("CEF browser client prepared.\n", stderr);
 
-        window.SetCloseRequestHandler([browser_client] {
+        // BindOnce copia los parámetros y conserva el cliente hasta ejecutar la tarea en CEF.
+        request_browser_creation = [browser_client, &window, &qt_close_requested,
+                                    &qt_exit_code](const CefWindowInfo& window_info) {
+            if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::CreateBrowser,
+                                                   browser_client, window_info))) {
+                std::fputs("CEF browser creation task could not be posted.\n", stderr);
+                // No hay una tarea ni una creación pendiente: Qt puede terminar con error.
+                qt_exit_code = 1;
+                qt_close_requested = true;
+                window.ConfirmClose();
+            }
+        };
+
+        window.SetCloseRequestHandler([browser_client, &qt_close_requested] {
+            // Impide iniciar una creación posterior si el aviso de contexto aún estaba en la cola Qt.
+            qt_close_requested = true;
             // Qt publica una tarea en TID_UI, el hilo de interfaz de CEF, sin esperar su ejecución.
             // La captura y BindOnce conservan referencias administradas al cliente, sin copiarlo.
             // &BrowserClient::RequestClose identifica el método que ejecutará la tarea sobre ese cliente.
@@ -202,7 +225,7 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         window.show();
 
         // winId() se consulta en el hilo Qt; en Windows identifica la ventana mediante un HWND.
-        // Solo registramos ese identificador: todavía no creamos ni asociamos un CefBrowser.
+        // Conservamos el identificador para preparar los parámetros del navegador hijo.
         browser_host_handle = reinterpret_cast<HWND>(browser_host.winId());
         std::fprintf(stderr, "Qt native browser host ready: %p.\n",
                      static_cast<void*>(browser_host_handle));
@@ -212,15 +235,20 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         // Qt espera y despacha eventos en el principal; CEF mantiene su bucle en su propio hilo.
         // Al cerrar la última ventana, exec() termina y conserva el código de salida de Qt.
         std::fputs("Qt event loop starting with CEF initialized.\n", stderr);
-        qt_exit_code = qt_app.exec();
+        const int event_loop_exit_code = qt_app.exec();
+        if (qt_exit_code == 0) {
+            qt_exit_code = event_loop_exit_code;
+        }
 
         // Retiramos el identificador y los parámetros antes de destruir los widgets anfitriones.
+        // Soltamos también la función y su referencia al cliente antes de apagar CEF.
+        request_browser_creation = {};
         browser_host_handle = nullptr;
         browser_window_info = CefWindowInfo();
         browser_window_info_ready = false;
     }
     // Al salir del bloque se destruye la ventana, antes de apagar el motor.
-    // Esta ventana aún no contiene un CefBrowser; al incrustarlo coordinaremos su cierre primero.
+    // OnBeforeClose ya ha confirmado el cierre del navegador antes de destruir su anfitrión.
     std::fprintf(stderr, "Qt window destroyed; event loop exit code %d.\n", qt_exit_code);
     // Solo apagamos el motor tras una inicialización correcta, desde el mismo hilo principal.
     CefShutdown();
