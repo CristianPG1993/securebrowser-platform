@@ -21,6 +21,9 @@ public:
     // Este mismo objeto atiende los avisos del ciclo de vida del navegador.
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
 
+    // Se llama en el hilo UI de CEF. Esta etapa solo confirma el caso sin navegador creado.
+    void RequestClose();
+
     // CEF notificará aquí que una instancia del navegador ya ha sido creada.
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
 

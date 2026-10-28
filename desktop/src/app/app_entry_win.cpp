@@ -17,7 +17,6 @@
 #include <shlobj.h>
 
 #include <cstdio>
-#include <functional>
 #include <string>
 
 // Entrada que el bootstrap llama al cargar nuestra DLL (Dynamic-Link Library).
@@ -179,18 +178,12 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
             confirm_close_on_qt));
         std::fputs("CEF browser client prepared; no browser instance created.\n", stderr);
 
-        window.SetCloseRequestHandler([confirm_close_on_qt] {
+        window.SetCloseRequestHandler([browser_client] {
             // Qt publica una tarea en TID_UI, el hilo de interfaz de CEF, sin esperar su ejecución.
-            // BindOnce guarda la función de confirmación como argumento y ejecuta la tarea una vez.
-            const bool posted = CefPostTask(TID_UI, base::BindOnce(
-                [](std::function<void()> confirm_close) {
-                    std::fprintf(stderr, "CEF close task received; CEF UI thread: %d.\n",
-                                 CefCurrentlyOn(TID_UI));
-                    // Todavía no existe un navegador: devolvemos la confirmación a la cola Qt.
-                    // Al incorporarlo, esta tarea solicitará su cierre y esperará OnBeforeClose.
-                    confirm_close();
-                },
-                std::function<void()>(confirm_close_on_qt)));
+            // La captura y BindOnce conservan referencias administradas al cliente, sin copiarlo.
+            // &BrowserClient::RequestClose identifica el método que ejecutará la tarea sobre ese cliente.
+            const bool posted = CefPostTask(TID_UI,
+                base::BindOnce(&sbp::BrowserClient::RequestClose, browser_client));
             if (!posted) {
                 std::fputs("Qt close request could not be posted to CEF.\n", stderr);
             }

@@ -19,6 +19,17 @@ CefRefPtr<CefLifeSpanHandler> BrowserClient::GetLifeSpanHandler() {
     return this;
 }
 
+void BrowserClient::RequestClose() {
+    CEF_REQUIRE_UI_THREAD();
+    std::fprintf(stderr, "CEF client close request received; CEF UI thread: %d.\n",
+                 CefCurrentlyOn(TID_UI));
+    // Todavía no existe un CefBrowser: confirmamos ese caso mediante la función registrada.
+    // No llamamos manualmente a OnBeforeClose; ese aviso pertenece exclusivamente a CEF.
+    if (on_browser_closed_) {
+        on_browser_closed_();
+    }
+}
+
 void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
     const int browser_id = browser->GetIdentifier();

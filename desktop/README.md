@@ -523,6 +523,8 @@ La propiedad y liberación de referencias es la siguiente:
 | `cef_app` | Variable local `CefRefPtr<BrowserApp>` en `RunWinMain`. | Al salir de `RunWinMain`, después de `CefShutdown` y antes de destruir `QApplication`. |
 | Referencias de CEF al objeto de aplicación y a su handler | CEF durante la vida del contexto. | Durante su limpieza; la referencia local mantiene vivo nuestro objeto mientras dura el arranque y apagado. |
 | `browser_client` | Variable local `CefRefPtr<BrowserClient>` dentro del ámbito de la ventana. | Al salir de ese ámbito; su referencia local se libera antes de destruir la ventana principal y antes de `CefShutdown`. |
+| Copia de `browser_client` en la solicitud de cierre Qt | Callback guardado por `BrowserWindow`. | Al destruir la ventana y su callback. La referencia local puede haberse liberado antes sin destruir todavía el cliente. |
+| Referencia al cliente ligada a la tarea CEF | `base::BindOnce` conserva un `CefRefPtr<BrowserClient>` mientras la tarea está pendiente o ejecutándose. | Al terminar o destruirse la tarea, sin dejar un puntero al cliente sin propietario. |
 | Parámetro `browser` de los callbacks | Referencia administrada durante cada llamada. | Al terminar la llamada. El cliente no la almacena en ningún miembro. |
 
 `IMPLEMENT_REFCOUNTING` proporciona `AddRef`, `Release` y el contador que
@@ -574,14 +576,16 @@ hasta ese momento. Todos estos pasos se ejecutan en el hilo Qt y no muestran
 un diálogo de confirmación al usuario.
 
 La solicitud sale del hilo Qt mediante `CefPostTask(TID_UI, ...)`.
-`base::BindOnce` conserva la función de confirmación como argumento de una
-tarea que se ejecutará una vez en el hilo UI de CEF. Como todavía no existe un
-navegador, esa tarea devuelve la confirmación hacia la cola de la ventana Qt.
+`base::BindOnce(&BrowserClient::RequestClose, browser_client)` prepara una
+llamada al método del cliente y conserva una referencia administrada a ese
+objeto hasta ejecutar o destruir la tarea. Como todavía no existe un navegador,
+`RequestClose` cubre únicamente ese caso y devuelve la confirmación hacia la
+cola de la ventana Qt mediante la función registrada en el cliente.
 El diagnóstico debe seguir este orden:
 
 ```text
 Qt close requested; native host remains alive.
-CEF close task received; CEF UI thread: 1.
+CEF client close request received; CEF UI thread: 1.
 Qt close confirmed; native host valid: 1.
 Qt close accepted after confirmation.
 Qt window destroyed; event loop exit code 0.
@@ -597,9 +601,9 @@ ni transfiere esa referencia a las funciones encoladas.
 Esta comprobación sigue verificando el cierre de una ventana sin navegador:
 recorre Qt → hilo UI de CEF → Qt, manteniendo el anfitrión vivo hasta confirmar.
 Todavía no solicita `CloseBrowser` ni ejecuta los callbacks CEF de creación o
-cierre. Al incorporar la instancia, la tarea sustituirá su confirmación
-directa por la solicitud de cierre CEF y la espera de `OnBeforeClose`, antes
-de terminar Qt y apagar CEF.
+cierre. Antes de incorporar una instancia, se ampliará `RequestClose` para
+solicitar su cierre y esperar `OnBeforeClose`, en lugar de confirmar
+directamente. La ventana Qt y CEF permanecen activos hasta esa confirmación.
 
 En esta etapa se verifica que el aviso de contexto llega una vez en el hilo
 esperado, que se prepara el cliente y que la ventana abre y cierra con salida
