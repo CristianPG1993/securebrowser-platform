@@ -573,11 +573,15 @@ solicitud mediante el callback registrado con `SetCloseRequestHandler`.
 hasta ese momento. Todos estos pasos se ejecutan en el hilo Qt y no muestran
 un diálogo de confirmación al usuario.
 
-Como todavía no existe un navegador, la solicitud encola la confirmación
-directamente hacia la propia ventana Qt. El diagnóstico debe seguir este orden:
+La solicitud sale del hilo Qt mediante `CefPostTask(TID_UI, ...)`.
+`base::BindOnce` conserva la función de confirmación como argumento de una
+tarea que se ejecutará una vez en el hilo UI de CEF. Como todavía no existe un
+navegador, esa tarea devuelve la confirmación hacia la cola de la ventana Qt.
+El diagnóstico debe seguir este orden:
 
 ```text
 Qt close requested; native host remains alive.
+CEF close task received; CEF UI thread: 1.
 Qt close confirmed; native host valid: 1.
 Qt close accepted after confirmation.
 Qt window destroyed; event loop exit code 0.
@@ -591,10 +595,11 @@ su diagnóstico en Qt. `OnBeforeClose` ejecuta la segunda, que encola
 ni transfiere esa referencia a las funciones encoladas.
 
 Esta comprobación sigue verificando el cierre de una ventana sin navegador:
-su solicitud utiliza directamente la función de confirmación encolada. Los
-callbacks CEF de creación y cierre todavía no se ejecutan. Al incorporar la
-instancia, se sustituirá esa confirmación directa por la solicitud de cierre
-CEF y la espera de `OnBeforeClose`, antes de terminar Qt y apagar CEF.
+recorre Qt → hilo UI de CEF → Qt, manteniendo el anfitrión vivo hasta confirmar.
+Todavía no solicita `CloseBrowser` ni ejecuta los callbacks CEF de creación o
+cierre. Al incorporar la instancia, la tarea sustituirá su confirmación
+directa por la solicitud de cierre CEF y la espera de `OnBeforeClose`, antes
+de terminar Qt y apagar CEF.
 
 En esta etapa se verifica que el aviso de contexto llega una vez en el hilo
 esperado, que se prepara el cliente y que la ventana abre y cierra con salida
