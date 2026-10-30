@@ -18,14 +18,24 @@ Qt, los avisos de terceros y los permisos de la carpeta de ejecución.
 La entrada `RunWinMain` de [`app_entry_win.cpp`](src/app/app_entry_win.cpp) distingue
 el proceso principal de los subprocesos antes de crear objetos Qt. En el
 principal comprueba el contexto de sandbox y crea `QApplication` antes de
-inicializar CEF. Tras una inicialización correcta, muestra el `QWidget` y
-ejecuta `qt_app.exec()`. La creación asíncrona del navegador se solicita cuando
-el contexto CEF y el anfitrión Qt están disponibles. `sbp_toolchain_check` conserva una ventana Qt independiente
-como comprobación básica del kit.
+inicializar CEF. Tras una inicialización correcta, llama a `BrowserSession::Run`,
+que crea la ventana y sus controles, conecta los avisos entre Qt y CEF y ejecuta
+`qt_app.exec()`. Al volver, los widgets ya se han destruido; la sesión permanece
+viva hasta después de `CefShutdown`. La creación asíncrona del navegador se
+solicita cuando el contexto CEF y el anfitrión Qt están disponibles.
+`sbp_toolchain_check` conserva una ventana Qt independiente como comprobación
+básica del kit.
 `BrowserApp` recibe el aviso de contexto preparado y `BrowserClient` contiene
 los handlers (receptores de avisos) de creación y cierre del único navegador.
-Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes;
-todavía no se incorporan barra de navegación ni pestañas.
+Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes.
+El primer bloque de #90 añade un campo Qt editable encima del contenido web.
+Todavía no ejecuta navegación al pulsar Enter ni refleja la URL real del
+navegador; esas conexiones y los botones se incorporarán en los siguientes
+bloques. Las pestañas quedan fuera del alcance de Foundation.
+Este primer campo se ha comprobado en Debug y Release: edición, Enter sin
+navegación, conservación del foco y texto tras Alt+Tab, y cierre con salida
+`0` sin procesos restantes. En la prueba local al 150 %, la ventana mantiene
+1024×768 unidades lógicas y el área web disponible queda en 1024×736.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
 
@@ -36,7 +46,7 @@ junto a su implementación:
 
 | Carpeta | Responsabilidad | Archivos actuales |
 | --- | --- | --- |
-| `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp` |
+| `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp` y `browser_session.h/.cpp` |
 | `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h`, `browser_client.h` y `browser_client.cpp` |
 | `src/ui/` | Ventana principal y widget anfitrión nativo del contenido CEF. | `browser_window.h/.cpp` y `browser_host.h/.cpp` |
 
@@ -45,6 +55,11 @@ junto a su implementación:
 comprobación independiente del kit Qt (`sbp_toolchain_check`). Las carpetas de
 políticas, Security Engine, persistencia y comunicación REST se añadirán al
 incorporar sus primeras clases.
+
+La extracción de `BrowserSession` se ha comprobado en Debug y Release: carga
+HTTPS, recepción de los avisos en Qt, cierre solicitado desde CEF con el
+anfitrión aún válido, salida `0` y ausencia de procesos restantes. También se
+ha verificado que las importaciones de Qt conservan su carga diferida.
 
 ## Requisitos
 

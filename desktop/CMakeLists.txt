@@ -106,6 +106,8 @@ ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
 # Nuestra DLL implementa la entrada que invoca el bootstrap.
 add_library(SecureBrowser SHARED
     src/app/app_entry_win.cpp
+    src/app/browser_session.cpp
+    src/app/browser_session.h
     src/browser/browser_app.h
     src/browser/browser_client.cpp
     src/browser/browser_client.h
