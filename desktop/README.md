@@ -38,7 +38,7 @@ junto a su implementación:
 | --- | --- | --- |
 | `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp` |
 | `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h`, `browser_client.h` y `browser_client.cpp` |
-| `src/ui/` | Ventana y comportamiento de la interfaz Qt. | `browser_window.h` y `browser_window.cpp` |
+| `src/ui/` | Ventana principal y widget anfitrión nativo del contenido CEF. | `browser_window.h/.cpp` y `browser_host.h/.cpp` |
 
 `CMakeLists.txt` incorpora esos archivos al target `SecureBrowser` y utiliza
 `src/` como raíz de los includes propios. `main.cpp` sigue siendo la
@@ -352,8 +352,9 @@ try {
 Mantener la ventana abierta durante 30-60 segundos: moverla, cambiar su tamaño,
 minimizarla, restaurarla y maximizarla. Debe seguir respondiendo. Después,
 cerrarla con la X. La página HTTPS debe aparecer dentro del área Qt, sin una
-ventana CEF independiente. El tamaño del navegador es el inicial; su ajuste
-al redimensionar y la coordinación del foco se desarrollarán en #89.
+ventana CEF independiente. Al reducir, ampliar o maximizar la ventana, el
+contenido debe ajustarse al área interior; al restaurarla debe recuperar
+el tamaño disponible. La coordinación explícita del foco sigue pendiente en #89.
 Los mensajes del hilo principal deben seguir este orden,
 con código final `0`:
 
@@ -586,10 +587,29 @@ el tamaño y el estilo (`2` identifica Alloy en este SDK).
 Después se llama a `request_browser_creation`, que publica una tarea con una
 copia de los parámetros y una referencia al cliente. Su método `CreateBrowser`
 ejecuta `CefBrowserHost::CreateBrowser` en el hilo UI de CEF con la URL HTTPS
-inicial. El tamaño es una captura inicial; el ajuste del contenido CEF al
-redimensionar se incorporará en #89. Al salir del bucle Qt se retiran el `HWND`
+inicial. Al salir del bucle Qt se retiran el `HWND`
 y los parámetros antes de destruir los widgets; una notificación posterior
 ya no encontrará un anfitrión disponible.
+
+El widget [`BrowserHost`](src/ui/browser_host.h) declara `resizeEvent` en el
+header y lo implementa en [`browser_host.cpp`](src/ui/browser_host.cpp).
+Cuando el layout cambia su tamaño, Qt ejecuta el callback registrado, que
+publica `BrowserClient::ResizeBrowser` en el hilo UI de CEF. Ese método obtiene
+el padre nativo de la ventana CEF, mide su área con `GetClientRect` y ajusta
+la hija con `SetWindowPos`, conservando su posición, orden y activación.
+No consulta objetos Qt desde el hilo CEF ni utiliza las unidades lógicas del
+evento como si fueran píxeles nativos.
+
+Los avisos anteriores a la creación se ignoran: `OnAfterCreated` aplica de
+nuevo el área actual para recoger cualquier cambio ocurrido mientras CEF
+creaba la instancia. Los avisos durante el cierre y las áreas vacías se
+ignoran. La copia de `CefRefPtr<BrowserClient>` del callback se libera al
+destruir el anfitrión; cada tarea conserva otra copia solo hasta ejecutarse.
+
+Este bloque compila en Debug y Release. Se ha comprobado el ajuste inicial
+con un viewport de 1024×768 unidades lógicas, la carga HTTPS y el cierre con
+salida `0`. El usuario ha confirmado también la prueba manual de reducir,
+ampliar, maximizar y restaurar la ventana, seguida del cierre con la X.
 
 La ventana principal utiliza [`BrowserWindow`](src/ui/browser_window.h), una subclase
 de `QWidget`. El header declara la clase y sus métodos; su implementación está
@@ -649,8 +669,8 @@ reales, cancelación de popup, anfitrión válido hasta confirmar, salida `0` y
 ausencia de procesos restantes. Se usó el protocolo local de depuración CEF
 solo en esas ejecuciones para inspeccionar el documento y solicitar `Page.close`.
 No se habilita un puerto de depuración en la configuración de la aplicación.
-La comprobación visual del marco Qt y del cierre manual con la X queda para
-la prueba anterior: la herramienta de inspección de escritorio no pudo iniciarse.
+El usuario confirmó después la prueba manual de apertura y cierre de la
+primera instancia. La herramienta de inspección de escritorio no pudo iniciarse.
 La carrera exacta de cierre mientras la creación está pendiente no se ha
 forzado de manera determinista. El cierre con cancelación JavaScript y su
 reintento se completará en #91; la guarda actual de Qt admite una solicitud.

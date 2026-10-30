@@ -25,6 +25,9 @@ public:
     // Este método y el estado del cliente pertenecen al hilo UI de CEF.
     void CreateBrowser(CefWindowInfo window_info);
 
+    // Ajusta la ventana hija al área nativa actual de su padre, desde el hilo UI de CEF.
+    void ResizeBrowser();
+
     // Solicita el cierre y espera OnBeforeClose, incluso si la creación todavía está pendiente.
     void RequestClose();
 

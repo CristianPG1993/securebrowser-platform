@@ -1,5 +1,6 @@
 #include "browser/browser_app.h"
 #include "browser/browser_client.h"
+#include "ui/browser_host.h"
 #include "ui/browser_window.h"
 
 #include "include/base/cef_callback.h"
@@ -218,9 +219,17 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         QVBoxLayout window_layout(&window);
         window_layout.setContentsMargins(0, 0, 0, 0);
 
-        // El padre es window. El atributo exige una ventana nativa propia para alojar CEF después.
-        QWidget browser_host(&window);
-        browser_host.setAttribute(Qt::WA_NativeWindow);
+        // El anfitrión avisa desde Qt y conserva una referencia al cliente en su callback.
+        sbp::BrowserHost browser_host([browser_client, &qt_close_requested] {
+            if (qt_close_requested) {
+                return;
+            }
+            // La tarea consulta el área nativa más reciente al ejecutarse en CEF, sin bloquear Qt.
+            if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::ResizeBrowser,
+                                                   browser_client))) {
+                std::fputs("Qt resize notification could not be posted to CEF.\n", stderr);
+            }
+        }, &window);
         window_layout.addWidget(&browser_host);
         window.show();
 

@@ -109,6 +109,8 @@ add_library(SecureBrowser SHARED
     src/browser/browser_app.h
     src/browser/browser_client.cpp
     src/browser/browser_client.h
+    src/ui/browser_host.cpp
+    src/ui/browser_host.h
     src/ui/browser_window.cpp
     src/ui/browser_window.h
 )

@@ -41,6 +41,35 @@ void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
     }
 }
 
+void BrowserClient::ResizeBrowser() {
+    CEF_REQUIRE_UI_THREAD();
+    // Un aviso puede llegar antes de OnAfterCreated o mientras se está cerrando la ventana.
+    if (browser_id_ == -1 || close_requested_) {
+        return;
+    }
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        return;
+    }
+    const HWND child_window = browser->GetHost()->GetWindowHandle();
+    RECT bounds{};
+    // Leemos el área Win32 del padre, sin consultar widgets Qt desde este hilo.
+    // GetClientRect entrega el área nativa; no usamos las unidades lógicas de QResizeEvent.
+    if (child_window == nullptr || !GetClientRect(GetParent(child_window), &bounds)) {
+        std::fputs("CEF resize failed: native host area unavailable.\n", stderr);
+        return;
+    }
+    // Ignoramos áreas vacías, por ejemplo durante una transición de minimización.
+    if (bounds.right <= 0 || bounds.bottom <= 0) {
+        return;
+    }
+    // Conservamos la posición (0, 0), el orden de ventanas y el foco mientras ajustamos el tamaño.
+    if (!SetWindowPos(child_window, nullptr, 0, 0, bounds.right, bounds.bottom,
+                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)) {
+        std::fputs("CEF resize failed: native child could not be resized.\n", stderr);
+    }
+}
+
 void BrowserClient::RequestClose() {
     CEF_REQUIRE_UI_THREAD();
     std::fprintf(stderr, "CEF client close request received; CEF UI thread: %d.\n",
@@ -75,6 +104,8 @@ void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     // Registramos la instancia para poder localizarla cuando Qt solicite su cierre.
     browser_id_ = browser_id;
     creation_pending_ = false;
+    // Recupera el tamaño más reciente si Qt cambió el anfitrión durante la creación asíncrona.
+    ResizeBrowser();
     std::fprintf(stderr, "CEF browser created: id %d.\n", browser_id);
     // Solo entregamos el identificador; no conservamos el navegador ni lo pasamos a la cola Qt.
     if (on_browser_created_) {
