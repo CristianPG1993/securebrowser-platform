@@ -354,7 +354,10 @@ minimizarla, restaurarla y maximizarla. Debe seguir respondiendo. Después,
 cerrarla con la X. La página HTTPS debe aparecer dentro del área Qt, sin una
 ventana CEF independiente. Al reducir, ampliar o maximizar la ventana, el
 contenido debe ajustarse al área interior; al restaurarla debe recuperar
-el tamaño disponible. La coordinación explícita del foco sigue pendiente en #89.
+el tamaño disponible. Para comprobar el foco, sin hacer clic previamente en
+la página, pulsar Tab hasta seleccionar «Learn more» y Enter para abrirlo.
+Cambiar a otra aplicación con Alt+Tab y regresar: el teclado debe seguir
+funcionando en el contenido. Finalmente, cerrar con la X.
 Los mensajes del hilo principal deben seguir este orden,
 con código final `0`:
 
@@ -593,6 +596,11 @@ ya no encontrará un anfitrión disponible.
 
 El widget [`BrowserHost`](src/ui/browser_host.h) declara `resizeEvent` en el
 header y lo implementa en [`browser_host.cpp`](src/ui/browser_host.cpp).
+Su constructor recibe un `BrowserHostCallbacks` y el widget padre. La
+estructura agrupa `on_resized` y `on_focus_requested`; `app_entry_win.cpp`
+asigna las lambdas mediante esos campos nombrados y el anfitrión conserva
+el bloque en `callbacks_`. Se guardan las funciones al construirlo y se
+ejecutan al recibir el evento correspondiente en Qt.
 Cuando el layout cambia su tamaño, Qt ejecuta el callback registrado, que
 publica `BrowserClient::ResizeBrowser` en el hilo UI de CEF. Ese método obtiene
 el padre nativo de la ventana CEF, mide su área con `GetClientRect` y ajusta
@@ -610,6 +618,26 @@ Este bloque compila en Debug y Release. Se ha comprobado el ajuste inicial
 con un viewport de 1024×768 unidades lógicas, la carga HTTPS y el cierre con
 salida `0`. El usuario ha confirmado también la prueba manual de reducir,
 ampliar, maximizar y restaurar la ventana, seguida del cierre con la X.
+
+El anfitrión utiliza `Qt::StrongFocus`. `focusInEvent` solicita entregar el
+teclado a CEF y `event` atiende también `WindowActivate`, siempre que Qt siga
+considerando al anfitrión su widget de foco. Ambos ejecutan el callback
+`on_focus_requested`, que publica `BrowserClient::FocusBrowser` en el hilo UI
+de CEF. El arranque solicita el foco inicial con `browser_host.setFocus`.
+
+`FocusBrowser` conserva una petición recibida antes de crear el navegador;
+`OnAfterCreated` la atiende una vez disponible el identificador. Antes de
+llamar a `CefBrowserHost::SetFocus(true)`, comprueba que no se esté cerrando,
+obtiene una referencia temporal al navegador y verifica que la ventana raíz
+siga en primer plano. Si el usuario cambió de aplicación, esa petición se
+descarta. `OnBeforeClose` retira cualquier petición pendiente. No se envía
+una pérdida de foco al pasar del anfitrión a su hija CEF, porque desharía
+la entrega del teclado al contenido.
+
+El bloque de foco y el refactor de callbacks compilan en Debug y Release.
+El usuario ha confirmado la prueba manual propuesta con Debug: navegación
+mediante Tab y Enter sin clic previo, cambio de aplicación y regreso,
+y cierre normal con la X.
 
 La ventana principal utiliza [`BrowserWindow`](src/ui/browser_window.h), una subclase
 de `QWidget`. El header declara la clase y sus métodos; su implementación está

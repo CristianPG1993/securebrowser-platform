@@ -70,6 +70,42 @@ void BrowserClient::ResizeBrowser() {
     }
 }
 
+void BrowserClient::FocusBrowser() {
+    // Comprobamos que la tarea llegó al hilo UI de CEF; aquí no accedemos a widgets Qt.
+    CEF_REQUIRE_UI_THREAD();
+    // Si ya se solicitó cerrar, no debemos volver a dar el foco al contenido que está saliendo.
+    if (close_requested_) {
+        return;
+    }
+    // Guardamos la intención antes de comprobar el identificador. Si aún no existe navegador,
+    // OnAfterCreated volverá a llamar a este método para atender la petición pendiente.
+    focus_requested_ = true;
+    if (browser_id_ == -1) {
+        return;
+    }
+    // El identificador no conserva vivo al navegador. Pedimos a CEF una referencia temporal
+    // y comprobamos que todavía existe antes de utilizar su host.
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        return;
+    }
+    // Consumimos esta petición: si la ventana dejó de estar activa, no la reintentaremos
+    // por nuestra cuenta. Un nuevo aviso de Qt podrá solicitar el foco de nuevo.
+    focus_requested_ = false;
+    const HWND child_window = browser->GetHost()->GetWindowHandle();
+    // Verificamos que existe la ventana nativa y que su raíz (la ventana principal Qt)
+    // sigue en primer plano. Entre encolar y ejecutar la tarea, el usuario pudo cambiar de app.
+    // En ese caso salimos para que esta petición no quite el foco a la otra aplicación.
+    if (child_window == nullptr || GetAncestor(child_window, GA_ROOT) != GetForegroundWindow()) {
+        return;
+    }
+    // Solo después de validar todo llamamos a la API de CefBrowserHost.
+    // CEF entrega el foco a su contenido; al salir del método se libera la referencia temporal.
+    browser->GetHost()->SetFocus(true);
+    std::fprintf(stderr, "CEF browser focus forwarded; CEF UI thread: %d.\n",
+                 CefCurrentlyOn(TID_UI));
+}
+
 void BrowserClient::RequestClose() {
     CEF_REQUIRE_UI_THREAD();
     std::fprintf(stderr, "CEF client close request received; CEF UI thread: %d.\n",
@@ -106,6 +142,9 @@ void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     creation_pending_ = false;
     // Recupera el tamaño más reciente si Qt cambió el anfitrión durante la creación asíncrona.
     ResizeBrowser();
+    if (focus_requested_) {
+        FocusBrowser();
+    }
     std::fprintf(stderr, "CEF browser created: id %d.\n", browser_id);
     // Solo entregamos el identificador; no conservamos el navegador ni lo pasamos a la cola Qt.
     if (on_browser_created_) {
@@ -148,6 +187,7 @@ void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     std::fprintf(stderr, "CEF browser closing: id %d.\n", browser->GetIdentifier());
     // Retiramos el identificador antes de avisar a Qt; ya no se solicitarán acciones a esta instancia.
     browser_id_ = -1;
+    focus_requested_ = false;
     NotifyClosed();
 }
 

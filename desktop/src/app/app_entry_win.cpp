@@ -219,19 +219,36 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         QVBoxLayout window_layout(&window);
         window_layout.setContentsMargins(0, 0, 0, 0);
 
-        // El anfitrión avisa desde Qt y conserva una referencia al cliente en su callback.
-        sbp::BrowserHost browser_host([browser_client, &qt_close_requested] {
-            if (qt_close_requested) {
-                return;
-            }
-            // La tarea consulta el área nativa más reciente al ejecutarse en CEF, sin bloquear Qt.
-            if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::ResizeBrowser,
-                                                   browser_client))) {
-                std::fputs("Qt resize notification could not be posted to CEF.\n", stderr);
+        // Los campos nombrados de BrowserHostCallbacks identifican el evento de cada lambda.
+        // El anfitrión avisa desde Qt y cada función conserva una referencia al cliente.
+        sbp::BrowserHost browser_host({
+            // Qt ejecuta esta lambda al redimensionar el anfitrión; solicita ajustar la ventana hija CEF.
+            .on_resized = [browser_client, &qt_close_requested] {
+                if (qt_close_requested) {
+                    return;
+                }
+                // La tarea consulta el área nativa más reciente al ejecutarse en CEF, sin bloquear Qt.
+                if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::ResizeBrowser,
+                                                       browser_client))) {
+                    std::fputs("Qt resize notification could not be posted to CEF.\n", stderr);
+                }
+            },
+            // Qt ejecuta esta lambda al recibir o recuperar el foco; solicita entregarlo al contenido CEF.
+            .on_focus_requested = [browser_client, &qt_close_requested] {
+                if (qt_close_requested) {
+                    return;
+                }
+                // El foco llega desde Qt; la llamada a CefBrowserHost::SetFocus se ejecutará en CEF.
+                if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::FocusBrowser,
+                                                       browser_client))) {
+                    std::fputs("Qt focus notification could not be posted to CEF.\n", stderr);
+                }
             }
         }, &window);
         window_layout.addWidget(&browser_host);
         window.show();
+        // El área web será el primer destino del teclado cuando esta ventana esté activa.
+        browser_host.setFocus(Qt::OtherFocusReason);
 
         // winId() se consulta en el hilo Qt; en Windows identifica la ventana mediante un HWND.
         // Conservamos el identificador para preparar los parámetros del navegador hijo.

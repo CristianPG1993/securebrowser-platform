@@ -28,6 +28,9 @@ public:
     // Ajusta la ventana hija al área nativa actual de su padre, desde el hilo UI de CEF.
     void ResizeBrowser();
 
+    // Recibe la petición Qt y entrega el foco al navegador desde el hilo UI de CEF.
+    void FocusBrowser();
+
     // Solicita el cierre y espera OnBeforeClose, incluso si la creación todavía está pendiente.
     void RequestClose();
 
@@ -65,6 +68,8 @@ private:
     bool creation_pending_ = false;
     bool close_requested_ = false;
     bool close_notified_ = false;
+    // Conserva una petición anterior a OnAfterCreated; solo se utiliza en el hilo UI de CEF.
+    bool focus_requested_ = false;
 
     // CEF implementa el contador que utilizan las referencias administradas al cliente.
     IMPLEMENT_REFCOUNTING(BrowserClient);
