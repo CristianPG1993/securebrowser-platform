@@ -19,8 +19,9 @@ La entrada `RunWinMain` de [`app_entry_win.cpp`](src/app/app_entry_win.cpp) dist
 el proceso principal de los subprocesos antes de crear objetos Qt. En el
 principal comprueba el contexto de sandbox y crea `QApplication` antes de
 inicializar CEF. Tras una inicialización correcta, llama a `BrowserSession::Run`,
-que crea la ventana y sus controles, conecta los avisos entre Qt y CEF y ejecuta
-`qt_app.exec()`. Al volver, los widgets ya se han destruido; la sesión permanece
+que crea la ventana, delega la construcción de sus controles en `BrowserWindowUi`,
+conecta los avisos entre Qt y CEF y ejecuta `qt_app.exec()`.
+Al volver, los widgets ya se han destruido; la sesión permanece
 viva hasta después de `CefShutdown`. La creación asíncrona del navegador se
 solicita cuando el contexto CEF y el anfitrión Qt están disponibles.
 `sbp_toolchain_check` conserva una ventana Qt independiente como comprobación
@@ -48,7 +49,7 @@ junto a su implementación:
 | --- | --- | --- |
 | `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp` y `browser_session.h/.cpp` |
 | `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h`, `browser_client.h` y `browser_client.cpp` |
-| `src/ui/` | Ventana principal y widget anfitrión nativo del contenido CEF. | `browser_window.h/.cpp` y `browser_host.h/.cpp` |
+| `src/ui/` | Ventana principal, composición de controles Qt y anfitrión nativo del contenido CEF. | `browser_window.h/.cpp`, `browser_window_ui.h/.cpp` y `browser_host.h/.cpp` |
 
 `CMakeLists.txt` incorpora esos archivos al target `SecureBrowser` y utiliza
 `src/` como raíz de los includes propios. `main.cpp` sigue siendo la
@@ -56,10 +57,15 @@ comprobación independiente del kit Qt (`sbp_toolchain_check`). Las carpetas de
 políticas, Security Engine, persistencia y comunicación REST se añadirán al
 incorporar sus primeras clases.
 
-La extracción de `BrowserSession` se ha comprobado en Debug y Release: carga
-HTTPS, recepción de los avisos en Qt, cierre solicitado desde CEF con el
-anfitrión aún válido, salida `0` y ausencia de procesos restantes. También se
-ha verificado que las importaciones de Qt conservan su carga diferida.
+`BrowserWindowUi` reúne el layout, el campo de dirección y el anfitrión web.
+No utiliza CEF: recibe los avisos del anfitrión desde `BrowserSession`, que
+conserva la coordinación del navegador, el foco y el cierre.
+
+Las extracciones de `BrowserSession` y `BrowserWindowUi` se han comprobado en
+Debug y Release: carga HTTPS, recepción de los avisos en Qt, cierre solicitado
+desde CEF con el anfitrión aún válido, salida `0` y ausencia de procesos
+restantes. El área web conserva 1024×736 unidades lógicas en la prueba local
+al 150 %. Las importaciones de Qt mantienen su carga diferida.
 
 ## Requisitos
 

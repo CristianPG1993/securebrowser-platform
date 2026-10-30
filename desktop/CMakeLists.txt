@@ -115,6 +115,8 @@ add_library(SecureBrowser SHARED
     src/ui/browser_host.h
     src/ui/browser_window.cpp
     src/ui/browser_window.h
+    src/ui/browser_window_ui.cpp
+    src/ui/browser_window_ui.h
 )
 # La raíz src permite includes como "browser/browser_client.h" desde cualquier fuente del target.
 target_include_directories(SecureBrowser PRIVATE

@@ -2,16 +2,14 @@
 
 #include "browser/browser_client.h"
 #include "ui/browser_window.h"
-#include "ui/browser_host.h"
+#include "ui/browser_window_ui.h"
 
 #include "include/base/cef_callback.h"
 #include "include/wrapper/cef_closure_task.h"
 
 #include <QApplication>
-#include <QLineEdit>
 #include <QMetaObject>
 #include <QThread>
-#include <QVBoxLayout>
 #include <QWidget>
 
 #include <cstdio>
@@ -121,22 +119,6 @@ int BrowserSession::Run(QApplication& qt_app) {
             }
         });
 
-        window.setWindowTitle("SecureBrowser");
-        window.resize(1024, 768);
-
-        // El layout reparte el espacio entre la dirección y el contenido web, sin márgenes exteriores.
-        QVBoxLayout window_layout(&window);
-        window_layout.setContentsMargins(0, 0, 0, 0);
-
-        // Primer control de navegación: Qt permite escribir y editar la dirección.
-        // La conexión de Enter con CEF se añadirá en el siguiente bloque.
-        QLineEdit address_input(&window);
-        address_input.setObjectName("address_input");
-        address_input.setAccessibleName("Dirección web");
-        address_input.setPlaceholderText("Introduce una URL HTTP o HTTPS");
-        // El orden del layout sitúa este campo encima del anfitrión web que añadimos después.
-        window_layout.addWidget(&address_input);
-
         // Esta lambda comparte la solicitud de foco entre el anfitrión Qt y el marco nativo.
         const auto request_browser_focus = [this, browser_client] {
             if (qt_close_requested_) {
@@ -148,9 +130,9 @@ int BrowserSession::Run(QApplication& qt_app) {
             }
         };
 
-        // Los campos nombrados de BrowserHostCallbacks identifican el evento de cada lambda.
-        // El anfitrión avisa desde Qt y cada función conserva una referencia al cliente.
-        sbp::BrowserHost browser_host({
+        // La clase de interfaz crea y distribuye todos los controles; la sesión aporta sus avisos.
+        // Cada callback conserva una referencia al cliente y conecta el evento Qt con una tarea CEF.
+        sbp::BrowserWindowUi window_ui(window, {
             // Qt ejecuta esta lambda al redimensionar el anfitrión; solicita ajustar la ventana hija CEF.
             .on_resized = [this, browser_client] {
                 if (qt_close_requested_) {
@@ -164,7 +146,9 @@ int BrowserSession::Run(QApplication& qt_app) {
             },
             // El aviso Qt reutiliza la misma función que atiende la notificación del marco nativo.
             .on_focus_requested = request_browser_focus
-        }, &window);
+        });
+        // Usamos el anfitrión creado por la interfaz, sin construir otro ni copiarlo.
+        sbp::BrowserHost& browser_host = window_ui.GetBrowserHost();
         // Esta lambda se ejecuta al recuperar el foco nativo del marco. Respetamos el control Qt
         // recordado por la ventana para no quitarle el teclado a futuros controles de navegación.
         window.SetNativeFocusHandler([&window, &browser_host, request_browser_focus] {
@@ -174,7 +158,6 @@ int BrowserSession::Run(QApplication& qt_app) {
                 request_browser_focus();
             }
         });
-        window_layout.addWidget(&browser_host);
         window.show();
         // El área web será el primer destino del teclado cuando esta ventana esté activa.
         browser_host.setFocus(Qt::OtherFocusReason);
