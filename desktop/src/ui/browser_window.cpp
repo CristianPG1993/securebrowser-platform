@@ -1,6 +1,9 @@
 #include "browser_window.h"
 
 #include <QCloseEvent>
+#include <QMetaObject>
+
+#include <windows.h>
 
 #include <cstdio>
 #include <utility>
@@ -13,6 +16,26 @@ BrowserWindow::BrowserWindow() = default;
 void BrowserWindow::SetCloseRequestHandler(std::function<void()> on_close_requested) {
     // Conservamos la función que se ejecutará cuando Qt entregue la primera solicitud de cierre.
     on_close_requested_ = std::move(on_close_requested);
+}
+
+void BrowserWindow::SetNativeFocusHandler(std::function<void()> on_native_focus) {
+    on_native_focus_ = std::move(on_native_focus);
+}
+
+bool BrowserWindow::nativeEvent(const QByteArray& event_type, void* message, qintptr* result) {
+    if (event_type == "windows_generic_MSG" && static_cast<MSG*>(message)->message == WM_SETFOCUS) {
+        // Esperamos a que Qt termine de procesar el foco nativo antes de solicitar la entrega a CEF.
+        // Qt descarta esta lambda si se destruye la ventana receptora antes de ejecutarla.
+        const bool queued = QMetaObject::invokeMethod(this, [this] {
+            if (!close_requested_ && on_native_focus_) {
+                on_native_focus_();
+            }
+        }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("Qt native focus notification could not be queued.\n", stderr);
+        }
+    }
+    return QWidget::nativeEvent(event_type, message, result);
 }
 
 void BrowserWindow::ConfirmClose() {

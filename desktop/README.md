@@ -625,6 +625,14 @@ considerando al anfitrión su widget de foco. Ambos ejecutan el callback
 `on_focus_requested`, que publica `BrowserClient::FocusBrowser` en el hilo UI
 de CEF. El arranque solicita el foco inicial con `browser_host.setFocus`.
 
+Windows puede devolver el foco al marco principal sin que Qt emita otro
+`FocusIn` para el anfitrión. `BrowserWindow::nativeEvent` observa `WM_SETFOCUS`
+y publica una tarea en Qt para dejar terminar el procesamiento nativo. La
+función registrada con `SetNativeFocusHandler` reutiliza la petición de foco
+del anfitrión si la ventana no recuerda otro control Qt como destino del
+teclado. Durante el cierre no se atienden esos avisos. La función se retira
+antes de destruir el anfitrión y Qt descarta las tareas de una ventana destruida.
+
 `FocusBrowser` conserva una petición recibida antes de crear el navegador;
 `OnAfterCreated` la atiende una vez disponible el identificador. Antes de
 llamar a `CefBrowserHost::SetFocus(true)`, comprueba que no se esté cerrando,
@@ -638,6 +646,29 @@ El bloque de foco y el refactor de callbacks compilan en Debug y Release.
 El usuario ha confirmado la prueba manual propuesta con Debug: navegación
 mediante Tab y Enter sin clic previo, cambio de aplicación y regreso,
 y cierre normal con la X.
+
+La comprobación adicional del 30 de octubre de 2026 utiliza una página local
+en memoria con un campo de texto, un área multilínea y un botón contador.
+La entrada se realiza por teclado y ratón; el diagnóstico local CEF permite
+comprobar el campo activo, sus valores y el viewport, sin enviar esos datos
+a servicios externos. El puerto de diagnóstico solo se habilita en esas
+ejecuciones de prueba.
+
+| Comprobación | Debug | Release |
+| --- | --- | --- |
+| Tab entra al campo y permite escribir en los dos controles. | Correcta. | Correcta. |
+| Alt+Tab libera y recupera el foco; se continúa escribiendo sin otro clic. | Correcta. | Correcta. |
+| Minimizar/restaurar conserva texto y devuelve el foco al campo activo. | Correcta. | Correcta. |
+| Maximizar/restaurar ajusta el contenido y conserva los valores. | Correcta. | Correcta. |
+| El botón de la página responde al ratón. | Correcta. | Correcta. |
+| La X recorre Qt → CEF → Qt, con anfitrión válido, salida `0` y sin procesos restantes. | Correcta. | Correcta. |
+
+Condiciones: Windows 11 x64, una pantalla, escala efectiva `1.5` (150 %).
+En ambas configuraciones el viewport pasa de 1024×768 a 1708×1044 unidades
+lógicas al maximizar y vuelve a 1024×768 al restaurar. No se ha cambiado la
+escala de Windows ni se acreditan otras escalas o cambios entre monitores.
+Los logs locales de cierre son `%TEMP%/sbp89-interaction-Debug-startup.log` y
+`%TEMP%/sbp89-interaction-Release-startup.log`; no se versionan.
 
 La ventana principal utiliza [`BrowserWindow`](src/ui/browser_window.h), una subclase
 de `QWidget`. El header declara la clase y sus métodos; su implementación está

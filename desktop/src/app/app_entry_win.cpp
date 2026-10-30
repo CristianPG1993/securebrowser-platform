@@ -219,6 +219,17 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         QVBoxLayout window_layout(&window);
         window_layout.setContentsMargins(0, 0, 0, 0);
 
+        // Esta lambda comparte la solicitud de foco entre el anfitrión Qt y el marco nativo.
+        const auto request_browser_focus = [browser_client, &qt_close_requested] {
+            if (qt_close_requested) {
+                return;
+            }
+            if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::FocusBrowser,
+                                                   browser_client))) {
+                std::fputs("Qt focus notification could not be posted to CEF.\n", stderr);
+            }
+        };
+
         // Los campos nombrados de BrowserHostCallbacks identifican el evento de cada lambda.
         // El anfitrión avisa desde Qt y cada función conserva una referencia al cliente.
         sbp::BrowserHost browser_host({
@@ -233,18 +244,18 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
                     std::fputs("Qt resize notification could not be posted to CEF.\n", stderr);
                 }
             },
-            // Qt ejecuta esta lambda al recibir o recuperar el foco; solicita entregarlo al contenido CEF.
-            .on_focus_requested = [browser_client, &qt_close_requested] {
-                if (qt_close_requested) {
-                    return;
-                }
-                // El foco llega desde Qt; la llamada a CefBrowserHost::SetFocus se ejecutará en CEF.
-                if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::FocusBrowser,
-                                                       browser_client))) {
-                    std::fputs("Qt focus notification could not be posted to CEF.\n", stderr);
-                }
-            }
+            // El aviso Qt reutiliza la misma función que atiende la notificación del marco nativo.
+            .on_focus_requested = request_browser_focus
         }, &window);
+        // Esta lambda se ejecuta al recuperar el foco nativo del marco. Respetamos el control Qt
+        // recordado por la ventana para no quitarle el teclado a futuros controles de navegación.
+        window.SetNativeFocusHandler([&window, &browser_host, request_browser_focus] {
+            const QWidget* remembered_focus = window.focusWidget();
+            if (remembered_focus == nullptr || remembered_focus == &window
+                || remembered_focus == &browser_host) {
+                request_browser_focus();
+            }
+        });
         window_layout.addWidget(&browser_host);
         window.show();
         // El área web será el primer destino del teclado cuando esta ventana esté activa.
@@ -269,6 +280,7 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         // Retiramos el identificador y los parámetros antes de destruir los widgets anfitriones.
         // Soltamos también la función y su referencia al cliente antes de apagar CEF.
         request_browser_creation = {};
+        window.SetNativeFocusHandler({});
         browser_host_handle = nullptr;
         browser_window_info = CefWindowInfo();
         browser_window_info_ready = false;

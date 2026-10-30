@@ -64,6 +64,13 @@ quedan fuera del alcance implementado.
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).
 
+Desktop Foundation incorpora ya un navegador CEF embebido en Qt 6 Widgets:
+carga HTTPS, adapta el contenido al tamaño de la ventana, gestiona el foco
+y coordina el cierre. Se ha comprobado localmente en Windows 11 x64, en
+Debug y Release. Las condiciones, límites y comandos están en el
+[README de Desktop](desktop/README.md). La navegación mediante controles
+propios, REST, SQLite y Security Engine se incorporarán en pasos posteriores.
+
 ## Integración continua
 
 El workflow [Backend CI](.github/workflows/backend.yml) compila el backend,
