@@ -4,27 +4,47 @@
 
 `SecureBrowser.exe` abre una ventana Qt con el título **SecureBrowser** y un
 tamaño inicial de 1024 por 768 unidades lógicas, mientras CEF (Chromium Embedded
-Framework) permanece inicializado. `QApplication` y los widgets viven en el hilo principal;
+Framework) carga `https://example.com/` en una ventana hija nativa con estilo
+Alloy. `QApplication` y los widgets viven en el hilo principal;
 CEF procesa sus eventos en su propio hilo de interfaz. Al cerrar la última
-ventana, termina el bucle Qt, se destruye la ventana y se apaga CEF antes de
+ventana, se espera a `OnBeforeClose` del navegador, termina el bucle Qt,
+se destruye la ventana y se apaga CEF antes de
 destruir `QApplication`.
 El target `SecureBrowser` construye nuestra DLL (Dynamic-Link Library,
 biblioteca de enlace dinámico), enlazada con Qt y CEF. Junto a ella copia el
 bootstrap oficial como `SecureBrowser.exe`.
 La construcción prepara también los binarios y recursos CEF, las dependencias
 Qt, los avisos de terceros y los permisos de la carpeta de ejecución.
-La entrada `RunWinMain` de [`app_entry_win.cpp`](app_entry_win.cpp) distingue
+La entrada `RunWinMain` de [`app_entry_win.cpp`](src/app/app_entry_win.cpp) distingue
 el proceso principal de los subprocesos antes de crear objetos Qt. En el
 principal comprueba el contexto de sandbox y crea `QApplication` antes de
 inicializar CEF. Tras una inicialización correcta, muestra el `QWidget` y
-ejecuta `qt_app.exec()`. Todavía no crea instancias `CefBrowser` ni carga
-contenido web. `sbp_toolchain_check` conserva una ventana Qt independiente
+ejecuta `qt_app.exec()`. La creación asíncrona del navegador se solicita cuando
+el contexto CEF y el anfitrión Qt están disponibles. `sbp_toolchain_check` conserva una ventana Qt independiente
 como comprobación básica del kit.
 `BrowserApp` recibe el aviso de contexto preparado y `BrowserClient` contiene
-los handlers (receptores de avisos) de creación y cierre para el navegador
-que incorporaremos en #88. Ambos objetos utilizan referencias de CEF.
+los handlers (receptores de avisos) de creación y cierre del único navegador.
+Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes;
+todavía no se incorporan barra de navegación ni pestañas.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
+
+## Organización del código
+
+El código de la aplicación se agrupa dentro de `src/`, conservando cada header
+junto a su implementación:
+
+| Carpeta | Responsabilidad | Archivos actuales |
+| --- | --- | --- |
+| `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp` |
+| `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h`, `browser_client.h` y `browser_client.cpp` |
+| `src/ui/` | Ventana principal y widget anfitrión nativo del contenido CEF. | `browser_window.h/.cpp` y `browser_host.h/.cpp` |
+
+`CMakeLists.txt` incorpora esos archivos al target `SecureBrowser` y utiliza
+`src/` como raíz de los includes propios. `main.cpp` sigue siendo la
+comprobación independiente del kit Qt (`sbp_toolchain_check`). Las carpetas de
+políticas, Security Engine, persistencia y comunicación REST se añadirán al
+incorporar sus primeras clases.
 
 ## Requisitos
 
@@ -208,7 +228,7 @@ El flujo de construcción es:
 
 1. Construir `libcef_dll_wrapper` y el ejecutable temporal
    `sbp_toolchain_check`, dependencias del target `SecureBrowser`.
-2. Compilar `app_entry_win.cpp` y enlazar `SecureBrowser.dll` con Qt Widgets,
+2. Compilar `src/app/app_entry_win.cpp` y enlazar `SecureBrowser.dll` con Qt Widgets,
    el adaptador, el `libcef.lib` correspondiente y las bibliotecas de Windows
    declaradas por CEF.
 3. Copiar el bootstrap de esa configuración como `SecureBrowser.exe`, los
@@ -331,13 +351,20 @@ try {
 
 Mantener la ventana abierta durante 30-60 segundos: moverla, cambiar su tamaño,
 minimizarla, restaurarla y maximizarla. Debe seguir respondiendo. Después,
-cerrarla con la X. Los mensajes del hilo principal deben seguir este orden,
+cerrarla con la X. La página HTTPS debe aparecer dentro del área Qt, sin una
+ventana CEF independiente. Al reducir, ampliar o maximizar la ventana, el
+contenido debe ajustarse al área interior; al restaurarla debe recuperar
+el tamaño disponible. Para comprobar el foco, sin hacer clic previamente en
+la página, pulsar Tab hasta seleccionar «Learn more» y Enter para abrirlo.
+Cambiar a otra aplicación con Alt+Tab y regresar: el teclado debe seguir
+funcionando en el contenido. Finalmente, cerrar con la X.
+Los mensajes del hilo principal deben seguir este orden,
 con código final `0`:
 
 ```text
 Qt application created in the main process.
 CEF initialized successfully with bootstrap sandbox context.
-CEF browser client prepared; no browser instance created.
+CEF browser client prepared.
 Qt event loop starting with CEF initialized.
 Qt window destroyed; event loop exit code 0.
 CEF shutdown completed.
@@ -349,6 +376,22 @@ Además, debe aparecer una única vez el aviso del contexto:
 ```text
 CEF context initialized; CEF UI thread: 1.
 ```
+
+También deben aparecer los avisos reales de creación y cierre con el mismo
+identificador (el número concreto puede variar):
+
+```text
+CEF browser creation requested; accepted: 1; CEF UI thread: 1.
+CEF browser created: id 1.
+Qt received browser creation: id 1; Qt main thread: 1.
+CEF browser closing: id 1.
+```
+
+`accepted: 1` confirma que CEF aceptó la solicitud asíncrona; la creación
+efectiva la confirma `OnAfterCreated`. Si la red falla, la creación puede
+completarse sin que la página cargue: comprobar también el contenido visible.
+Probar además a cerrar inmediatamente después de abrir y durante la carga:
+la aplicación debe esperar a que CEF termine antes de destruir su anfitrión.
 
 Ese mensaje se escribe desde el hilo UI (User Interface, interfaz de usuario)
 de CEF, por lo que puede intercalarse con los mensajes del hilo principal.
@@ -454,15 +497,15 @@ la configuración elegida y detenerse antes de `qt_app.exec()` y antes de
 `CefShutdown()`. Ambos puntos deben alcanzarse desde el hilo principal.
 Durante la ejecución, comprobar en la ventana Threads que CEF mantiene su
 hilo `CrBrowserMain` separado del hilo propietario de la ventana Qt. Los
-widgets se crean y destruyen únicamente en el principal. Todavía no hay
-callbacks propios que accedan a widgets desde CEF.
+widgets se crean y destruyen únicamente en el principal. Los callbacks CEF
+encolan los avisos hacia Qt sin acceder directamente a los widgets.
 
 Para observar el reposo, dejar la ventana quieta tras el arranque y consultar
 el proceso principal en el Administrador de tareas. Registrar configuración,
 duración y condiciones; las actividades internas iniciales de Chromium pueden
 generar picos y una muestra local no representa todos los equipos.
 
-La comprobación local en Windows 11 x64, Qt 6.12.0 y CEF
+Una comprobación anterior a incorporar el navegador, en Windows 11 x64, Qt 6.12.0 y CEF
 `156.0.14+g4fa4ab5+chromium-156.0.8078.48` registró una ventana vacía, sin
 browser, con tres segundos de calentamiento y unos diez segundos de reposo.
 Se comprobó su respuesta con un mensaje Windows por segundo, desde otra
@@ -483,9 +526,11 @@ y no quedaron auxiliares tras el margen de cinco segundos.
 
 ## Objetos CEF y propiedad de sus referencias
 
-Las clases propias se definen en [`browser_app.h`](browser_app.h) y
-[`browser_client.h`](browser_client.h), dentro del namespace `sbp`.
-Sus métodos están implementados en los headers y no crean objetos Qt.
+Las clases propias se definen en [`browser_app.h`](src/browser/browser_app.h) y
+[`browser_client.h`](src/browser/browser_client.h), dentro del namespace `sbp`.
+`BrowserApp` mantiene sus métodos en el header. `BrowserClient` declara sus
+métodos en el header y los implementa en [`browser_client.cpp`](src/browser/browser_client.cpp).
+Ninguna de las dos clases crea objetos Qt.
 
 | Objeto | Papeles | Avisos preparados |
 | --- | --- | --- |
@@ -503,7 +548,10 @@ La propiedad y liberación de referencias es la siguiente:
 | --- | --- | --- |
 | `cef_app` | Variable local `CefRefPtr<BrowserApp>` en `RunWinMain`. | Al salir de `RunWinMain`, después de `CefShutdown` y antes de destruir `QApplication`. |
 | Referencias de CEF al objeto de aplicación y a su handler | CEF durante la vida del contexto. | Durante su limpieza; la referencia local mantiene vivo nuestro objeto mientras dura el arranque y apagado. |
-| `browser_client` | Variable local `CefRefPtr<BrowserClient>` dentro del ámbito de la ventana. | Al salir de ese ámbito; actualmente se destruye después del widget y antes de `CefShutdown`. |
+| `browser_client` | Variable local `CefRefPtr<BrowserClient>` dentro del ámbito de la ventana. | Al salir de ese ámbito; su referencia local se libera antes de destruir la ventana principal y antes de `CefShutdown`. |
+| Copia de `browser_client` en la solicitud de cierre Qt | Callback guardado por `BrowserWindow`. | Al destruir la ventana y su callback. La referencia local puede haberse liberado antes sin destruir todavía el cliente. |
+| Referencia al cliente ligada a la tarea CEF | `base::BindOnce` conserva un `CefRefPtr<BrowserClient>` mientras la tarea está pendiente o ejecutándose. | Al terminar o destruirse la tarea, sin dejar un puntero al cliente sin propietario. |
+| Copia del cliente en la función de creación | `request_browser_creation`, usada solo en Qt. | Se vacía al terminar el bucle Qt, antes de destruir la ventana y de `CefShutdown`. |
 | Parámetro `browser` de los callbacks | Referencia administrada durante cada llamada. | Al terminar la llamada. El cliente no la almacena en ningún miembro. |
 
 `IMPLEMENT_REFCOUNTING` proporciona `AddRef`, `Release` y el contador que
@@ -513,17 +561,178 @@ están prohibidas, pero se pueden copiar sus referencias administradas.
 `.get()` entrega el puntero conservando nuestra referencia; al recibirlo como
 `CefRefPtr`, la API de CEF gestiona las referencias que necesite mantener.
 
-Ninguna de las clases almacena referencias a sí misma, a la otra clase, al
-widget Qt ni a un navegador. Así no se introduce un ciclo de propiedad.
+Ninguna de las clases conserva una referencia administrada a sí misma, a la
+otra clase ni a un navegador. Los callbacks de `BrowserClient` capturan la
+ventana Qt por referencia para encolar avisos, sin adquirir su propiedad.
+La ventana se mantiene viva hasta la confirmación del cierre; estas capturas
+no crean un ciclo de propiedad.
 `OnContextInitialized`, `OnAfterCreated` y `OnBeforeClose` no modifican widgets
-desde el hilo CEF; únicamente comprueban el hilo o escriben un diagnóstico.
+desde el hilo CEF. `BrowserApp` conserva una función proporcionada al construirlo;
+tras el diagnóstico de contexto preparado, la ejecuta en el hilo CEF. Esa función
+utiliza `QMetaObject::invokeMethod` con `Qt::QueuedConnection` para enviar el aviso
+al hilo de `QApplication`, sin bloquear el hilo CEF. Las variables capturadas
+permanecen vivas hasta después de `CefShutdown` y de liberar nuestra referencia
+a `BrowserApp`.
 
-En esta etapa se verifica que el aviso de contexto llega una vez en el hilo
-esperado, que se prepara el cliente y que la ventana abre y cierra con salida
-`0`. Los avisos `OnAfterCreated` y `OnBeforeClose` todavía no se ejecutan:
-se validarán con una instancia real en #88. No se simulan sus llamadas desde
-el hilo Qt. La creación y el cierre coordinado del navegador seguirán
-respetando las responsabilidades descritas en el ADR-0011.
+El receptor escribe `CEF context notification received; Qt main
+thread: 1.`. Debe aparecer una vez al procesar el bucle Qt; `1` confirma el hilo
+principal tanto en Debug como en Release. El mensaje de contexto CEF original
+sigue procediendo de su propio hilo UI.
+
+En el hilo Qt se coordinan dos condiciones: aviso de contexto recibido y
+`HWND` (identificador de ventana de Windows) del widget anfitrión disponible.
+Cuando ambas se cumplen, se prepara una vez `CefWindowInfo`: `SetAsChild`
+configura la ventana hija, `GetClientRect` obtiene su área nativa en píxeles
+y `CEF_RUNTIME_STYLE_ALLOY` selecciona el estilo acordado. Se mantiene
+`windowless_rendering_enabled = false`. El diagnóstico muestra el padre,
+el tamaño y el estilo (`2` identifica Alloy en este SDK).
+
+Después se llama a `request_browser_creation`, que publica una tarea con una
+copia de los parámetros y una referencia al cliente. Su método `CreateBrowser`
+ejecuta `CefBrowserHost::CreateBrowser` en el hilo UI de CEF con la URL HTTPS
+inicial. Al salir del bucle Qt se retiran el `HWND`
+y los parámetros antes de destruir los widgets; una notificación posterior
+ya no encontrará un anfitrión disponible.
+
+El widget [`BrowserHost`](src/ui/browser_host.h) declara `resizeEvent` en el
+header y lo implementa en [`browser_host.cpp`](src/ui/browser_host.cpp).
+Su constructor recibe un `BrowserHostCallbacks` y el widget padre. La
+estructura agrupa `on_resized` y `on_focus_requested`; `app_entry_win.cpp`
+asigna las lambdas mediante esos campos nombrados y el anfitrión conserva
+el bloque en `callbacks_`. Se guardan las funciones al construirlo y se
+ejecutan al recibir el evento correspondiente en Qt.
+Cuando el layout cambia su tamaño, Qt ejecuta el callback registrado, que
+publica `BrowserClient::ResizeBrowser` en el hilo UI de CEF. Ese método obtiene
+el padre nativo de la ventana CEF, mide su área con `GetClientRect` y ajusta
+la hija con `SetWindowPos`, conservando su posición, orden y activación.
+No consulta objetos Qt desde el hilo CEF ni utiliza las unidades lógicas del
+evento como si fueran píxeles nativos.
+
+Los avisos anteriores a la creación se ignoran: `OnAfterCreated` aplica de
+nuevo el área actual para recoger cualquier cambio ocurrido mientras CEF
+creaba la instancia. Los avisos durante el cierre y las áreas vacías se
+ignoran. La copia de `CefRefPtr<BrowserClient>` del callback se libera al
+destruir el anfitrión; cada tarea conserva otra copia solo hasta ejecutarse.
+
+Este bloque compila en Debug y Release. Se ha comprobado el ajuste inicial
+con un viewport de 1024×768 unidades lógicas, la carga HTTPS y el cierre con
+salida `0`. El usuario ha confirmado también la prueba manual de reducir,
+ampliar, maximizar y restaurar la ventana, seguida del cierre con la X.
+
+El anfitrión utiliza `Qt::StrongFocus`. `focusInEvent` solicita entregar el
+teclado a CEF y `event` atiende también `WindowActivate`, siempre que Qt siga
+considerando al anfitrión su widget de foco. Ambos ejecutan el callback
+`on_focus_requested`, que publica `BrowserClient::FocusBrowser` en el hilo UI
+de CEF. El arranque solicita el foco inicial con `browser_host.setFocus`.
+
+Windows puede devolver el foco al marco principal sin que Qt emita otro
+`FocusIn` para el anfitrión. `BrowserWindow::nativeEvent` observa `WM_SETFOCUS`
+y publica una tarea en Qt para dejar terminar el procesamiento nativo. La
+función registrada con `SetNativeFocusHandler` reutiliza la petición de foco
+del anfitrión si la ventana no recuerda otro control Qt como destino del
+teclado. Durante el cierre no se atienden esos avisos. La función se retira
+antes de destruir el anfitrión y Qt descarta las tareas de una ventana destruida.
+
+`FocusBrowser` conserva una petición recibida antes de crear el navegador;
+`OnAfterCreated` la atiende una vez disponible el identificador. Antes de
+llamar a `CefBrowserHost::SetFocus(true)`, comprueba que no se esté cerrando,
+obtiene una referencia temporal al navegador y verifica que la ventana raíz
+siga en primer plano. Si el usuario cambió de aplicación, esa petición se
+descarta. `OnBeforeClose` retira cualquier petición pendiente. No se envía
+una pérdida de foco al pasar del anfitrión a su hija CEF, porque desharía
+la entrega del teclado al contenido.
+
+El bloque de foco y el refactor de callbacks compilan en Debug y Release.
+El usuario ha confirmado la prueba manual propuesta con Debug: navegación
+mediante Tab y Enter sin clic previo, cambio de aplicación y regreso,
+y cierre normal con la X.
+
+La comprobación adicional del 30 de octubre de 2026 utiliza una página local
+en memoria con un campo de texto, un área multilínea y un botón contador.
+La entrada se realiza por teclado y ratón; el diagnóstico local CEF permite
+comprobar el campo activo, sus valores y el viewport, sin enviar esos datos
+a servicios externos. El puerto de diagnóstico solo se habilita en esas
+ejecuciones de prueba.
+
+| Comprobación | Debug | Release |
+| --- | --- | --- |
+| Tab entra al campo y permite escribir en los dos controles. | Correcta. | Correcta. |
+| Alt+Tab libera y recupera el foco; se continúa escribiendo sin otro clic. | Correcta. | Correcta. |
+| Minimizar/restaurar conserva texto y devuelve el foco al campo activo. | Correcta. | Correcta. |
+| Maximizar/restaurar ajusta el contenido y conserva los valores. | Correcta. | Correcta. |
+| El botón de la página responde al ratón. | Correcta. | Correcta. |
+| La X recorre Qt → CEF → Qt, con anfitrión válido, salida `0` y sin procesos restantes. | Correcta. | Correcta. |
+
+Condiciones: Windows 11 x64, una pantalla, escala efectiva `1.5` (150 %).
+En ambas configuraciones el viewport pasa de 1024×768 a 1708×1044 unidades
+lógicas al maximizar y vuelve a 1024×768 al restaurar. No se ha cambiado la
+escala de Windows ni se acreditan otras escalas o cambios entre monitores.
+Los logs locales de cierre son `%TEMP%/sbp89-interaction-Debug-startup.log` y
+`%TEMP%/sbp89-interaction-Release-startup.log`; no se versionan.
+
+La ventana principal utiliza [`BrowserWindow`](src/ui/browser_window.h), una subclase
+de `QWidget`. El header declara la clase y sus métodos; su implementación está
+en [`browser_window.cpp`](src/ui/browser_window.cpp), que se compila como parte del
+target `SecureBrowser`. Su `closeEvent` rechaza el cierre inmediato y comunica una única
+solicitud mediante el callback registrado con `SetCloseRequestHandler`.
+`ConfirmClose` permite después aceptar el cierre, conservando los widgets
+hasta ese momento. Todos estos pasos se ejecutan en el hilo Qt y no muestran
+un diálogo de confirmación al usuario.
+
+La solicitud sale del hilo Qt mediante `CefPostTask(TID_UI, ...)`.
+`base::BindOnce(&BrowserClient::RequestClose, browser_client)` prepara una
+llamada al método del cliente y conserva una referencia administrada a ese
+objeto hasta ejecutar o destruir la tarea. `OnAfterCreated` registra el
+identificador del navegador en el cliente. Cuando hay uno registrado,
+`RequestClose` lo localiza con `CefBrowserHost::GetBrowserByIdentifier` y solicita
+`CloseBrowser(false)`: la confirmación queda a cargo de `OnBeforeClose`, que
+retira primero el identificador. La referencia obtenida al buscar el navegador
+es local y se libera al salir de `RequestClose`.
+
+Si la creación sigue pendiente, `RequestClose` registra la intención y espera
+a `OnAfterCreated`, que publica la solicitud de cierre para después del callback.
+Si Qt recibió el cierre antes de enviar la creación, se omite esa creación.
+Solo cuando no hay navegador ni creación pendiente se puede confirmar
+directamente. Al cerrar con la X después de crear el navegador, el diagnóstico
+debe seguir este orden:
+
+```text
+Qt close requested; native host remains alive.
+CEF client close request received; CEF UI thread: 1.
+CEF browser closing: id 1.
+Qt close confirmed; native host valid: 1.
+Qt close accepted after confirmation.
+Qt window destroyed; event loop exit code 0.
+CEF shutdown completed.
+```
+
+`BrowserClient` recibe dos funciones al construirse. `OnAfterCreated`
+entrega únicamente el identificador del navegador a la primera, que encola
+su diagnóstico en Qt. `OnBeforeClose` publica una tarea CEF que ejecuta la segunda
+función después de regresar del callback; esa función encola `ConfirmClose`
+en la ventana principal. `NotifyClosed` evita publicar dos confirmaciones.
+El cliente no guarda un `CefBrowser`
+ni transfiere esa referencia a las funciones encoladas.
+
+En Windows, Alloy envía por defecto `WM_CLOSE` a la ventana raíz. Nuestro
+`DoClose` publica además ese mensaje para la ventana hija de CEF y devuelve
+`false`, permitiendo que CEF marque su cierre como aceptado antes de procesar
+el mensaje. La hija termina sin destruir el anfitrión Qt; la raíz sigue
+reteniendo su cierre hasta la confirmación posterior a `OnBeforeClose`.
+Si el cierre nace en el contenido web, el mensaje de la raíz puede intercalarse
+con el callback final; la confirmación de Qt siempre espera a ese callback.
+
+Se han comprobado Debug y Release desde TEMP, con PATH limitado a Windows:
+documento HTTPS cargado, contenido renderizado mediante captura CEF, callbacks
+reales, cancelación de popup, anfitrión válido hasta confirmar, salida `0` y
+ausencia de procesos restantes. Se usó el protocolo local de depuración CEF
+solo en esas ejecuciones para inspeccionar el documento y solicitar `Page.close`.
+No se habilita un puerto de depuración en la configuración de la aplicación.
+El usuario confirmó después la prueba manual de apertura y cierre de la
+primera instancia. La herramienta de inspección de escritorio no pudo iniciarse.
+La carrera exacta de cierre mientras la creación está pendiente no se ha
+forzado de manera determinista. El cierre con cancelación JavaScript y su
+reintento se completará en #91; la guarda actual de Qt admite una solicitud.
 
 ## Ventana Qt independiente de comprobación del kit
 

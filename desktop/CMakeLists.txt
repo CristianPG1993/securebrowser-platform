@@ -105,11 +105,20 @@ ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
 
 # Nuestra DLL implementa la entrada que invoca el bootstrap.
 add_library(SecureBrowser SHARED
-    app_entry_win.cpp
-    browser_app.h
-    browser_client.h
+    src/app/app_entry_win.cpp
+    src/browser/browser_app.h
+    src/browser/browser_client.cpp
+    src/browser/browser_client.h
+    src/ui/browser_host.cpp
+    src/ui/browser_host.h
+    src/ui/browser_window.cpp
+    src/ui/browser_window.h
 )
-target_include_directories(SecureBrowser PRIVATE "${CEF_INCLUDE_PATH}")
+# La raíz src permite includes como "browser/browser_client.h" desde cualquier fuente del target.
+target_include_directories(SecureBrowser PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CEF_INCLUDE_PATH}"
+)
 # Evita que las macros min/max de Windows interfieran con las funciones estándar usadas por CEF.
 target_compile_definitions(SecureBrowser PRIVATE NOMINMAX)
 # La etiqueta de versión Qt importa datos de QtCore e impide su carga diferida en MSVC.

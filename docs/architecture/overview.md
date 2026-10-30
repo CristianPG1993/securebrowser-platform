@@ -66,9 +66,12 @@ La elección de Qt 6 Widgets para la interfaz Desktop está aceptada en el
 [ADR-0002](../adr/0002-desktop-gui.md), por decisión directa del usuario y sin
 realizar un prototipo comparativo con CEF Views.
 
-La validación técnica de la integración Qt/CEF permanece pendiente y se
-realizará de forma incremental durante Desktop Foundation, desde una ventana
-mínima hasta la carga de una URL, el redimensionamiento y el cierre correcto.
+La integración básica Qt/CEF se ha validado localmente en Windows 11 x64,
+en Debug y Release: carga HTTPS, redimensionamiento, foco e interacción con
+campos, minimizar/restaurar y cierre coordinado. Las condiciones y límites
+están registrados en el [README de Desktop](../../desktop/README.md).
+Desktop Foundation continúa con navegación, robustez del ciclo de vida,
+diagnósticos, comprobaciones automáticas y CI de Windows.
 
 Las decisiones arquitectónicas relevantes se documentarán mediante ADR
 en `docs/adr/`.
