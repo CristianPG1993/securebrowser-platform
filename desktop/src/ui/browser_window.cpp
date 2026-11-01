@@ -23,8 +23,10 @@ void BrowserWindow::SetNativeFocusHandler(std::function<void()> on_native_focus)
 }
 
 bool BrowserWindow::nativeEvent(const QByteArray& event_type, void* message, qintptr* result) {
-    if (event_type == "windows_generic_MSG" && static_cast<MSG*>(message)->message == WM_SETFOCUS) {
-        // Esperamos a que Qt termine de procesar el foco nativo antes de solicitar la entrega a CEF.
+    if (event_type == "windows_generic_MSG"
+        && (static_cast<MSG*>(message)->message == WM_SETFOCUS
+            || static_cast<MSG*>(message)->message == WM_KILLFOCUS)) {
+        // Esperamos a que termine el cambio nativo antes de sincronizar el estado Qt con el foco real.
         // Qt descarta esta lambda si se destruye la ventana receptora antes de ejecutarla.
         const bool queued = QMetaObject::invokeMethod(this, [this] {
             if (!close_requested_ && on_native_focus_) {

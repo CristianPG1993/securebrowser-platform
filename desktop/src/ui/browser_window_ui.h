@@ -26,6 +26,9 @@ public:
     // La sesión necesita el anfitrión para obtener su ventana nativa y coordinar el foco.
     BrowserHost& GetBrowserHost();
 
+    // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
+    void ClearAddressFocus();
+
     // Guarda la función que recibirá el texto al pulsar Enter; instalarla no la ejecuta.
     void SetAddressSubmitHandler(std::function<void(const QString&)> on_address_submitted);
 

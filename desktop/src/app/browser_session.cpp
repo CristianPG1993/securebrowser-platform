@@ -183,9 +183,16 @@ int BrowserSession::Run(QApplication& qt_app) {
         });
         // Usamos el anfitrión creado por la interfaz, sin construir otro ni copiarlo.
         sbp::BrowserHost& browser_host = window_ui.GetBrowserHost();
-        // Esta lambda se ejecuta al recuperar el foco nativo del marco. Respetamos el control Qt
-        // recordado por la ventana para no quitarle el teclado a futuros controles de navegación.
-        window.SetNativeFocusHandler([&window, &browser_host, request_browser_focus] {
+        // Esta lambda sincroniza el foco lógico de Qt después de un cambio de foco nativo.
+        window.SetNativeFocusHandler([this, &window, &window_ui, &browser_host, request_browser_focus] {
+            // Consultamos el destino actual, porque el usuario pudo volver a la barra mientras se encolaba el aviso.
+            const HWND native_focus = GetFocus();
+            if (browser_host_handle_ != nullptr
+                && (native_focus == browser_host_handle_ || IsChild(browser_host_handle_, native_focus))) {
+                window_ui.ClearAddressFocus();
+                return;
+            }
+            // Al recuperar el marco, respetamos los controles Qt recordados antes de reenviar foco a CEF.
             const QWidget* remembered_focus = window.focusWidget();
             if (remembered_focus == nullptr || remembered_focus == &window
                 || remembered_focus == &browser_host) {

@@ -5,6 +5,8 @@
 #include <QEvent>
 #include <QKeyEvent>
 
+#include <windows.h>
+
 #include <utility>
 
 namespace sbp {
@@ -37,12 +39,32 @@ BrowserHost& BrowserWindowUi::GetBrowserHost() {
     return browser_host_;
 }
 
+void BrowserWindowUi::ClearAddressFocus() {
+    // clearFocus entrega a QLineEdit su FocusOut normal, que detiene el caret.
+    if (address_input_.hasFocus()) {
+        address_input_.clearFocus();
+    }
+}
+
 void BrowserWindowUi::SetAddressSubmitHandler(
     std::function<void(const QString&)> on_address_submitted) {
     on_address_submitted_ = std::move(on_address_submitted);
 }
 
 bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
+    // CEF puede conservar el foco nativo aunque Qt recuerde este campo como enfocado.
+    // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.
+    if (watched == &address_input_
+        && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::FocusIn)) {
+        QWidget* qt_window = address_input_.window();
+        if (qt_window->isActiveWindow()) {
+            const HWND qt_window_handle = reinterpret_cast<HWND>(qt_window->winId());
+            // Solo cambiamos el foco real si sigue en otra ventana; Qt conserva su control de destino.
+            if (GetFocus() != qt_window_handle) {
+                ::SetFocus(qt_window_handle);
+            }
+        }
+    }
     // Solo observamos pulsaciones del campo de dirección; el resto mantiene su comportamiento Qt.
     if (watched == &address_input_ && event->type() == QEvent::KeyPress) {
         const auto* key_event = static_cast<QKeyEvent*>(event);

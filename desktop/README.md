@@ -61,6 +61,14 @@ parámetros de prueba esperados, y el diagnóstico confirma el hilo UI de CEF.
 En Debug se ha comprobado además que FTP no genera una tarea de navegación y
 que una consulta con caracteres codificados conserva su representación al
 cargarse. El cierre sigue terminando con salida `0` y sin procesos restantes.
+La edición tras navegar sincroniza el foco nativo de Windows al entrar en la
+barra mediante ratón o foco Qt. Se ha reproducido el fallo anterior: Ctrl+A
+seleccionaba la página aunque Qt mostrase el campo como enfocado. La corrección
+se ha comprobado en Debug y Release con clic en la página, vuelta a la barra,
+Ctrl+A, Retroceso y Suprimir, escritura de otra URL y segunda navegación.
+Estas comprobaciones utilizan pulsaciones de teclado y no sustituyen el texto
+mediante accesibilidad. Ambas configuraciones terminan con salida `0` y sin
+procesos restantes.
 La normalización de dominios sin protocolo se ha compilado en Debug y Release:
 en Debug se ha escrito `as.com` y se ha comprobado la carga de `https://as.com/`;
 `mailto:test@example.org` sigue rechazándose sin generar otra navegación.
@@ -69,6 +77,16 @@ HTTPS conservando la consulta. Ambas pruebas terminan con salida `0` y sin
 procesos restantes.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
+
+El caret de la barra sigue el foco lógico de Qt. El marco observa tanto
+`WM_SETFOCUS` como `WM_KILLFOCUS` y encola la sincronización en Qt. Si el foco
+nativo actual está en el anfitrión o su hija CEF, `ClearAddressFocus` retira el
+foco del campo mediante `clearFocus`; el aviso se contrasta con el destino
+actual para respetar un posible clic posterior en la barra. En Debug y Release
+se ha probado la alternancia entre la barra y un campo web local, la escritura
+en CEF sin modificar la URL, el retorno a la barra y la navegación con Enter.
+En Release también se ha comprobado la conservación del foco de la barra tras
+Alt+Tab. Ambas configuraciones cierran con salida `0` y sin procesos restantes.
 
 ## Organización del código
 
