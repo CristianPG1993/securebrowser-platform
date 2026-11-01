@@ -32,24 +32,33 @@ Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes.
 Los primeros bloques de #90 añaden un campo Qt editable encima del contenido
 web. Enter entrega su texto a `BrowserSession` mediante un callback en el mismo
 hilo Qt. La sesión elimina espacios exteriores y valida con `QUrl::StrictMode`
-que exista un servidor y un esquema HTTP o HTTPS explícito. Registra la
-longitud, el hilo y si acepta o rechaza la entrada; no registra la dirección ni
-solicita navegación CEF. La navegación, la actualización de la dirección real
-y los botones se incorporarán en los siguientes bloques. Las pestañas quedan
-fuera del alcance de Foundation.
-Este primer campo se ha comprobado en Debug y Release: edición, Enter sin
+que exista un servidor y un esquema HTTP o HTTPS explícito. La dirección
+aceptada se codifica y se envía mediante `CefPostTask` al hilo UI de CEF, donde
+`BrowserClient::Navigate` solicita su carga con `GetMainFrame()->LoadURL`.
+Las tareas conservan el cliente y la dirección, y el cliente consulta una
+referencia temporal al navegador; no se transfieren widgets Qt al hilo CEF.
+Los diagnósticos no registran la dirección. La actualización de la barra con
+la URL real y los botones se incorporarán en los siguientes bloques.
+Las pestañas quedan fuera del alcance de Foundation.
+En el primer bloque se comprobó en Debug y Release: edición, Enter sin
 navegación, conservación del foco y texto tras Alt+Tab, y cierre con salida
 `0` sin procesos restantes. En la prueba local al 150 %, la ventana mantiene
 1024×768 unidades lógicas y el área web disponible queda en 1024×736.
-El callback de Enter se ha comprobado en Debug y Release; en Debug también se
-han probado Enter numérico y el campo vacío. Cada pulsación produce un aviso
-en el hilo Qt y conserva la página inicial de CEF. El filtro descarta la
-repetición automática de Enter al mantenerlo pulsado.
+Antes de conectar la navegación, el callback de Enter se comprobó en Debug y
+Release; en Debug también se probaron Enter numérico y el campo vacío.
+Cada pulsación producía un aviso en el hilo Qt y conservaba la página inicial
+de CEF. El filtro descarta la repetición automática de Enter al mantenerlo pulsado.
 La validación se ha compilado en Debug y Release y se ha probado desde la
 ventana Debug con siete entradas: acepta HTTPS y HTTP (incluidas mayúsculas y
 espacios exteriores), y rechaza entradas sin esquema, FTP, HTTPS sin servidor,
 un servidor con espacios interiores y el campo vacío. El cierre termina con
 salida `0` y sin procesos restantes.
+La navegación desde Enter se ha compilado y probado en Debug y Release:
+la página pasa de `https://example.com/` a `https://example.org/` con los
+parámetros de prueba esperados, y el diagnóstico confirma el hilo UI de CEF.
+En Debug se ha comprobado además que FTP no genera una tarea de navegación y
+que una consulta con caracteres codificados conserva su representación al
+cargarse. El cierre sigue terminando con salida `0` y sin procesos restantes.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
 

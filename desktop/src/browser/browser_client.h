@@ -3,6 +3,7 @@
 #include "include/cef_client.h"
 #include "include/cef_life_span_handler.h"
 #include <functional>
+#include <string>
 
 namespace sbp {
 
@@ -24,6 +25,9 @@ public:
     // Recibe una copia de los parámetros preparados por Qt y solicita la creación asíncrona.
     // Este método y el estado del cliente pertenecen al hilo UI de CEF.
     void CreateBrowser(CefWindowInfo window_info);
+
+    // Carga la URL validada por la sesión en el documento principal, desde el hilo UI de CEF.
+    void Navigate(std::string url);
 
     // Ajusta la ventana hija al área nativa actual de su padre, desde el hilo UI de CEF.
     void ResizeBrowser();

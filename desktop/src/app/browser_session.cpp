@@ -14,6 +14,7 @@
 #include <QWidget>
 
 #include <cstdio>
+#include <string>
 
 namespace sbp {
 
@@ -149,7 +150,7 @@ int BrowserSession::Run(QApplication& qt_app) {
             .on_focus_requested = request_browser_focus
         });
         // Esta lambda recibe el texto al pulsar Enter, directamente en el mismo hilo Qt.
-        window_ui.SetAddressSubmitHandler([this](const QString& address) {
+        window_ui.SetAddressSubmitHandler([this, browser_client](const QString& address) {
             if (qt_close_requested_) {
                 return;
             }
@@ -167,8 +168,13 @@ int BrowserSession::Run(QApplication& qt_app) {
                            stderr);
                 return;
             }
-            // En este bloque solo validamos; la solicitud de navegación CEF se añadirá después.
-            std::fputs("Qt address accepted; CEF navigation is not connected yet.\n", stderr);
+            // Serializamos la misma URL que acabamos de validar, conservando su codificación.
+            const std::string target_url = url.toEncoded().toStdString();
+            // BindOnce conserva el cliente y una copia de la dirección hasta ejecutar Navigate en CEF.
+            if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::Navigate,
+                                                   browser_client, target_url))) {
+                std::fputs("Qt navigation request could not be posted to CEF.\n", stderr);
+            }
         });
         // Usamos el anfitrión creado por la interfaz, sin construir otro ni copiarlo.
         sbp::BrowserHost& browser_host = window_ui.GetBrowserHost();

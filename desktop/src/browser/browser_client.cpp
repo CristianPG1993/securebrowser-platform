@@ -1,6 +1,7 @@
 #include "browser_client.h"
 
 #include "include/base/cef_callback.h"
+#include "include/cef_frame.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
@@ -39,6 +40,30 @@ void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
         std::fputs("CEF browser creation failed: request rejected.\n", stderr);
         NotifyClosed();
     }
+}
+
+void BrowserClient::Navigate(std::string url) {
+    CEF_REQUIRE_UI_THREAD();
+    // La tarea puede llegar antes de la creación o después de que se haya solicitado cerrar.
+    if (browser_id_ == -1 || close_requested_) {
+        std::fputs("CEF navigation skipped: browser unavailable or closing.\n", stderr);
+        return;
+    }
+    // Obtenemos una referencia temporal; ningún objeto navegador se comparte con el hilo Qt.
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        std::fputs("CEF navigation skipped: registered browser unavailable.\n", stderr);
+        return;
+    }
+    // El frame principal representa el documento de la página, frente a sus posibles subframes.
+    const CefRefPtr<CefFrame> frame = browser->GetMainFrame();
+    if (!frame) {
+        std::fputs("CEF navigation skipped: main frame unavailable.\n", stderr);
+        return;
+    }
+    // LoadURL solicita la carga asíncrona; CEF mantiene sus comprobaciones normales de certificados.
+    frame->LoadURL(CefString(url));
+    std::fprintf(stderr, "CEF navigation requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
 }
 
 void BrowserClient::ResizeBrowser() {
