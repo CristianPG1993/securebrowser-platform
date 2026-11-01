@@ -129,8 +129,11 @@ target_compile_definitions(SecureBrowser PRIVATE NOMINMAX)
 # La versión del kit ya se exige mediante find_package(Qt6 ... EXACT).
 target_compile_definitions(SecureBrowser PRIVATE QT_NO_VERSION_TAGGING)
 # Carga Qt al crear QApplication en el principal, después de CefExecuteProcess.
+# En Debug, QKeyEvent genera llamadas a QtGui; Release expande estas funciones inline.
+# Diferimos también esas importaciones Debug para no cargar Qt en los subprocesos al arrancar.
 target_link_options(SecureBrowser PRIVATE
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Core>"
+    "$<$<CONFIG:Debug>:/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Gui>>"
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Widgets>"
 )
 # Carga estas DLL de Windows al usarlas, después de distinguir los subprocesos de CEF.

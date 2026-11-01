@@ -29,14 +29,20 @@ básica del kit.
 `BrowserApp` recibe el aviso de contexto preparado y `BrowserClient` contiene
 los handlers (receptores de avisos) de creación y cierre del único navegador.
 Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes.
-El primer bloque de #90 añade un campo Qt editable encima del contenido web.
-Todavía no ejecuta navegación al pulsar Enter ni refleja la URL real del
-navegador; esas conexiones y los botones se incorporarán en los siguientes
-bloques. Las pestañas quedan fuera del alcance de Foundation.
+Los primeros bloques de #90 añaden un campo Qt editable encima del contenido
+web. Enter entrega su texto a `BrowserSession` mediante un callback en el mismo
+hilo Qt. Por ahora, la sesión registra la longitud recibida y el hilo; no
+registra la dirección ni solicita navegación CEF. La validación de la URL, la
+navegación, la actualización de la dirección real y los botones se incorporarán
+en los siguientes bloques. Las pestañas quedan fuera del alcance de Foundation.
 Este primer campo se ha comprobado en Debug y Release: edición, Enter sin
 navegación, conservación del foco y texto tras Alt+Tab, y cierre con salida
 `0` sin procesos restantes. En la prueba local al 150 %, la ventana mantiene
 1024×768 unidades lógicas y el área web disponible queda en 1024×736.
+El callback de Enter se ha comprobado en Debug y Release; en Debug también se
+han probado Enter numérico y el campo vacío. Cada pulsación produce un aviso
+en el hilo Qt y conserva la página inicial de CEF. El filtro descarta la
+repetición automática de Enter al mantenerlo pulsado.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
 

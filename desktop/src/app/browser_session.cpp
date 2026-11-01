@@ -147,6 +147,16 @@ int BrowserSession::Run(QApplication& qt_app) {
             // El aviso Qt reutiliza la misma función que atiende la notificación del marco nativo.
             .on_focus_requested = request_browser_focus
         });
+        // Esta lambda recibe el texto al pulsar Enter, directamente en el mismo hilo Qt.
+        window_ui.SetAddressSubmitHandler([this](const QString& address) {
+            if (qt_close_requested_) {
+                return;
+            }
+            // Comprobamos la recepción sin registrar la dirección introducida por el usuario.
+            std::fprintf(stderr, "Qt address submitted; length %lld; Qt main thread: %d.\n",
+                         static_cast<long long>(address.size()), QThread::isMainThread());
+
+        });
         // Usamos el anfitrión creado por la interfaz, sin construir otro ni copiarlo.
         sbp::BrowserHost& browser_host = window_ui.GetBrowserHost();
         // Esta lambda se ejecuta al recuperar el foco nativo del marco. Respetamos el control Qt
