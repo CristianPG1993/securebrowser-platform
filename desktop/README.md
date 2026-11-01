@@ -31,10 +31,12 @@ los handlers (receptores de avisos) de creación y cierre del único navegador.
 Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes.
 Los primeros bloques de #90 añaden un campo Qt editable encima del contenido
 web. Enter entrega su texto a `BrowserSession` mediante un callback en el mismo
-hilo Qt. Por ahora, la sesión registra la longitud recibida y el hilo; no
-registra la dirección ni solicita navegación CEF. La validación de la URL, la
-navegación, la actualización de la dirección real y los botones se incorporarán
-en los siguientes bloques. Las pestañas quedan fuera del alcance de Foundation.
+hilo Qt. La sesión elimina espacios exteriores y valida con `QUrl::StrictMode`
+que exista un servidor y un esquema HTTP o HTTPS explícito. Registra la
+longitud, el hilo y si acepta o rechaza la entrada; no registra la dirección ni
+solicita navegación CEF. La navegación, la actualización de la dirección real
+y los botones se incorporarán en los siguientes bloques. Las pestañas quedan
+fuera del alcance de Foundation.
 Este primer campo se ha comprobado en Debug y Release: edición, Enter sin
 navegación, conservación del foco y texto tras Alt+Tab, y cierre con salida
 `0` sin procesos restantes. En la prueba local al 150 %, la ventana mantiene
@@ -43,6 +45,11 @@ El callback de Enter se ha comprobado en Debug y Release; en Debug también se
 han probado Enter numérico y el campo vacío. Cada pulsación produce un aviso
 en el hilo Qt y conserva la página inicial de CEF. El filtro descarta la
 repetición automática de Enter al mantenerlo pulsado.
+La validación se ha compilado en Debug y Release y se ha probado desde la
+ventana Debug con siete entradas: acepta HTTPS y HTTP (incluidas mayúsculas y
+espacios exteriores), y rechaza entradas sin esquema, FTP, HTTPS sin servidor,
+un servidor con espacios interiores y el campo vacío. El cierre termina con
+salida `0` y sin procesos restantes.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
 

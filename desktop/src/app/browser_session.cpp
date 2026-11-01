@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QMetaObject>
 #include <QThread>
+#include <QUrl>
 #include <QWidget>
 
 #include <cstdio>
@@ -156,6 +157,18 @@ int BrowserSession::Run(QApplication& qt_app) {
             std::fprintf(stderr, "Qt address submitted; length %lld; Qt main thread: %d.\n",
                          static_cast<long long>(address.size()), QThread::isMainThread());
 
+            // Quitamos espacios exteriores y analizamos la dirección sin corregir entradas mal formadas.
+            const QUrl url(address.trimmed(), QUrl::StrictMode);
+            // Una URL debe tener formato válido, un servidor y un esquema HTTP o HTTPS explícito.
+            const QString scheme = url.scheme();
+            if (!url.isValid() || url.host().isEmpty()
+                || (scheme != QStringLiteral("http") && scheme != QStringLiteral("https"))) {
+                std::fputs("Qt address rejected: expected an absolute HTTP or HTTPS URL with a host.\n",
+                           stderr);
+                return;
+            }
+            // En este bloque solo validamos; la solicitud de navegación CEF se añadirá después.
+            std::fputs("Qt address accepted; CEF navigation is not connected yet.\n", stderr);
         });
         // Usamos el anfitrión creado por la interfaz, sin construir otro ni copiarlo.
         sbp::BrowserHost& browser_host = window_ui.GetBrowserHost();
