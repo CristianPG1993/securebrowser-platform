@@ -158,9 +158,14 @@ int BrowserSession::Run(QApplication& qt_app) {
             std::fprintf(stderr, "Qt address submitted; length %lld; Qt main thread: %d.\n",
                          static_cast<long long>(address.size()), QThread::isMainThread());
 
-            // Quitamos espacios exteriores y analizamos la dirección sin corregir entradas mal formadas.
-            const QUrl url(address.trimmed(), QUrl::StrictMode);
-            // Una URL debe tener formato válido, un servidor y un esquema HTTP o HTTPS explícito.
+            // Quitamos espacios exteriores y analizamos la dirección en modo estricto.
+            const QString address_text = address.trimmed();
+            QUrl url(address_text, QUrl::StrictMode);
+            // Si el usuario escribe un servidor sin esquema, usamos HTTPS por defecto: google.com -> https://google.com.
+            if (!address_text.isEmpty() && url.scheme().isEmpty()) {
+                url = QUrl(QStringLiteral("https://") + address_text, QUrl::StrictMode);
+            }
+            // Validamos el resultado completo, tanto si el esquema venía escrito como si lo añadimos.
             const QString scheme = url.scheme();
             if (!url.isValid() || url.host().isEmpty()
                 || (scheme != QStringLiteral("http") && scheme != QStringLiteral("https"))) {

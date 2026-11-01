@@ -31,9 +31,11 @@ los handlers (receptores de avisos) de creación y cierre del único navegador.
 Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes.
 Los primeros bloques de #90 añaden un campo Qt editable encima del contenido
 web. Enter entrega su texto a `BrowserSession` mediante un callback en el mismo
-hilo Qt. La sesión elimina espacios exteriores y valida con `QUrl::StrictMode`
-que exista un servidor y un esquema HTTP o HTTPS explícito. La dirección
-aceptada se codifica y se envía mediante `CefPostTask` al hilo UI de CEF, donde
+hilo Qt. La sesión elimina espacios exteriores y añade HTTPS cuando falta el
+esquema, por ejemplo `as.com` se interpreta como `https://as.com`. Después
+valida con `QUrl::StrictMode` que exista un servidor y que el esquema resultante
+sea HTTP o HTTPS. La dirección aceptada se codifica y se envía mediante
+`CefPostTask` al hilo UI de CEF, donde
 `BrowserClient::Navigate` solicita su carga con `GetMainFrame()->LoadURL`.
 Las tareas conservan el cliente y la dirección, y el cliente consulta una
 referencia temporal al navegador; no se transfieren widgets Qt al hilo CEF.
@@ -48,8 +50,8 @@ Antes de conectar la navegación, el callback de Enter se comprobó en Debug y
 Release; en Debug también se probaron Enter numérico y el campo vacío.
 Cada pulsación producía un aviso en el hilo Qt y conservaba la página inicial
 de CEF. El filtro descarta la repetición automática de Enter al mantenerlo pulsado.
-La validación se ha compilado en Debug y Release y se ha probado desde la
-ventana Debug con siete entradas: acepta HTTPS y HTTP (incluidas mayúsculas y
+Antes de admitir dominios sin protocolo, la validación se compiló en Debug y
+Release y se probó desde la ventana Debug con siete entradas: acepta HTTPS y HTTP (incluidas mayúsculas y
 espacios exteriores), y rechaza entradas sin esquema, FTP, HTTPS sin servidor,
 un servidor con espacios interiores y el campo vacío. El cierre termina con
 salida `0` y sin procesos restantes.
@@ -59,6 +61,12 @@ parámetros de prueba esperados, y el diagnóstico confirma el hilo UI de CEF.
 En Debug se ha comprobado además que FTP no genera una tarea de navegación y
 que una consulta con caracteres codificados conserva su representación al
 cargarse. El cierre sigue terminando con salida `0` y sin procesos restantes.
+La normalización de dominios sin protocolo se ha compilado en Debug y Release:
+en Debug se ha escrito `as.com` y se ha comprobado la carga de `https://as.com/`;
+`mailto:test@example.org` sigue rechazándose sin generar otra navegación.
+En Release se ha comprobado que `example.org/?q=bare-release` carga mediante
+HTTPS conservando la consulta. Ambas pruebas terminan con salida `0` y sin
+procesos restantes.
 La preparación independiente del SDK CEF está disponible mediante
 [`setup-cef.ps1`](../scripts/setup-cef.ps1).
 
