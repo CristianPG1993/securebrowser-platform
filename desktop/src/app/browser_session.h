@@ -8,6 +8,8 @@ class QApplication;
 
 namespace sbp {
 
+class BrowserWindowUi;
+
 // Coordina la ventana Qt y su navegador CEF; el arranque de Windows queda fuera.
 // Todos sus métodos y su estado pertenecen al hilo principal de Qt.
 class BrowserSession final {
@@ -33,6 +35,8 @@ private:
     CefWindowInfo browser_window_info_;
     bool browser_window_info_ready_ = false;
     bool qt_close_requested_ = false;
+    // Referencia no propietaria a los controles; solo se consulta en Qt y se retira antes de destruirlos.
+    BrowserWindowUi* window_ui_ = nullptr;
     // Solo se instala mientras vive la ventana; se retira antes de destruir sus widgets.
     std::function<void(const CefWindowInfo&)> request_browser_creation_;
 };

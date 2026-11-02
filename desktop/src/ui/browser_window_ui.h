@@ -26,6 +26,9 @@ public:
     // La sesión necesita el anfitrión para obtener su ventana nativa y coordinar el foco.
     BrowserHost& GetBrowserHost();
 
+    // Actualiza el texto visible de la barra; debe llamarse desde el hilo principal de Qt.
+    void SetAddress(const QString& address);
+
     // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
     void ClearAddressFocus();
 

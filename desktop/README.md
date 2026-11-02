@@ -39,13 +39,16 @@ sea HTTP o HTTPS. La dirección aceptada se codifica y se envía mediante
 `BrowserClient::Navigate` solicita su carga con `GetMainFrame()->LoadURL`.
 Las tareas conservan el cliente y la dirección, y el cliente consulta una
 referencia temporal al navegador; no se transfieren widgets Qt al hilo CEF.
-Los diagnósticos no registran la dirección. La actualización visual de la barra
-y los botones se incorporarán en los siguientes bloques.
-`CefDisplayHandler` recibe `OnAddressChange` solo para el frame principal de
-la instancia registrada. `BrowserClientCallbacks` agrupa los avisos de creación,
-cierre y dirección. El aviso de dirección entrega una copia UTF-8 a la sesión,
-que la conserva en una lambda encolada sobre la ventana Qt. La recepción
-registra el número de bytes y confirma el hilo principal.
+Los diagnósticos no registran la dirección. La barra muestra la URL real
+notificada por CEF; los botones se incorporarán en los siguientes bloques.
+El primer bloque de esa actualización implementa `CefDisplayHandler` y recibe
+`OnAddressChange` solo para el frame principal de la instancia registrada.
+`BrowserClientCallbacks` agrupa los avisos de creación, cierre y dirección.
+El aviso de dirección entrega una copia UTF-8 a la sesión, que la conserva en
+una lambda encolada sobre la ventana Qt. La recepción convierte el texto a
+`QString` y llama a `BrowserWindowUi::SetAddress`, que actualiza el `QLineEdit`.
+La sesión guarda un puntero no propietario a los controles solo mientras existen;
+lo consulta en el hilo Qt y lo retira antes de destruirlos.
 Los objetos `CefBrowser` y `CefFrame` permanecen en CEF.
 Las pestañas quedan fuera del alcance de Foundation.
 En el primer bloque se comprobó en Debug y Release: edición, Enter sin

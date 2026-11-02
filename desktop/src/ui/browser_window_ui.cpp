@@ -39,6 +39,11 @@ BrowserHost& BrowserWindowUi::GetBrowserHost() {
     return browser_host_;
 }
 
+void BrowserWindowUi::SetAddress(const QString& address) {
+    // QLineEdit guarda el texto y Qt programa su repintado para mostrar la nueva dirección.
+    address_input_.setText(address);
+}
+
 void BrowserWindowUi::ClearAddressFocus() {
     // clearFocus entrega a QLineEdit su FocusOut normal, que detiene el caret.
     if (address_input_.hasFocus()) {

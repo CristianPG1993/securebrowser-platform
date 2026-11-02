@@ -98,10 +98,11 @@ int BrowserSession::Run(QApplication& qt_app) {
                 // La lambda interior posee la cadena y se ejecutará en el hilo Qt de la ventana.
                 const bool queued = QMetaObject::invokeMethod(&window,
                     [this, address = std::move(address)] {
-                        if (qt_close_requested_) {
+                        if (qt_close_requested_ || window_ui_ == nullptr) {
                             return;
                         }
-                        // Comprobamos la recepción del texto en el hilo principal de Qt.
+                        // Ya estamos en Qt: convertimos la copia UTF-8 y actualizamos el control visual.
+                        window_ui_->SetAddress(QString::fromStdString(address));
                         std::fprintf(stderr, "Qt received main address; bytes %zu; Qt main thread: %d.\n",
                                      address.size(), QThread::isMainThread());
                     }, Qt::QueuedConnection);
@@ -167,6 +168,8 @@ int BrowserSession::Run(QApplication& qt_app) {
             // El aviso Qt reutiliza la misma función que atiende la notificación del marco nativo.
             .on_focus_requested = request_browser_focus
         });
+        // Los controles ya existen; el callback encolado podrá acceder a ellos desde el hilo Qt.
+        window_ui_ = &window_ui;
         // Esta lambda recibe el texto al pulsar Enter, directamente en el mismo hilo Qt.
         window_ui.SetAddressSubmitHandler([this, browser_client](const QString& address) {
             if (qt_close_requested_) {
@@ -240,6 +243,7 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Retiramos el identificador y los parámetros antes de destruir los widgets anfitriones.
         // Soltamos también la función y su referencia al cliente antes de apagar CEF.
         request_browser_creation_ = {};
+        window_ui_ = nullptr;
         window.SetNativeFocusHandler({});
         browser_host_handle_ = nullptr;
         browser_window_info_ = CefWindowInfo();
