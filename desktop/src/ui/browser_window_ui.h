@@ -26,7 +26,7 @@ public:
     // La sesión necesita el anfitrión para obtener su ventana nativa y coordinar el foco.
     BrowserHost& GetBrowserHost();
 
-    // Actualiza el texto visible de la barra; debe llamarse desde el hilo principal de Qt.
+    // Recibe la URL actual en el hilo Qt; conserva la edición si la barra tiene el foco.
     void SetAddress(const QString& address);
 
     // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
@@ -46,6 +46,9 @@ private:
 
     // Campo de texto Qt donde el usuario escribe y edita la dirección web.
     QLineEdit address_input_;
+
+    // Última URL recibida del navegador; permite mostrarla al terminar de editar la barra.
+    QString latest_address_;
 
     // Widget Qt con ventana nativa que aloja la ventana hija del navegador CEF.
     BrowserHost browser_host_;

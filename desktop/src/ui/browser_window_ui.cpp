@@ -40,6 +40,12 @@ BrowserHost& BrowserWindowUi::GetBrowserHost() {
 }
 
 void BrowserWindowUi::SetAddress(const QString& address) {
+    // Recordamos siempre la URL real, aunque el usuario esté escribiendo otra dirección.
+    latest_address_ = address;
+    // Tener el foco reserva el texto y la selección para la edición del usuario.
+    if (address_input_.hasFocus()) {
+        return;
+    }
     // QLineEdit guarda el texto y Qt programa su repintado para mostrar la nueva dirección.
     address_input_.setText(address);
 }
@@ -57,6 +63,10 @@ void BrowserWindowUi::SetAddressSubmitHandler(
 }
 
 bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
+    // Al abandonar la barra, mostramos la última URL recibida, incluso si hubo avisos durante la edición.
+    if (watched == &address_input_ && event->type() == QEvent::FocusOut) {
+        address_input_.setText(latest_address_);
+    }
     // CEF puede conservar el foco nativo aunque Qt recuerde este campo como enfocado.
     // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.
     if (watched == &address_input_
