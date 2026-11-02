@@ -1,19 +1,29 @@
 #pragma once
 
 #include "include/cef_client.h"
+#include "include/cef_display_handler.h"
 #include "include/cef_life_span_handler.h"
 #include <functional>
 #include <string>
 
 namespace sbp {
 
-// Crea una única instancia del navegador y recibe los avisos de su ciclo de vida.
-// Sus callbacks de vida se ejecutan en el hilo UI de CEF, distinto del hilo principal de Qt.
-class BrowserClient final : public CefClient, public CefLifeSpanHandler {
+// Agrupa los avisos del cliente. Se fijan al construirlo y se ejecutan en el hilo UI de CEF.
+struct BrowserClientCallbacks {
+    std::function<void(int)> on_browser_created;
+    std::function<void()> on_browser_closed;
+    // La dirección se entrega como una copia de texto UTF-8, sin compartir objetos de CEF.
+    std::function<void(std::string)> on_address_changed;
+};
+
+// Crea una única instancia del navegador y recibe sus avisos de vida y dirección.
+// Estos callbacks se ejecutan en el hilo UI de CEF, distinto del hilo principal de Qt.
+class BrowserClient final : public CefClient,
+                            public CefLifeSpanHandler,
+                            public CefDisplayHandler {
 public:
-    // Conservamos las funciones que recibirán el identificador creado y el aviso de cierre.
-    explicit BrowserClient(std::function<void(int)> on_browser_created,
-                           std::function<void()> on_browser_closed);
+    // Conservamos los avisos juntos, sin añadir un argumento por cada nuevo evento.
+    explicit BrowserClient(BrowserClientCallbacks callbacks);
 
     // Compartimos referencias al cliente, sin copiar el objeto ni su contador.
     BrowserClient(const BrowserClient&) = delete;
@@ -21,6 +31,9 @@ public:
 
     // Este mismo objeto atiende los avisos del ciclo de vida del navegador.
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
+
+    // CEF solicita el receptor de los avisos de presentación; este mismo cliente los atiende.
+    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
 
     // Recibe una copia de los parámetros preparados por Qt y solicita la creación asíncrona.
     // Este método y el estado del cliente pertenecen al hilo UI de CEF.
@@ -37,6 +50,10 @@ public:
 
     // Solicita el cierre y espera OnBeforeClose, incluso si la creación todavía está pendiente.
     void RequestClose();
+
+    // CEF entrega la dirección real del frame que ha cambiado; filtramos el documento principal.
+    void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                         const CefString& url) override;
 
     // CEF notificará aquí que una instancia del navegador ya ha sido creada.
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
@@ -63,8 +80,7 @@ private:
     void NotifyClosed();
 
     // Se fijan al construir el cliente; quien las proporciona controla la vida de sus capturas.
-    const std::function<void(int)> on_browser_created_;
-    const std::function<void()> on_browser_closed_;
+    const BrowserClientCallbacks callbacks_;
 
     // Solo se lee o modifica en el hilo UI de CEF. -1 significa que no hay navegador registrado.
     // Guardamos un identificador, sin mantener una referencia circular navegador -> cliente -> navegador.

@@ -27,7 +27,7 @@ solicita cuando el contexto CEF y el anfitrión Qt están disponibles.
 `sbp_toolchain_check` conserva una ventana Qt independiente como comprobación
 básica del kit.
 `BrowserApp` recibe el aviso de contexto preparado y `BrowserClient` contiene
-los handlers (receptores de avisos) de creación y cierre del único navegador.
+los handlers (receptores de avisos) de vida y dirección del único navegador.
 Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes.
 Los primeros bloques de #90 añaden un campo Qt editable encima del contenido
 web. Enter entrega su texto a `BrowserSession` mediante un callback en el mismo
@@ -39,8 +39,14 @@ sea HTTP o HTTPS. La dirección aceptada se codifica y se envía mediante
 `BrowserClient::Navigate` solicita su carga con `GetMainFrame()->LoadURL`.
 Las tareas conservan el cliente y la dirección, y el cliente consulta una
 referencia temporal al navegador; no se transfieren widgets Qt al hilo CEF.
-Los diagnósticos no registran la dirección. La actualización de la barra con
-la URL real y los botones se incorporarán en los siguientes bloques.
+Los diagnósticos no registran la dirección. La actualización visual de la barra
+y los botones se incorporarán en los siguientes bloques.
+`CefDisplayHandler` recibe `OnAddressChange` solo para el frame principal de
+la instancia registrada. `BrowserClientCallbacks` agrupa los avisos de creación,
+cierre y dirección. El aviso de dirección entrega una copia UTF-8 a la sesión,
+que la conserva en una lambda encolada sobre la ventana Qt. La recepción
+registra el número de bytes y confirma el hilo principal.
+Los objetos `CefBrowser` y `CefFrame` permanecen en CEF.
 Las pestañas quedan fuera del alcance de Foundation.
 En el primer bloque se comprobó en Debug y Release: edición, Enter sin
 navegación, conservación del foco y texto tras Alt+Tab, y cierre con salida
@@ -87,6 +93,18 @@ se ha probado la alternancia entre la barra y un campo web local, la escritura
 en CEF sin modificar la URL, el retorno a la barra y la navegación con Enter.
 En Release también se ha comprobado la conservación del foco de la barra tras
 Alt+Tab. Ambas configuraciones cierran con salida `0` y sin procesos restantes.
+
+El receptor de dirección se ha comprobado en Debug y Release: aviso inicial,
+carga de otro documento principal y cambio de fragmento en HTTPS. La navegación
+de un iframe local no genera avisos del documento principal. Todos los avisos
+registrados indican el hilo UI de CEF, y ambas pruebas cierran con salida `0`
+y sin procesos restantes.
+
+El puente de dirección se ha comprobado en Debug y Release con tres avisos
+del frame principal: las copias llegan en orden al hilo principal Qt y sus
+longitudes coinciden con las direcciones ASCII de la prueba. Los cambios del
+iframe siguen filtrándose. También se han verificado los avisos de creación,
+el cierre con anfitrión válido, salida `0` y ausencia de procesos restantes.
 
 ## Organización del código
 
@@ -775,11 +793,13 @@ Qt window destroyed; event loop exit code 0.
 CEF shutdown completed.
 ```
 
-`BrowserClient` recibe dos funciones al construirse. `OnAfterCreated`
-entrega únicamente el identificador del navegador a la primera, que encola
-su diagnóstico en Qt. `OnBeforeClose` publica una tarea CEF que ejecuta la segunda
-función después de regresar del callback; esa función encola `ConfirmClose`
-en la ventana principal. `NotifyClosed` evita publicar dos confirmaciones.
+`BrowserClient` recibe un `BrowserClientCallbacks` al construirse.
+`OnAfterCreated` entrega únicamente el identificador del navegador a
+`on_browser_created`, que encola su diagnóstico en Qt. `OnBeforeClose` publica
+una tarea CEF que ejecuta `on_browser_closed` después de regresar del callback;
+esa función encola `ConfirmClose` en la ventana principal. `OnAddressChange`
+entrega una copia UTF-8 a `on_address_changed`, que encola su recepción en Qt.
+`NotifyClosed` evita publicar dos confirmaciones.
 El cliente no guarda un `CefBrowser`
 ni transfiere esa referencia a las funciones encoladas.
 

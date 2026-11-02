@@ -10,15 +10,18 @@
 
 namespace sbp {
 
-BrowserClient::BrowserClient(std::function<void(int)> on_browser_created,
-                             std::function<void()> on_browser_closed)
-    : on_browser_created_(std::move(on_browser_created)),
-      on_browser_closed_(std::move(on_browser_closed)) {}
+BrowserClient::BrowserClient(BrowserClientCallbacks callbacks)
+    : callbacks_(std::move(callbacks)) {}
 
 BrowserClient::~BrowserClient() = default;
 
 CefRefPtr<CefLifeSpanHandler> BrowserClient::GetLifeSpanHandler() {
     // CEF recibe una referencia al mismo cliente, visto como receptor del ciclo de vida.
+    return this;
+}
+
+CefRefPtr<CefDisplayHandler> BrowserClient::GetDisplayHandler() {
+    // Devolvemos una referencia al cliente existente, visto como manejador de presentación.
     return this;
 }
 
@@ -159,6 +162,23 @@ void BrowserClient::RequestClose() {
     NotifyClosed();
 }
 
+void BrowserClient::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                   const CefString& url) {
+    CEF_REQUIRE_UI_THREAD();
+    // Ignoramos avisos de cierre, de otra instancia o de documentos dentro de un iframe.
+    if (close_requested_ || !browser || !frame || !frame->IsMain()
+        || browser->GetIdentifier() != browser_id_) {
+        return;
+    }
+    // Verificamos el aviso sin imprimir la URL ni acceder a controles Qt.
+    std::fprintf(stderr, "CEF main address changed; length %zu; CEF UI thread: %d.\n",
+                 url.length(), CefCurrentlyOn(TID_UI));
+    if (callbacks_.on_address_changed) {
+        // ToString crea una cadena UTF-8 propia que seguirá viva fuera de este callback CEF.
+        callbacks_.on_address_changed(url.ToString());
+    }
+}
+
 void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
     const int browser_id = browser->GetIdentifier();
@@ -172,8 +192,8 @@ void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     }
     std::fprintf(stderr, "CEF browser created: id %d.\n", browser_id);
     // Solo entregamos el identificador; no conservamos el navegador ni lo pasamos a la cola Qt.
-    if (on_browser_created_) {
-        on_browser_created_(browser_id);
+    if (callbacks_.on_browser_created) {
+        callbacks_.on_browser_created(browser_id);
     }
     if (close_requested_) {
         // Esperamos a que termine este callback de creación antes de solicitar el cierre real.
@@ -228,7 +248,7 @@ void BrowserClient::NotifyClosed() {
             if (on_closed) {
                 on_closed();
             }
-        }, on_browser_closed_))) {
+        }, callbacks_.on_browser_closed))) {
         std::fputs("CEF final close notification could not be posted.\n", stderr);
     }
 }

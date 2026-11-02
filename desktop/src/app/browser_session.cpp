@@ -15,6 +15,7 @@
 
 #include <cstdio>
 #include <string>
+#include <utility>
 
 namespace sbp {
 
@@ -78,9 +79,9 @@ int BrowserSession::Run(QApplication& qt_app) {
         };
 
         // El cliente no conserva CefBrowser: sus funciones notifican a Qt sin transferir esa referencia.
-        CefRefPtr<sbp::BrowserClient> browser_client(new sbp::BrowserClient(
+        CefRefPtr<sbp::BrowserClient> browser_client(new sbp::BrowserClient(sbp::BrowserClientCallbacks{
             // Este callback recibe el identificador en CEF y publica su aviso para Qt.
-            [&window](int browser_id) {
+            .on_browser_created = [&window](int browser_id) {
                 // CEF invoca esta función en su hilo UI; el identificador se copia a la cola Qt.
                 // La lambda interior solo copia el identificador, sin conservar el navegador.
                 const bool queued = QMetaObject::invokeMethod(&window, [browser_id] {
@@ -91,7 +92,24 @@ int BrowserSession::Run(QApplication& qt_app) {
                     std::fputs("CEF browser creation notification could not be queued to Qt.\n", stderr);
                 }
             },
-            confirm_close_on_qt));
+            .on_browser_closed = confirm_close_on_qt,
+            // CEF entrega una copia de la dirección; esta lambda publica su recepción para Qt.
+            .on_address_changed = [this, &window](std::string address) {
+                // La lambda interior posee la cadena y se ejecutará en el hilo Qt de la ventana.
+                const bool queued = QMetaObject::invokeMethod(&window,
+                    [this, address = std::move(address)] {
+                        if (qt_close_requested_) {
+                            return;
+                        }
+                        // Comprobamos la recepción del texto en el hilo principal de Qt.
+                        std::fprintf(stderr, "Qt received main address; bytes %zu; Qt main thread: %d.\n",
+                                     address.size(), QThread::isMainThread());
+                    }, Qt::QueuedConnection);
+                if (!queued) {
+                    std::fputs("CEF address notification could not be queued to Qt.\n", stderr);
+                }
+            }
+        }));
         std::fputs("CEF browser client prepared.\n", stderr);
 
         // BindOnce copia los parámetros y conserva el cliente hasta ejecutar la tarea en CEF.
