@@ -1,16 +1,19 @@
 #include "app/browser_navigation.h"
 
 #include "browser/browser_client.h"
+#include "ui/browser_window.h"
 #include "ui/browser_window_ui.h"
 
 #include "include/base/cef_callback.h"
 #include "include/wrapper/cef_closure_task.h"
 
+#include <QMetaObject>
 #include <QThread>
 #include <QUrl>
 
 #include <cstdio>
 #include <string>
+#include <utility>
 
 namespace sbp {
 
@@ -49,6 +52,26 @@ void ConnectBrowserNavigation(BrowserWindowUi& window_ui,
             std::fputs("Qt navigation request could not be posted to CEF.\n", stderr);
         }
     });
+}
+
+std::function<void(std::string)> MakeBrowserAddressHandler(
+    BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) {
+    // CEF entrega una copia UTF-8; esta lambda solo publica su recepción para Qt.
+    return [&window, &window_ui, &close_requested](std::string address) {
+        // La lambda interior posee el texto y consulta las referencias de sesión únicamente en Qt.
+        const bool queued = QMetaObject::invokeMethod(&window,
+            [&window_ui, &close_requested, address = std::move(address)] {
+                if (close_requested || window_ui == nullptr) {
+                    return;
+                }
+                window_ui->SetAddress(QString::fromStdString(address));
+                std::fprintf(stderr, "Qt received main address; bytes %zu; Qt main thread: %d.\n",
+                             address.size(), QThread::isMainThread());
+            }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF address notification could not be queued to Qt.\n", stderr);
+        }
+    };
 }
 
 }  // namespace sbp

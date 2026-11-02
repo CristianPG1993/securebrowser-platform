@@ -125,7 +125,7 @@ junto a su implementación:
 
 `browser_navigation.h/.cpp` reúne las conexiones de los controles, la validación
 de direcciones y el envío de operaciones al hilo UI de CEF. La sesión conserva
-la coordinación de creación, cierre y vida de la ventana. El estado de cierre
+la composición de módulos, el bucle Qt y la vida de los objetos. El estado de cierre
 se consulta por referencia en Qt y permanece vivo durante todos los callbacks.
 
 `BrowserWindowBridge` conecta el tamaño y el foco Qt con el contenido CEF.
@@ -135,6 +135,15 @@ en el hilo UI de CEF. El marco retira su callback antes de destruir los controle
 `BrowserLifecycle` prepara la ventana hija, publica creación y cierre en CEF,
 y conserva el estado y el código de salida hasta después de `CefShutdown`.
 La ventana Qt solo acepta cerrar cuando recibe la confirmación de CEF.
+
+`Run()` queda como punto de composición: crea los objetos, conecta los módulos,
+ejecuta el bucle Qt y retira las conexiones antes de destruir los widgets.
+La recepción de direcciones CEF→Qt también pertenece a `browser_navigation`;
+el receptor Qt descarta tareas cuando su ventana deja de existir.
+
+Los siguientes cambios deben mantener módulos con responsabilidades acotadas:
+los detalles de nuevos controles y callbacks se incorporan en su módulo,
+con declaraciones en `.h`, implementación en `.cpp` y comentarios de hilo y vida.
 
 `CMakeLists.txt` incorpora esos archivos al target `SecureBrowser` y utiliza
 `src/` como raíz de los includes propios. `main.cpp` sigue siendo la

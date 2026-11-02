@@ -16,12 +16,17 @@ public:
     BrowserWindowBridge(CefRefPtr<BrowserClient> browser_client,
                         const bool& close_requested, const HWND& host_handle);
 
+    ~BrowserWindowBridge();
+
     // Prepara los avisos que recibe BrowserHost durante su construcción.
     BrowserHostCallbacks MakeHostCallbacks() const;
 
     // Instala y retira la sincronización del foco nativo del marco.
     void Connect(BrowserWindow& window, BrowserWindowUi& window_ui) const;
     void Disconnect(BrowserWindow& window) const;
+
+    // Muestra la ventana, prepara el foco inicial y devuelve el identificador nativo del anfitrión.
+    HWND Show(BrowserWindow& window, BrowserWindowUi& window_ui) const;
 
 private:
     // El cliente se conserva mediante una referencia administrada; el estado solo se consulta en Qt.

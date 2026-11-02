@@ -31,6 +31,8 @@ BrowserWindowBridge::BrowserWindowBridge(CefRefPtr<BrowserClient> browser_client
     : browser_client_(std::move(browser_client)),
       close_requested_(close_requested), host_handle_(host_handle) {}
 
+BrowserWindowBridge::~BrowserWindowBridge() = default;
+
 BrowserHostCallbacks BrowserWindowBridge::MakeHostCallbacks() const {
     return {
         // Qt solicita ajustar la ventana hija; CEF consultará el área nativa más reciente.
@@ -72,6 +74,14 @@ void BrowserWindowBridge::Connect(BrowserWindow& window, BrowserWindowUi& window
 void BrowserWindowBridge::Disconnect(BrowserWindow& window) const {
     // La ventana deja de consultar los controles antes de que se destruyan.
     window.SetNativeFocusHandler({});
+}
+
+HWND BrowserWindowBridge::Show(BrowserWindow& window, BrowserWindowUi& window_ui) const {
+    window.show();
+    BrowserHost& browser_host = window_ui.GetBrowserHost();
+    // El área web recibe el foco inicial; winId solo se consulta desde el hilo Qt.
+    browser_host.setFocus(Qt::OtherFocusReason);
+    return reinterpret_cast<HWND>(browser_host.winId());
 }
 
 }  // namespace sbp
