@@ -11,15 +11,23 @@ class BrowserClient;
 class BrowserWindow;
 class BrowserWindowUi;
 
-// Conecta los controles de navegación en el hilo Qt y publica sus operaciones para CEF.
-// close_requested pertenece a la sesión y debe vivir más que los callbacks de la interfaz.
-void ConnectBrowserNavigation(BrowserWindowUi& window_ui,
-                              CefRefPtr<BrowserClient> browser_client,
-                              const bool& close_requested);
+// Coordina la navegación Qt↔CEF; cada control tiene su propio método privado.
+// Los callbacks conservan sus dependencias explícitas; el estado referenciado pertenece a la sesión.
+class BrowserNavigation final {
+public:
+    // Conecta los controles en Qt; sus acciones publicarán las operaciones para el hilo UI de CEF.
+    void Connect(BrowserWindowUi& window_ui, CefRefPtr<BrowserClient> browser_client,
+                 const bool& close_requested) const;
 
-// Prepara el aviso CEF→Qt. La ventana recibe la tarea; el puntero y el estado viven en la sesión.
-// Se consulta el puntero por referencia porque los controles se conectan después y se retiran al terminar.
-std::function<void(std::string)> MakeBrowserAddressHandler(
-    BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested);
+    // Prepara el aviso CEF→Qt; el receptor es la ventana y el puntero se consulta por referencia.
+    std::function<void(std::string)> MakeAddressHandler(
+        BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
+
+private:
+    // Cada método instala únicamente la acción correspondiente a su control Qt.
+    void ConnectAddressControl(BrowserWindowUi& window_ui,
+                               const CefRefPtr<BrowserClient>& browser_client,
+                               const bool& close_requested) const;
+};
 
 }  // namespace sbp

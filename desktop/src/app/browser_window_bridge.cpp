@@ -13,9 +13,9 @@
 #include <utility>
 
 namespace sbp {
-namespace {
 
-void RequestBrowserFocus(CefRefPtr<BrowserClient> browser_client, const bool& close_requested) {
+void BrowserWindowBridge::RequestBrowserFocus(CefRefPtr<BrowserClient> browser_client,
+                                              const bool& close_requested) {
     if (close_requested) {
         return;
     }
@@ -23,8 +23,6 @@ void RequestBrowserFocus(CefRefPtr<BrowserClient> browser_client, const bool& cl
         std::fputs("Qt focus notification could not be posted to CEF.\n", stderr);
     }
 }
-
-}  // namespace
 
 BrowserWindowBridge::BrowserWindowBridge(CefRefPtr<BrowserClient> browser_client,
                                          const bool& close_requested, const HWND& host_handle)

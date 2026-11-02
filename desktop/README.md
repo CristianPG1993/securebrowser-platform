@@ -20,7 +20,7 @@ el proceso principal de los subprocesos antes de crear objetos Qt. En el
 principal comprueba el contexto de sandbox y crea `QApplication` antes de
 inicializar CEF. Tras una inicialización correcta, llama a `BrowserSession::Run`,
 que crea la ventana, delega la construcción de sus controles en `BrowserWindowUi`,
-delega las acciones de navegación en `ConnectBrowserNavigation`, conecta los
+delega las acciones de navegación en `BrowserNavigation`, conecta los
 avisos de vida entre Qt y CEF y ejecuta `qt_app.exec()`.
 Al volver, los widgets ya se han destruido; la sesión permanece
 viva hasta después de `CefShutdown`. La creación asíncrona del navegador se
@@ -120,13 +120,18 @@ junto a su implementación:
 | Carpeta | Responsabilidad | Archivos actuales |
 | --- | --- | --- |
 | `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp`, `browser_session.h/.cpp` y `browser_navigation.h/.cpp`, `browser_window_bridge.h/.cpp` y `browser_lifecycle.h/.cpp` |
-| `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h`, `browser_client.h` y `browser_client.cpp` |
+| `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h/.cpp` y `browser_client.h/.cpp` |
 | `src/ui/` | Ventana principal, composición de controles Qt y anfitrión nativo del contenido CEF. | `browser_window.h/.cpp`, `browser_window_ui.h/.cpp` y `browser_host.h/.cpp` |
 
 `browser_navigation.h/.cpp` reúne las conexiones de los controles, la validación
 de direcciones y el envío de operaciones al hilo UI de CEF. La sesión conserva
 la composición de módulos, el bucle Qt y la vida de los objetos. El estado de cierre
 se consulta por referencia en Qt y permanece vivo durante todos los callbacks.
+
+`BrowserNavigation::Connect` delega cada control en un método privado,
+como `ConnectAddressControl` para la barra de dirección.
+La clase declara su interfaz pública y sus métodos privados en el header,
+y mantiene sus implementaciones en el `.cpp`.
 
 `BrowserWindowBridge` conecta el tamaño y el foco Qt con el contenido CEF.
 Sus callbacks consultan el estado de la sesión en Qt y publican las operaciones
@@ -144,6 +149,8 @@ el receptor Qt descarta tareas cuando su ventana deja de existir.
 Los siguientes cambios deben mantener módulos con responsabilidades acotadas:
 los detalles de nuevos controles y callbacks se incorporan en su módulo,
 con declaraciones en `.h`, implementación en `.cpp` y comentarios de hilo y vida.
+Esta estructura de clases, con interfaz pública y auxiliares privados declarados
+en el header, se aplica también a los futuros módulos C++ propios de Desktop.
 
 `CMakeLists.txt` incorpora esos archivos al target `SecureBrowser` y utiliza
 `src/` como raíz de los includes propios. `main.cpp` sigue siendo la

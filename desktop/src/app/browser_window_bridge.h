@@ -29,6 +29,9 @@ public:
     HWND Show(BrowserWindow& window, BrowserWindowUi& window_ui) const;
 
 private:
+    // Auxiliar compartido por los avisos de foco; recibe sus dependencias sin capturar el puente.
+    static void RequestBrowserFocus(CefRefPtr<BrowserClient> browser_client, const bool& close_requested);
+
     // El cliente se conserva mediante una referencia administrada; el estado solo se consulta en Qt.
     const CefRefPtr<BrowserClient> browser_client_;
     const bool& close_requested_;

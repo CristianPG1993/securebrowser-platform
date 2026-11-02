@@ -17,9 +17,17 @@
 
 namespace sbp {
 
-void ConnectBrowserNavigation(BrowserWindowUi& window_ui,
-                              CefRefPtr<BrowserClient> browser_client,
-                              const bool& close_requested) {
+void BrowserNavigation::Connect(BrowserWindowUi& window_ui,
+                                 CefRefPtr<BrowserClient> browser_client,
+                                 const bool& close_requested) const {
+    // El método público coordina las conexiones; cada control mantiene su implementación separada.
+    ConnectAddressControl(window_ui, browser_client, close_requested);
+}
+
+// Conecta únicamente la barra de dirección, con su validación y envío de navegación a CEF.
+void BrowserNavigation::ConnectAddressControl(BrowserWindowUi& window_ui,
+                                              const CefRefPtr<BrowserClient>& browser_client,
+                                              const bool& close_requested) const {
     // Esta lambda recibe el texto al pulsar Enter, directamente en el mismo hilo Qt.
     window_ui.SetAddressSubmitHandler([browser_client, &close_requested](const QString& address) {
         if (close_requested) {
@@ -54,8 +62,8 @@ void ConnectBrowserNavigation(BrowserWindowUi& window_ui,
     });
 }
 
-std::function<void(std::string)> MakeBrowserAddressHandler(
-    BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) {
+std::function<void(std::string)> BrowserNavigation::MakeAddressHandler(
+    BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const {
     // CEF entrega una copia UTF-8; esta lambda solo publica su recepción para Qt.
     return [&window, &window_ui, &close_requested](std::string address) {
         // La lambda interior posee el texto y consulta las referencias de sesión únicamente en Qt.
