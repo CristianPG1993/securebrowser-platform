@@ -23,6 +23,7 @@ BrowserClientCallbacks BrowserNavigation::MakeCallbacks(
     BrowserClientCallbacks callbacks{};
     callbacks.on_address_changed = MakeAddressHandler(window, window_ui, close_requested);
     callbacks.on_back_availability_changed = MakeBackAvailabilityHandler(window, window_ui, close_requested);
+    callbacks.on_forward_availability_changed = MakeForwardAvailabilityHandler(window, window_ui, close_requested);
     return callbacks;
 }
 
@@ -31,6 +32,7 @@ void BrowserNavigation::Connect(BrowserWindowUi& window_ui,
                                  const bool& close_requested) const {
     // El método público coordina las conexiones; cada control mantiene su implementación separada.
     ConnectBackControl(window_ui, browser_client, close_requested);
+    ConnectForwardControl(window_ui, browser_client, close_requested);
     ConnectAddressControl(window_ui, browser_client, close_requested);
 }
 
@@ -47,6 +49,23 @@ void BrowserNavigation::ConnectBackControl(BrowserWindowUi& window_ui,
         // BindOnce conserva el cliente hasta ejecutar su método GoBack en CEF.
         if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::GoBack, browser_client))) {
             std::fputs("Qt back navigation request could not be posted to CEF.\n", stderr);
+        }
+    });
+}
+
+// Conecta únicamente la petición Adelante; el método es privado en BrowserNavigation.
+void BrowserNavigation::ConnectForwardControl(BrowserWindowUi& window_ui,
+                                               const CefRefPtr<BrowserClient>& browser_client,
+                                               const bool& close_requested) const {
+    // Esta lambda recibe la petición Adelante en Qt y publica la operación en el hilo UI de CEF.
+    window_ui.SetForwardRequestHandler([browser_client, &close_requested] {
+        // Una activación tardía no debe iniciar navegación durante el cierre de la ventana.
+        if (close_requested) {
+            return;
+        }
+        // BindOnce conserva el cliente hasta ejecutar su método GoForward en CEF.
+        if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::GoForward, browser_client))) {
+            std::fputs("Qt forward navigation request could not be posted to CEF.\n", stderr);
         }
     });
 }
@@ -125,6 +144,26 @@ std::function<void(bool)> BrowserNavigation::MakeBackAvailabilityHandler(
             }, Qt::QueuedConnection);
         if (!queued) {
             std::fputs("CEF back availability could not be queued to Qt.\n", stderr);
+        }
+    };
+}
+
+std::function<void(bool)> BrowserNavigation::MakeForwardAvailabilityHandler(
+    BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const {
+    // CEF entrega la disponibilidad; esta lambda publica el aviso para el hilo principal Qt.
+    return [&window, &window_ui, &close_requested](bool available) {
+        // La lambda interior consulta los controles y el estado de cierre únicamente en Qt.
+        const bool queued = QMetaObject::invokeMethod(&window,
+            [&window_ui, &close_requested, available] {
+                if (close_requested || window_ui == nullptr) {
+                    return;
+                }
+                window_ui->SetForwardAvailable(available);
+                std::fprintf(stderr, "Qt forward availability updated; available: %d; Qt main thread: %d.\n",
+                             available, QThread::isMainThread());
+            }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF forward availability could not be queued to Qt.\n", stderr);
         }
     };
 }

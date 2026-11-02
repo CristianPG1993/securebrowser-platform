@@ -45,15 +45,23 @@ notificada por CEF. El botón Atrás muestra una flecha estándar Qt, con toolti
 «Atrás» y nombre accesible «Volver a la página anterior». Utiliza la señal Qt `clicked` para ejecutar
 la acción guardada mediante `SetBackRequestHandler`. La acción encola
 `BrowserClient::GoBack`, que delega el retroceso en el controlador de CEF.
+La flecha Adelante usa `SetForwardRequestHandler` y `BrowserClient::GoForward`
+para avanzar por el mismo historial después de retroceder.
 `CefLoadHandler::OnLoadingStateChange` y los cambios de dirección consultan la
 entrada actual mediante `GetNavigationEntries` y `BrowserHistoryVisitor`.
-El visitante entrega solo si su índice es mayor que cero; Qt recibe ese booleano
-y habilita o deshabilita el botón en su propio hilo. No se espera a que terminen
+El visitante calcula Atrás con `index > 0` y Adelante con `index + 1 < total`.
+Los avisos `on_back_availability_changed` y `on_forward_availability_changed`
+encolan esos booleanos en Qt para actualizar sus respectivos botones.
+No se espera a que terminen
 de cargar imágenes u otros recursos. `CanGoBack` puede conservar el estado anterior
 durante esa carga; la operación `GoBack` mantiene su propia comprobación interna.
 La señal se obtiene de los metadatos Qt en tiempo de ejecución para mantener
 la carga diferida de las bibliotecas en el bootstrap. Ratón y teclado conservan
 el comportamiento normal de `QPushButton`.
+Queda pendiente estudiar la demora al mostrar páginas con carga prolongada.
+Los diagnósticos de Adelante, `OnLoadStart` y `OnLoadingStateChange` incluyen
+`time_ms`, en milisegundos desde el arranque de Windows, para comparar sus tiempos.
+Estas marcas no registran URLs ni miden el primer pintado del contenido.
 El primer bloque de esa actualización implementa `CefDisplayHandler` y recibe
 `OnAddressChange` solo para el frame principal de la instancia registrada.
 `BrowserClientCallbacks` agrupa los avisos de creación, cierre, dirección e historial.
@@ -862,8 +870,9 @@ CEF shutdown completed.
 una tarea CEF que ejecuta `on_browser_closed` después de regresar del callback;
 esa función encola `ConfirmClose` en la ventana principal. `OnAddressChange`
 entrega una copia UTF-8 a `on_address_changed`, que encola su recepción en Qt.
-`OnLoadingStateChange` y `OnAddressChange` notifican la disponibilidad de Atrás
-a `on_back_availability_changed`, que encola el estado del botón en Qt.
+`OnLoadingStateChange` y `OnAddressChange` solicitan `RefreshNavigationAvailability`.
+El visitante notifica Atrás a `on_back_availability_changed` y Adelante a
+`on_forward_availability_changed`; cada función encola el estado de su botón en Qt.
 `NotifyClosed` evita publicar dos confirmaciones.
 El cliente no guarda un `CefBrowser`
 ni transfiere esa referencia a las funciones encoladas.

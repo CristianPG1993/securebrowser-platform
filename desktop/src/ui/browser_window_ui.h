@@ -43,6 +43,12 @@ public:
     // CEF comunica su historial mediante una tarea Qt; el botón refleja si se puede retroceder.
     void SetBackAvailable(bool available);
 
+    // Guarda la acción Adelante; la sesión la proporcionará al conectar este control con CEF.
+    void SetForwardRequestHandler(std::function<void()> on_forward_requested);
+
+    // Actualiza en Qt si existe una entrada posterior en el historial.
+    void SetForwardAvailable(bool available);
+
 protected:
     // Qt entrega aquí los eventos del campo donde instalamos este objeto como filtro.
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -51,16 +57,21 @@ private:
     // Conecta la activación normal del botón Qt con la acción proporcionada por la sesión.
     void ConnectBackButton();
     void RequestBack();
+    void ConnectForwardButton();
+    void RequestForward();
 
     // El orden permite destruir los controles antes del layout y de la ventana que los contiene.
     // Layout vertical que coloca la barra de navegación arriba y el contenido web debajo.
     QVBoxLayout window_layout_;
 
-    // Fila horizontal que reúne el botón Atrás y el campo de dirección.
+    // Fila horizontal que reúne las flechas de navegación y el campo de dirección.
     QHBoxLayout navigation_layout_;
 
     // Botón de navegación; CEF determina su disponibilidad a partir del historial.
     QPushButton back_button_;
+
+    // Flecha Adelante; empieza deshabilitada hasta recibir la disponibilidad desde CEF.
+    QPushButton forward_button_;
 
     // Campo de texto Qt donde el usuario escribe y edita la dirección web.
     QLineEdit address_input_;
@@ -76,6 +87,9 @@ private:
 
     // Acción que la sesión proporcionará para solicitar el retroceso, sin exponer CEF a la interfaz.
     std::function<void()> on_back_requested_;
+
+    // Acción para avanzar en el historial; se ejecuta únicamente al activar la flecha Adelante.
+    std::function<void()> on_forward_requested_;
 };
 
 }  // namespace sbp

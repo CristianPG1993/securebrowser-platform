@@ -17,6 +17,8 @@ struct BrowserClientCallbacks {
     std::function<void(std::string)> on_address_changed;
     // Solo transmitimos la disponibilidad del historial, sin transferir objetos CEF a Qt.
     std::function<void(bool)> on_back_availability_changed;
+    // Adelante tiene su aviso propio; utiliza la misma consulta de la entrada actual.
+    std::function<void(bool)> on_forward_availability_changed;
 };
 
 // Crea una única instancia del navegador y recibe sus avisos de vida, dirección e historial.
@@ -52,6 +54,9 @@ public:
     // Solicita volver a la entrada anterior del historial, desde el hilo UI de CEF.
     void GoBack();
 
+    // Solicita avanzar a la siguiente entrada del historial, desde el hilo UI de CEF.
+    void GoForward();
+
     // Ajusta la ventana hija al área nativa actual de su padre, desde el hilo UI de CEF.
     void ResizeBrowser();
 
@@ -68,6 +73,10 @@ public:
     // CEF avisa de cambios de carga; aprovechamos el aviso para consultar la entrada actual.
     void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool is_loading,
                               bool can_go_back, bool can_go_forward) override;
+
+    // Marca cuándo se confirma el documento principal; todavía puede quedar contenido por cargar o pintar.
+    void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                     TransitionType transition_type) override;
 
     // CEF notificará aquí que una instancia del navegador ya ha sido creada.
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
@@ -93,8 +102,8 @@ private:
     // Publica una sola confirmación después de que termine el callback CEF actual.
     void NotifyClosed();
 
-    // Consulta la entrada actual sin esperar al final de la carga; el callback llevará el resultado a Qt.
-    void RefreshBackAvailability(CefRefPtr<CefBrowser> browser);
+    // Consulta una sola entrada sin esperar al final de la carga; los avisos actualizan ambas flechas en Qt.
+    void RefreshNavigationAvailability(CefRefPtr<CefBrowser> browser);
 
     // Se fijan al construir el cliente; quien las proporciona controla la vida de sus capturas.
     const BrowserClientCallbacks callbacks_;

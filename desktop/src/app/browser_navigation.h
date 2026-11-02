@@ -30,11 +30,16 @@ private:
         BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
     std::function<void(bool)> MakeBackAvailabilityHandler(
         BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
+    std::function<void(bool)> MakeForwardAvailabilityHandler(
+        BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
 
     // Cada método instala únicamente la acción correspondiente a su control Qt.
     void ConnectBackControl(BrowserWindowUi& window_ui,
                             const CefRefPtr<BrowserClient>& browser_client,
                             const bool& close_requested) const;
+    void ConnectForwardControl(BrowserWindowUi& window_ui,
+                               const CefRefPtr<BrowserClient>& browser_client,
+                               const bool& close_requested) const;
     void ConnectAddressControl(BrowserWindowUi& window_ui,
                                const CefRefPtr<BrowserClient>& browser_client,
                                const bool& close_requested) const;

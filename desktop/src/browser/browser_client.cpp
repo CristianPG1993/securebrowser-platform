@@ -7,6 +7,8 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
+#include <windows.h>
+
 #include <cstdio>
 #include <utility>
 
@@ -91,6 +93,27 @@ void BrowserClient::GoBack() {
     // Los cambios de URL seguirán llegando por OnAddressChange.
     browser->GoBack();
     std::fprintf(stderr, "CEF back navigation requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
+}
+
+void BrowserClient::GoForward() {
+    CEF_REQUIRE_UI_THREAD();
+    // Una tarea tardía no debe actuar sobre un navegador inexistente o que ya se está cerrando.
+    if (browser_id_ == -1 || close_requested_) {
+        return;
+    }
+    // Consultamos la instancia registrada sin conservar una referencia permanente al navegador.
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        return;
+    }
+    // CanGoForward puede conservar el estado anterior mientras se cargan recursos de la nueva página.
+    // GoForward consulta el controlador real de CEF y no avanza si no existe una entrada siguiente.
+    // Los cambios de URL seguirán llegando por OnAddressChange.
+    // GetTickCount64 mide milisegundos desde el arranque de Windows; las diferencias indican duración.
+    // Registramos el instante antes de llamar a CEF para compararlo con los callbacks de carga.
+    std::fprintf(stderr, "CEF forward navigation requested; CEF UI thread: %d. time_ms: %llu.\n",
+                 CefCurrentlyOn(TID_UI), static_cast<unsigned long long>(GetTickCount64()));
+    browser->GoForward();
 }
 
 void BrowserClient::ResizeBrowser() {
@@ -202,24 +225,42 @@ void BrowserClient::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<Cef
         callbacks_.on_address_changed(url.ToString());
     }
     // Incluye cambios dentro del mismo documento, como enlaces a fragmentos o history.pushState.
-    RefreshBackAvailability(browser);
+    RefreshNavigationAvailability(browser);
 }
 
-void BrowserClient::OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool, bool, bool) {
+void BrowserClient::OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool is_loading, bool, bool) {
     CEF_REQUIRE_UI_THREAD();
     if (close_requested_ || !browser || browser->GetIdentifier() != browser_id_) {
         return;
     }
-    RefreshBackAvailability(browser);
+    // El final de carga puede indicar finalización, cancelación o fallo; no acredita un pintado correcto.
+    std::fprintf(stderr, "CEF loading state changed; loading: %d; time_ms: %llu.\n",
+                 is_loading, static_cast<unsigned long long>(GetTickCount64()));
+    RefreshNavigationAvailability(browser);
 }
 
-void BrowserClient::RefreshBackAvailability(CefRefPtr<CefBrowser> browser) {
+void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                TransitionType) {
     CEF_REQUIRE_UI_THREAD();
-    if (callbacks_.on_back_availability_changed) {
-        // El estado de CanGoBack puede actualizarse al terminar la carga de todos los recursos.
+    // Filtramos los iframes y los avisos tardíos igual que en OnAddressChange.
+    if (close_requested_ || !browser || !frame || !frame->IsMain()
+        || browser->GetIdentifier() != browser_id_) {
+        return;
+    }
+    // CEF confirma aquí la navegación del documento; esta marca no mide su primer pintado.
+    // No registramos la URL ni conservamos referencias al navegador o al frame.
+    std::fprintf(stderr, "CEF main document load started; time_ms: %llu.\n",
+                 static_cast<unsigned long long>(GetTickCount64()));
+}
+
+void BrowserClient::RefreshNavigationAvailability(CefRefPtr<CefBrowser> browser) {
+    CEF_REQUIRE_UI_THREAD();
+    if (callbacks_.on_back_availability_changed || callbacks_.on_forward_availability_changed) {
+        // CanGoBack y CanGoForward pueden actualizarse al terminar la carga de todos los recursos.
         // La instantánea obtiene el índice actual del historial en este mismo hilo UI.
         browser->GetHost()->GetNavigationEntries(
-            new BrowserHistoryVisitor(callbacks_.on_back_availability_changed), true);
+            new BrowserHistoryVisitor(callbacks_.on_back_availability_changed,
+                                      callbacks_.on_forward_availability_changed), true);
     }
 }
 

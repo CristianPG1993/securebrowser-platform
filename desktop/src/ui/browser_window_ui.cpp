@@ -19,6 +19,7 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     : QObject(&window),
       window_layout_(&window),
       back_button_(&window),
+      forward_button_(&window),
       address_input_(&window),
       browser_host_(std::move(host_callbacks), &window) {
     // Aquí se configura el aspecto inicial de la ventana y la distribución de sus controles.
@@ -36,6 +37,15 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     back_button_.installEventFilter(this);
     ConnectBackButton();
 
+    // CEF habilitará Adelante cuando exista una página posterior en el historial.
+    forward_button_.setObjectName("forward_button");
+    forward_button_.setIcon(window.style()->standardIcon(QStyle::SP_ArrowForward));
+    forward_button_.setToolTip("Adelante");
+    forward_button_.setAccessibleName("Ir a la página siguiente");
+    forward_button_.setEnabled(false);
+    forward_button_.installEventFilter(this);
+    ConnectForwardButton();
+
     // El campo permite editar una dirección; Enter avisará a la sesión mediante su callback.
     address_input_.setObjectName("address_input");
     address_input_.setAccessibleName("Dirección web");
@@ -44,8 +54,9 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     // No requiere Q_OBJECT ni importar datos de QLineEdit para conectar una señal tipada.
     address_input_.installEventFilter(this);
 
-    // La fila coloca el botón a la izquierda; el factor 1 permite que la dirección ocupe el espacio restante.
+    // Las flechas quedan a la izquierda; el factor 1 reserva el espacio restante a la dirección.
     navigation_layout_.addWidget(&back_button_);
+    navigation_layout_.addWidget(&forward_button_);
     navigation_layout_.addWidget(&address_input_, 1);
     // El layout principal mantiene la barra completa encima del contenido web.
     window_layout_.addLayout(&navigation_layout_);
@@ -89,6 +100,15 @@ void BrowserWindowUi::SetBackAvailable(bool available) {
     back_button_.setEnabled(available);
 }
 
+void BrowserWindowUi::SetForwardRequestHandler(std::function<void()> on_forward_requested) {
+    // Conservamos la función para ejecutarla más tarde, cuando Qt entregue la activación del botón.
+    on_forward_requested_ = std::move(on_forward_requested);
+}
+
+void BrowserWindowUi::SetForwardAvailable(bool available) {
+    forward_button_.setEnabled(available);
+}
+
 void BrowserWindowUi::ConnectBackButton() {
     // Consultamos la señal en tiempo de ejecución para conservar la carga diferida de Qt en el bootstrap.
     // QMetaObject::connect entrega la señal a una lambda, sin añadir Q_OBJECT a nuestra clase.
@@ -109,6 +129,25 @@ void BrowserWindowUi::RequestBack() {
     }
 }
 
+void BrowserWindowUi::ConnectForwardButton() {
+    // La conexión por metadatos conserva la carga diferida de Qt, igual que en el botón Atrás.
+    const QMetaObject* button_meta = forward_button_.metaObject();
+    const int clicked_index = button_meta->indexOfSignal("clicked(bool)");
+    // Esta lambda recibe la señal Qt y delega la acción en nuestro método privado.
+    const auto connection = QMetaObject::connect(&forward_button_, button_meta->method(clicked_index),
+                                                this, [this] { RequestForward(); });
+    if (!connection) {
+        std::fputs("Qt forward button activation could not be connected.\n", stderr);
+    }
+}
+
+void BrowserWindowUi::RequestForward() {
+    // Qt reconoce la activación; ejecutamos la acción que instaló el coordinador de navegación.
+    if (on_forward_requested_) {
+        on_forward_requested_();
+    }
+}
+
 bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
     // Al abandonar la barra, mostramos la última URL recibida, incluso si hubo avisos durante la edición.
     if (watched == &address_input_ && event->type() == QEvent::FocusOut) {
@@ -116,7 +155,7 @@ bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
     }
     // CEF puede conservar el foco nativo aunque Qt recuerde un control de la barra como enfocado.
     // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.
-    if ((watched == &address_input_ || watched == &back_button_)
+    if ((watched == &address_input_ || watched == &back_button_ || watched == &forward_button_)
         && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::FocusIn)) {
         QWidget* qt_window = address_input_.window();
         if (qt_window->isActiveWindow()) {
