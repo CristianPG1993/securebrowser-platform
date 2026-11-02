@@ -1,8 +1,6 @@
 #pragma once
 
-#include "include/internal/cef_win.h"
-
-#include <functional>
+#include "app/browser_lifecycle.h"
 
 class QApplication;
 
@@ -26,19 +24,11 @@ public:
     int Run(QApplication& qt_app);
 
 private:
-    // Solicita el navegador cuando están disponibles el contexto CEF y el anfitrión Qt.
-    void PrepareBrowserWindowInfo();
-
-    // La sesión vive hasta después de CefShutdown, aunque Run ya haya destruido la ventana.
-    bool cef_context_ready_ = false;
-    HWND browser_host_handle_ = nullptr;
-    CefWindowInfo browser_window_info_;
-    bool browser_window_info_ready_ = false;
-    bool qt_close_requested_ = false;
+    // Vive hasta después de CefShutdown; los callbacks consultan su estado desde Qt.
+    BrowserLifecycle lifecycle_;
     // Referencia no propietaria a los controles; solo se consulta en Qt y se retira antes de destruirlos.
     BrowserWindowUi* window_ui_ = nullptr;
-    // Solo se instala mientras vive la ventana; se retira antes de destruir sus widgets.
-    std::function<void(const CefWindowInfo&)> request_browser_creation_;
+
 };
 
 }  // namespace sbp

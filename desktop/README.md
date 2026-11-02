@@ -119,7 +119,7 @@ junto a su implementación:
 
 | Carpeta | Responsabilidad | Archivos actuales |
 | --- | --- | --- |
-| `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp`, `browser_session.h/.cpp` y `browser_navigation.h/.cpp` y `browser_window_bridge.h/.cpp` |
+| `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp`, `browser_session.h/.cpp` y `browser_navigation.h/.cpp`, `browser_window_bridge.h/.cpp` y `browser_lifecycle.h/.cpp` |
 | `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h`, `browser_client.h` y `browser_client.cpp` |
 | `src/ui/` | Ventana principal, composición de controles Qt y anfitrión nativo del contenido CEF. | `browser_window.h/.cpp`, `browser_window_ui.h/.cpp` y `browser_host.h/.cpp` |
 
@@ -131,6 +131,10 @@ se consulta por referencia en Qt y permanece vivo durante todos los callbacks.
 `BrowserWindowBridge` conecta el tamaño y el foco Qt con el contenido CEF.
 Sus callbacks consultan el estado de la sesión en Qt y publican las operaciones
 en el hilo UI de CEF. El marco retira su callback antes de destruir los controles.
+
+`BrowserLifecycle` prepara la ventana hija, publica creación y cierre en CEF,
+y conserva el estado y el código de salida hasta después de `CefShutdown`.
+La ventana Qt solo acepta cerrar cuando recibe la confirmación de CEF.
 
 `CMakeLists.txt` incorpora esos archivos al target `SecureBrowser` y utiliza
 `src/` como raíz de los includes propios. `main.cpp` sigue siendo la

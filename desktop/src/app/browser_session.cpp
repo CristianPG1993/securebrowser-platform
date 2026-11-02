@@ -7,9 +7,6 @@
 #include "ui/browser_window.h"
 #include "ui/browser_window_ui.h"
 
-#include "include/base/cef_callback.h"
-#include "include/wrapper/cef_closure_task.h"
-
 #include <QApplication>
 #include <QMetaObject>
 #include <QThread>
@@ -21,41 +18,7 @@
 namespace sbp {
 
 void BrowserSession::OnContextInitialized() {
-    std::fprintf(stderr, "CEF context notification received; Qt main thread: %d.\n",
-                 QThread::isMainThread());
-    cef_context_ready_ = true;
-    PrepareBrowserWindowInfo();
-}
-
-// Puede llamarse al recibir el contexto CEF o al crear el anfitrión, en cualquier orden.
-void BrowserSession::PrepareBrowserWindowInfo() {
-    if (!cef_context_ready_ || browser_host_handle_ == nullptr || browser_window_info_ready_
-        || qt_close_requested_) {
-        return;
-    }
-
-    // Medimos el área nativa en píxeles, desde el hilo Qt, para respetar el escalado de Windows.
-    RECT host_bounds{};
-    if (!GetClientRect(browser_host_handle_, &host_bounds)
-        || host_bounds.right <= 0 || host_bounds.bottom <= 0) {
-        std::fputs("CEF window preparation failed: native host area unavailable.\n", stderr);
-        return;
-    }
-
-    // SetAsChild solo rellena los parámetros: todavía no crea ninguna ventana ni navegador CEF.
-    browser_window_info_.SetAsChild(browser_host_handle_,
-        CefRect(0, 0, static_cast<int>(host_bounds.right), static_cast<int>(host_bounds.bottom)));
-    browser_window_info_.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
-    browser_window_info_.windowless_rendering_enabled = false;
-    // Impide preparar dos veces la misma solicitud cuando ambas condiciones ya se cumplen.
-    browser_window_info_ready_ = true;
-    std::fprintf(stderr,
-                 "CEF child window parameters prepared: parent %p; size %dx%d; runtime style %d; Qt main thread: %d.\n",
-                 static_cast<void*>(browser_window_info_.parent_window),
-                 browser_window_info_.bounds.width, browser_window_info_.bounds.height,
-                 static_cast<int>(browser_window_info_.runtime_style), QThread::isMainThread());
-    // Solo ahora están preparados tanto CEF como el anfitrión nativo de Qt.
-    request_browser_creation_(browser_window_info_);
+    lifecycle_.OnContextInitialized();
 }
 
 int BrowserSession::Run(QApplication& qt_app) {
@@ -64,42 +27,14 @@ int BrowserSession::Run(QApplication& qt_app) {
     {
         // La ventana principal contendrá un widget hijo reservado al contenido web.
         sbp::BrowserWindow window;
-        // Esta función puede recibir el aviso de cierre CEF y trasladarlo a la propia ventana Qt.
-        // La ventana debe seguir viva hasta recibir la confirmación; su closeEvent la conserva.
-        const auto confirm_close_on_qt = [this, &window] {
-            // Esta lambda interior confirma el cierre al procesarse en el hilo Qt.
-            const bool queued = QMetaObject::invokeMethod(&window, [this, &window] {
-                // El receptor es window, que sigue vivo; no se muestra ningún diálogo al usuario.
-                std::fprintf(stderr, "Qt close confirmed; native host valid: %d.\n",
-                             IsWindow(browser_host_handle_) != FALSE);
-                window.ConfirmClose();
-            }, Qt::QueuedConnection);
-            if (!queued) {
-                std::fputs("Qt close confirmation could not be queued.\n", stderr);
-            }
-        };
-
-        // El cliente no conserva CefBrowser: sus funciones notifican a Qt sin transferir esa referencia.
-        CefRefPtr<sbp::BrowserClient> browser_client(new sbp::BrowserClient(sbp::BrowserClientCallbacks{
-            // Este callback recibe el identificador en CEF y publica su aviso para Qt.
-            .on_browser_created = [&window](int browser_id) {
-                // CEF invoca esta función en su hilo UI; el identificador se copia a la cola Qt.
-                // La lambda interior solo copia el identificador, sin conservar el navegador.
-                const bool queued = QMetaObject::invokeMethod(&window, [browser_id] {
-                    std::fprintf(stderr, "Qt received browser creation: id %d; Qt main thread: %d.\n",
-                                 browser_id, QThread::isMainThread());
-                }, Qt::QueuedConnection);
-                if (!queued) {
-                    std::fputs("CEF browser creation notification could not be queued to Qt.\n", stderr);
-                }
-            },
-            .on_browser_closed = confirm_close_on_qt,
+        // El ciclo de vida aporta los avisos de creación y cierre; la dirección conserva su puente Qt.
+        CefRefPtr<BrowserClient> browser_client(new BrowserClient(lifecycle_.MakeClientCallbacks(window,
             // CEF entrega una copia de la dirección; esta lambda publica su recepción para Qt.
-            .on_address_changed = [this, &window](std::string address) {
+            [this, &window](std::string address) {
                 // La lambda interior posee la cadena y se ejecutará en el hilo Qt de la ventana.
                 const bool queued = QMetaObject::invokeMethod(&window,
                     [this, address = std::move(address)] {
-                        if (qt_close_requested_ || window_ui_ == nullptr) {
+                        if (lifecycle_.CloseRequested() || window_ui_ == nullptr) {
                             return;
                         }
                         // Ya estamos en Qt: convertimos la copia UTF-8 y actualizamos el control visual.
@@ -110,44 +45,17 @@ int BrowserSession::Run(QApplication& qt_app) {
                 if (!queued) {
                     std::fputs("CEF address notification could not be queued to Qt.\n", stderr);
                 }
-            }
-        }));
+            })));
         std::fputs("CEF browser client prepared.\n", stderr);
-
-        // BindOnce copia los parámetros y conserva el cliente hasta ejecutar la tarea en CEF.
-        request_browser_creation_ = [this, browser_client, &window,
-                                     &qt_exit_code](const CefWindowInfo& window_info) {
-            if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::CreateBrowser,
-                                                   browser_client, window_info))) {
-                std::fputs("CEF browser creation task could not be posted.\n", stderr);
-                // No hay una tarea ni una creación pendiente: Qt puede terminar con error.
-                qt_exit_code = 1;
-                qt_close_requested_ = true;
-                window.ConfirmClose();
-            }
-        };
-
-        // Esta lambda convierte la solicitud de cierre Qt en una tarea para el cliente CEF.
-        window.SetCloseRequestHandler([this, browser_client] {
-            // Impide iniciar una creación posterior si el aviso de contexto aún estaba en la cola Qt.
-            qt_close_requested_ = true;
-            // Qt publica una tarea en TID_UI, el hilo de interfaz de CEF, sin esperar su ejecución.
-            // La captura y BindOnce conservan referencias administradas al cliente, sin copiarlo.
-            // &BrowserClient::RequestClose identifica el método que ejecutará la tarea sobre ese cliente.
-            const bool posted = CefPostTask(TID_UI,
-                base::BindOnce(&sbp::BrowserClient::RequestClose, browser_client));
-            if (!posted) {
-                std::fputs("Qt close request could not be posted to CEF.\n", stderr);
-            }
-        });
+        lifecycle_.Connect(window, browser_client);
 
         // El puente reúne los avisos de tamaño y foco, conservando el estado en la sesión.
-        BrowserWindowBridge window_bridge(browser_client, qt_close_requested_, browser_host_handle_);
+        BrowserWindowBridge window_bridge(browser_client, lifecycle_.CloseRequested(), lifecycle_.HostHandle());
         sbp::BrowserWindowUi window_ui(window, window_bridge.MakeHostCallbacks());
         // Los controles ya existen; el callback encolado podrá acceder a ellos desde el hilo Qt.
         window_ui_ = &window_ui;
         // El módulo de navegación instala sus callbacks; la sesión coordina su vida y el cierre.
-        ConnectBrowserNavigation(window_ui, browser_client, qt_close_requested_);
+        ConnectBrowserNavigation(window_ui, browser_client, lifecycle_.CloseRequested());
         // Usamos el anfitrión creado por la interfaz, sin construir otro ni copiarlo.
         sbp::BrowserHost& browser_host = window_ui.GetBrowserHost();
         window_bridge.Connect(window, window_ui);
@@ -155,30 +63,18 @@ int BrowserSession::Run(QApplication& qt_app) {
         // El área web será el primer destino del teclado cuando esta ventana esté activa.
         browser_host.setFocus(Qt::OtherFocusReason);
 
-        // winId() se consulta en el hilo Qt; en Windows identifica la ventana mediante un HWND.
-        // Conservamos el identificador para preparar los parámetros del navegador hijo.
-        browser_host_handle_ = reinterpret_cast<HWND>(browser_host.winId());
-        std::fprintf(stderr, "Qt native browser host ready: %p.\n",
-                     static_cast<void*>(browser_host_handle_));
-        // Si el aviso CEF ya se procesó, esta llamada completa la preparación; si no, lo hará el aviso.
-        PrepareBrowserWindowInfo();
+        // El ciclo de vida prepara la creación con el identificador nativo del anfitrión.
+        lifecycle_.OnHostReady(reinterpret_cast<HWND>(browser_host.winId()));
 
         // Qt espera y despacha eventos en el principal; CEF mantiene su bucle en su propio hilo.
         // Al cerrar la última ventana, exec() termina y conserva el código de salida de Qt.
         std::fputs("Qt event loop starting with CEF initialized.\n", stderr);
-        const int event_loop_exit_code = qt_app.exec();
-        if (qt_exit_code == 0) {
-            qt_exit_code = event_loop_exit_code;
-        }
+        qt_exit_code = lifecycle_.ExitCode(qt_app.exec());
 
-        // Retiramos el identificador y los parámetros antes de destruir los widgets anfitriones.
-        // Soltamos también la función y su referencia al cliente antes de apagar CEF.
-        request_browser_creation_ = {};
+        // Retiramos las conexiones mientras los widgets siguen vivos.
+        lifecycle_.Detach();
         window_ui_ = nullptr;
         window_bridge.Disconnect(window);
-        browser_host_handle_ = nullptr;
-        browser_window_info_ = CefWindowInfo();
-        browser_window_info_ready_ = false;
     }
     // Al salir del bloque se destruye la ventana, antes de apagar el motor.
     // OnBeforeClose ya ha confirmado el cierre del navegador antes de destruir su anfitrión.
