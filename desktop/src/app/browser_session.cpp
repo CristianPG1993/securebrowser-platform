@@ -1,6 +1,7 @@
 #include "app/browser_session.h"
 
 #include "app/browser_navigation.h"
+#include "app/browser_window_bridge.h"
 
 #include "browser/browser_client.h"
 #include "ui/browser_window.h"
@@ -12,7 +13,6 @@
 #include <QApplication>
 #include <QMetaObject>
 #include <QThread>
-#include <QWidget>
 
 #include <cstdio>
 #include <string>
@@ -141,56 +141,16 @@ int BrowserSession::Run(QApplication& qt_app) {
             }
         });
 
-        // Esta lambda comparte la solicitud de foco entre el anfitrión Qt y el marco nativo.
-        const auto request_browser_focus = [this, browser_client] {
-            if (qt_close_requested_) {
-                return;
-            }
-            if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::FocusBrowser,
-                                                   browser_client))) {
-                std::fputs("Qt focus notification could not be posted to CEF.\n", stderr);
-            }
-        };
-
-        // La clase de interfaz crea y distribuye todos los controles; la sesión aporta sus avisos.
-        // Cada callback conserva una referencia al cliente y conecta el evento Qt con una tarea CEF.
-        sbp::BrowserWindowUi window_ui(window, {
-            // Qt ejecuta esta lambda al redimensionar el anfitrión; solicita ajustar la ventana hija CEF.
-            .on_resized = [this, browser_client] {
-                if (qt_close_requested_) {
-                    return;
-                }
-                // La tarea consulta el área nativa más reciente al ejecutarse en CEF, sin bloquear Qt.
-                if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::ResizeBrowser,
-                                                       browser_client))) {
-                    std::fputs("Qt resize notification could not be posted to CEF.\n", stderr);
-                }
-            },
-            // El aviso Qt reutiliza la misma función que atiende la notificación del marco nativo.
-            .on_focus_requested = request_browser_focus
-        });
+        // El puente reúne los avisos de tamaño y foco, conservando el estado en la sesión.
+        BrowserWindowBridge window_bridge(browser_client, qt_close_requested_, browser_host_handle_);
+        sbp::BrowserWindowUi window_ui(window, window_bridge.MakeHostCallbacks());
         // Los controles ya existen; el callback encolado podrá acceder a ellos desde el hilo Qt.
         window_ui_ = &window_ui;
         // El módulo de navegación instala sus callbacks; la sesión coordina su vida y el cierre.
         ConnectBrowserNavigation(window_ui, browser_client, qt_close_requested_);
         // Usamos el anfitrión creado por la interfaz, sin construir otro ni copiarlo.
         sbp::BrowserHost& browser_host = window_ui.GetBrowserHost();
-        // Esta lambda sincroniza el foco lógico de Qt después de un cambio de foco nativo.
-        window.SetNativeFocusHandler([this, &window, &window_ui, &browser_host, request_browser_focus] {
-            // Consultamos el destino actual, porque el usuario pudo volver a la barra mientras se encolaba el aviso.
-            const HWND native_focus = GetFocus();
-            if (browser_host_handle_ != nullptr
-                && (native_focus == browser_host_handle_ || IsChild(browser_host_handle_, native_focus))) {
-                window_ui.ClearAddressFocus();
-                return;
-            }
-            // Al recuperar el marco, respetamos los controles Qt recordados antes de reenviar foco a CEF.
-            const QWidget* remembered_focus = window.focusWidget();
-            if (remembered_focus == nullptr || remembered_focus == &window
-                || remembered_focus == &browser_host) {
-                request_browser_focus();
-            }
-        });
+        window_bridge.Connect(window, window_ui);
         window.show();
         // El área web será el primer destino del teclado cuando esta ventana esté activa.
         browser_host.setFocus(Qt::OtherFocusReason);
@@ -215,7 +175,7 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Soltamos también la función y su referencia al cliente antes de apagar CEF.
         request_browser_creation_ = {};
         window_ui_ = nullptr;
-        window.SetNativeFocusHandler({});
+        window_bridge.Disconnect(window);
         browser_host_handle_ = nullptr;
         browser_window_info_ = CefWindowInfo();
         browser_window_info_ready_ = false;
