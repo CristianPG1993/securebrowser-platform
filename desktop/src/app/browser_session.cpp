@@ -1,5 +1,7 @@
 #include "app/browser_session.h"
 
+#include "app/browser_navigation.h"
+
 #include "browser/browser_client.h"
 #include "ui/browser_window.h"
 #include "ui/browser_window_ui.h"
@@ -10,7 +12,6 @@
 #include <QApplication>
 #include <QMetaObject>
 #include <QThread>
-#include <QUrl>
 #include <QWidget>
 
 #include <cstdio>
@@ -170,38 +171,8 @@ int BrowserSession::Run(QApplication& qt_app) {
         });
         // Los controles ya existen; el callback encolado podrá acceder a ellos desde el hilo Qt.
         window_ui_ = &window_ui;
-        // Esta lambda recibe el texto al pulsar Enter, directamente en el mismo hilo Qt.
-        window_ui.SetAddressSubmitHandler([this, browser_client](const QString& address) {
-            if (qt_close_requested_) {
-                return;
-            }
-            // Comprobamos la recepción sin registrar la dirección introducida por el usuario.
-            std::fprintf(stderr, "Qt address submitted; length %lld; Qt main thread: %d.\n",
-                         static_cast<long long>(address.size()), QThread::isMainThread());
-
-            // Quitamos espacios exteriores y analizamos la dirección en modo estricto.
-            const QString address_text = address.trimmed();
-            QUrl url(address_text, QUrl::StrictMode);
-            // Si el usuario escribe un servidor sin esquema, usamos HTTPS por defecto: google.com -> https://google.com.
-            if (!address_text.isEmpty() && url.scheme().isEmpty()) {
-                url = QUrl(QStringLiteral("https://") + address_text, QUrl::StrictMode);
-            }
-            // Validamos el resultado completo, tanto si el esquema venía escrito como si lo añadimos.
-            const QString scheme = url.scheme();
-            if (!url.isValid() || url.host().isEmpty()
-                || (scheme != QStringLiteral("http") && scheme != QStringLiteral("https"))) {
-                std::fputs("Qt address rejected: expected an absolute HTTP or HTTPS URL with a host.\n",
-                           stderr);
-                return;
-            }
-            // Serializamos la misma URL que acabamos de validar, conservando su codificación.
-            const std::string target_url = url.toEncoded().toStdString();
-            // BindOnce conserva el cliente y una copia de la dirección hasta ejecutar Navigate en CEF.
-            if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::Navigate,
-                                                   browser_client, target_url))) {
-                std::fputs("Qt navigation request could not be posted to CEF.\n", stderr);
-            }
-        });
+        // El módulo de navegación instala sus callbacks; la sesión coordina su vida y el cierre.
+        ConnectBrowserNavigation(window_ui, browser_client, qt_close_requested_);
         // Usamos el anfitrión creado por la interfaz, sin construir otro ni copiarlo.
         sbp::BrowserHost& browser_host = window_ui.GetBrowserHost();
         // Esta lambda sincroniza el foco lógico de Qt después de un cambio de foco nativo.
