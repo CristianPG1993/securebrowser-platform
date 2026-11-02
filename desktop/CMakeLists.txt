@@ -118,6 +118,8 @@ add_library(SecureBrowser SHARED
     src/browser/browser_app.h
     src/browser/browser_client.cpp
     src/browser/browser_client.h
+    src/browser/browser_history_visitor.cpp
+    src/browser/browser_history_visitor.h
     src/ui/browser_host.cpp
     src/ui/browser_host.h
     src/ui/browser_window.cpp
@@ -136,11 +138,11 @@ target_compile_definitions(SecureBrowser PRIVATE NOMINMAX)
 # La versión del kit ya se exige mediante find_package(Qt6 ... EXACT).
 target_compile_definitions(SecureBrowser PRIVATE QT_NO_VERSION_TAGGING)
 # Carga Qt al crear QApplication en el principal, después de CefExecuteProcess.
-# En Debug, QKeyEvent genera llamadas a QtGui; Release expande estas funciones inline.
-# Diferimos también esas importaciones Debug para no cargar Qt en los subprocesos al arrancar.
+# Los iconos utilizan QtGui en ambas configuraciones; QKeyEvent también lo utiliza en Debug.
+# Diferimos esas importaciones para no cargar Qt en los subprocesos al arrancar.
 target_link_options(SecureBrowser PRIVATE
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Core>"
-    "$<$<CONFIG:Debug>:/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Gui>>"
+    "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Gui>"
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Widgets>"
 )
 # Carga estas DLL de Windows al usarlas, después de distinguir los subprocesos de CEF.

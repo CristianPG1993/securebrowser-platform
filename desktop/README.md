@@ -28,7 +28,7 @@ solicita cuando el contexto CEF y el anfitrión Qt están disponibles.
 `sbp_toolchain_check` conserva una ventana Qt independiente como comprobación
 básica del kit.
 `BrowserApp` recibe el aviso de contexto preparado y `BrowserClient` contiene
-los handlers (receptores de avisos) de vida y dirección del único navegador.
+los handlers (receptores de avisos) de vida, dirección e historial del único navegador.
 Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes.
 Los primeros bloques de #90 añaden un campo Qt editable encima del contenido
 web. Enter entrega su texto a `BrowserSession` mediante un callback en el mismo
@@ -41,10 +41,22 @@ sea HTTP o HTTPS. La dirección aceptada se codifica y se envía mediante
 Las tareas conservan el cliente y la dirección, y el cliente consulta una
 referencia temporal al navegador; no se transfieren widgets Qt al hilo CEF.
 Los diagnósticos no registran la dirección. La barra muestra la URL real
-notificada por CEF; los botones se incorporarán en los siguientes bloques.
+notificada por CEF. El botón Atrás muestra una flecha estándar Qt, con tooltip
+«Atrás» y nombre accesible «Volver a la página anterior». Utiliza la señal Qt `clicked` para ejecutar
+la acción guardada mediante `SetBackRequestHandler`. La acción encola
+`BrowserClient::GoBack`, que delega el retroceso en el controlador de CEF.
+`CefLoadHandler::OnLoadingStateChange` y los cambios de dirección consultan la
+entrada actual mediante `GetNavigationEntries` y `BrowserHistoryVisitor`.
+El visitante entrega solo si su índice es mayor que cero; Qt recibe ese booleano
+y habilita o deshabilita el botón en su propio hilo. No se espera a que terminen
+de cargar imágenes u otros recursos. `CanGoBack` puede conservar el estado anterior
+durante esa carga; la operación `GoBack` mantiene su propia comprobación interna.
+La señal se obtiene de los metadatos Qt en tiempo de ejecución para mantener
+la carga diferida de las bibliotecas en el bootstrap. Ratón y teclado conservan
+el comportamiento normal de `QPushButton`.
 El primer bloque de esa actualización implementa `CefDisplayHandler` y recibe
 `OnAddressChange` solo para el frame principal de la instancia registrada.
-`BrowserClientCallbacks` agrupa los avisos de creación, cierre y dirección.
+`BrowserClientCallbacks` agrupa los avisos de creación, cierre, dirección e historial.
 El aviso de dirección entrega una copia UTF-8 a la sesión, que la conserva en
 una lambda encolada sobre la ventana Qt. La recepción convierte el texto a
 `QString` y llama a `BrowserWindowUi::SetAddress`, que actualiza el `QLineEdit`.
@@ -112,6 +124,23 @@ longitudes coinciden con las direcciones ASCII de la prueba. Los cambios del
 iframe siguen filtrándose. También se han verificado los avisos de creación,
 el cierre con anfitrión válido, salida `0` y ausencia de procesos restantes.
 
+El botón Atrás se ha comprobado con clic y Espacio en Debug y Release. En Debug,
+la prueba navegó a una página HTTP local con Enter, siguió un enlace y retrocedió
+entre documentos hasta deshabilitar el botón en la primera entrada. En Release,
+se comprobó también el retroceso desde un enlace real a un fragmento local.
+Ambas configuraciones cerraron con salida `0` y sin procesos restantes. Una prueba
+Qt aislada verificó además el estado deshabilitado y un callback vacío. Las
+importaciones Qt siguen siendo diferidas en Debug y Release.
+
+Para reproducir la demora con páginas pesadas se utilizó un servidor local:
+el documento se entrega inmediatamente y una imagen tarda ocho segundos.
+Antes del ajuste, el documento estaba disponible a los 60 ms y Atrás se habilitaba
+a los 8154 ms. Con la consulta de la entrada actual, se habilitó a los 62 ms en
+Debug y a los 36 ms en Release, antes del final de carga en ambas configuraciones.
+También se comprobó en Debug un clic real en Atrás con el documento todavía
+cargando: regresó a la página anterior. Son mediciones de esta prueba local;
+no representan el tiempo de arranque de CEF ni la velocidad de un sitio externo.
+
 ## Organización del código
 
 El código de la aplicación se agrupa dentro de `src/`, conservando cada header
@@ -120,7 +149,7 @@ junto a su implementación:
 | Carpeta | Responsabilidad | Archivos actuales |
 | --- | --- | --- |
 | `src/app/` | Arranque y coordinación de Qt y CEF. | `app_entry_win.cpp`, `browser_session.h/.cpp` y `browser_navigation.h/.cpp`, `browser_window_bridge.h/.cpp` y `browser_lifecycle.h/.cpp` |
-| `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h/.cpp` y `browser_client.h/.cpp` |
+| `src/browser/` | Objetos propios que atienden los avisos de CEF. | `browser_app.h/.cpp`, `browser_client.h/.cpp` y `browser_history_visitor.h/.cpp` |
 | `src/ui/` | Ventana principal, composición de controles Qt y anfitrión nativo del contenido CEF. | `browser_window.h/.cpp`, `browser_window_ui.h/.cpp` y `browser_host.h/.cpp` |
 
 `browser_navigation.h/.cpp` reúne las conexiones de los controles, la validación
@@ -128,8 +157,8 @@ de direcciones y el envío de operaciones al hilo UI de CEF. La sesión conserva
 la composición de módulos, el bucle Qt y la vida de los objetos. El estado de cierre
 se consulta por referencia en Qt y permanece vivo durante todos los callbacks.
 
-`BrowserNavigation::Connect` delega cada control en un método privado,
-como `ConnectAddressControl` para la barra de dirección.
+`BrowserNavigation::Connect` delega cada control en un método privado:
+`ConnectAddressControl` para la dirección y `ConnectBackControl` para Atrás.
 La clase declara su interfaz pública y sus métodos privados en el header,
 y mantiene sus implementaciones en el `.cpp`.
 
@@ -650,14 +679,13 @@ y no quedaron auxiliares tras el margen de cinco segundos.
 
 Las clases propias se definen en [`browser_app.h`](src/browser/browser_app.h) y
 [`browser_client.h`](src/browser/browser_client.h), dentro del namespace `sbp`.
-`BrowserApp` mantiene sus métodos en el header. `BrowserClient` declara sus
-métodos en el header y los implementa en [`browser_client.cpp`](src/browser/browser_client.cpp).
+Ambas clases declaran sus métodos en el header y los implementan en su `.cpp`.
 Ninguna de las dos clases crea objetos Qt.
 
 | Objeto | Papeles | Avisos preparados |
 | --- | --- | --- |
 | `BrowserApp` | `CefApp` y `CefBrowserProcessHandler` | `OnContextInitialized`: contexto global preparado, sin argumentos, en el hilo UI de CEF. |
-| `BrowserClient` | `CefClient` y `CefLifeSpanHandler` | `OnAfterCreated`: navegador ya creado; `OnBeforeClose`: fase final del cierre. Reciben un `CefRefPtr<CefBrowser>`. |
+| `BrowserClient` | `CefClient`, `CefLifeSpanHandler`, `CefDisplayHandler` y `CefLoadHandler` | Recibe creación, cierre, URL del documento principal y estado del historial. Los callbacks de navegación envían texto o booleanos a Qt. |
 
 `GetBrowserProcessHandler` y `GetLifeSpanHandler` devuelven `this` mediante
 `CefRefPtr`: el mismo objeto visto como receptor de avisos, sin construir ni
@@ -834,6 +862,8 @@ CEF shutdown completed.
 una tarea CEF que ejecuta `on_browser_closed` después de regresar del callback;
 esa función encola `ConfirmClose` en la ventana principal. `OnAddressChange`
 entrega una copia UTF-8 a `on_address_changed`, que encola su recepción en Qt.
+`OnLoadingStateChange` y `OnAddressChange` notifican la disponibilidad de Atrás
+a `on_back_availability_changed`, que encola el estado del botón en Qt.
 `NotifyClosed` evita publicar dos confirmaciones.
 El cliente no guarda un `CefBrowser`
 ni transfiere esa referencia a las funciones encoladas.

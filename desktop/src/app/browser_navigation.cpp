@@ -17,11 +17,38 @@
 
 namespace sbp {
 
+BrowserClientCallbacks BrowserNavigation::MakeCallbacks(
+    BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const {
+    // Preparamos el bloque con la misma sintaxis que utilizará BrowserLifecycle al completarlo.
+    BrowserClientCallbacks callbacks{};
+    callbacks.on_address_changed = MakeAddressHandler(window, window_ui, close_requested);
+    callbacks.on_back_availability_changed = MakeBackAvailabilityHandler(window, window_ui, close_requested);
+    return callbacks;
+}
+
 void BrowserNavigation::Connect(BrowserWindowUi& window_ui,
                                  CefRefPtr<BrowserClient> browser_client,
                                  const bool& close_requested) const {
     // El método público coordina las conexiones; cada control mantiene su implementación separada.
+    ConnectBackControl(window_ui, browser_client, close_requested);
     ConnectAddressControl(window_ui, browser_client, close_requested);
+}
+
+// Conecta únicamente la petición Atrás; el método es privado en BrowserNavigation.
+void BrowserNavigation::ConnectBackControl(BrowserWindowUi& window_ui,
+                                           const CefRefPtr<BrowserClient>& browser_client,
+                                           const bool& close_requested) const {
+    // Esta lambda recibe la petición Atrás en Qt y publica la operación en el hilo UI de CEF.
+    window_ui.SetBackRequestHandler([browser_client, &close_requested] {
+        // Una activación tardía no debe iniciar navegación durante el cierre de la ventana.
+        if (close_requested) {
+            return;
+        }
+        // BindOnce conserva el cliente hasta ejecutar su método GoBack en CEF.
+        if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::GoBack, browser_client))) {
+            std::fputs("Qt back navigation request could not be posted to CEF.\n", stderr);
+        }
+    });
 }
 
 // Conecta únicamente la barra de dirección, con su validación y envío de navegación a CEF.
@@ -78,6 +105,26 @@ std::function<void(std::string)> BrowserNavigation::MakeAddressHandler(
             }, Qt::QueuedConnection);
         if (!queued) {
             std::fputs("CEF address notification could not be queued to Qt.\n", stderr);
+        }
+    };
+}
+
+std::function<void(bool)> BrowserNavigation::MakeBackAvailabilityHandler(
+    BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const {
+    // CEF entrega un valor simple; esta lambda publica la actualización para la ventana Qt.
+    return [&window, &window_ui, &close_requested](bool available) {
+        // Solo el hilo Qt consulta los controles y modifica la disponibilidad del botón.
+        const bool queued = QMetaObject::invokeMethod(&window,
+            [&window_ui, &close_requested, available] {
+                if (close_requested || window_ui == nullptr) {
+                    return;
+                }
+                window_ui->SetBackAvailable(available);
+                std::fprintf(stderr, "Qt back availability updated; available: %d; Qt main thread: %d.\n",
+                             available, QThread::isMainThread());
+            }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF back availability could not be queued to Qt.\n", stderr);
         }
     };
 }

@@ -8,6 +8,7 @@
 namespace sbp {
 
 class BrowserClient;
+struct BrowserClientCallbacks;
 class BrowserWindow;
 class BrowserWindowUi;
 
@@ -19,12 +20,21 @@ public:
     void Connect(BrowserWindowUi& window_ui, CefRefPtr<BrowserClient> browser_client,
                  const bool& close_requested) const;
 
-    // Prepara el aviso CEF→Qt; el receptor es la ventana y el puntero se consulta por referencia.
-    std::function<void(std::string)> MakeAddressHandler(
+    // Agrupa los avisos de dirección e historial, conservando un único bloque de callbacks.
+    BrowserClientCallbacks MakeCallbacks(
         BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
 
 private:
+    // Prepara los avisos CEF→Qt sin transferir referencias a objetos del navegador.
+    std::function<void(std::string)> MakeAddressHandler(
+        BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
+    std::function<void(bool)> MakeBackAvailabilityHandler(
+        BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
+
     // Cada método instala únicamente la acción correspondiente a su control Qt.
+    void ConnectBackControl(BrowserWindowUi& window_ui,
+                            const CefRefPtr<BrowserClient>& browser_client,
+                            const bool& close_requested) const;
     void ConnectAddressControl(BrowserWindowUi& window_ui,
                                const CefRefPtr<BrowserClient>& browser_client,
                                const bool& close_requested) const;

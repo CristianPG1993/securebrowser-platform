@@ -1,5 +1,7 @@
 #include "browser_client.h"
 
+#include "browser/browser_history_visitor.h"
+
 #include "include/base/cef_callback.h"
 #include "include/cef_frame.h"
 #include "include/wrapper/cef_closure_task.h"
@@ -22,6 +24,10 @@ CefRefPtr<CefLifeSpanHandler> BrowserClient::GetLifeSpanHandler() {
 
 CefRefPtr<CefDisplayHandler> BrowserClient::GetDisplayHandler() {
     // Devolvemos una referencia al cliente existente, visto como manejador de presentación.
+    return this;
+}
+
+CefRefPtr<CefLoadHandler> BrowserClient::GetLoadHandler() {
     return this;
 }
 
@@ -67,6 +73,24 @@ void BrowserClient::Navigate(std::string url) {
     // LoadURL solicita la carga asíncrona; CEF mantiene sus comprobaciones normales de certificados.
     frame->LoadURL(CefString(url));
     std::fprintf(stderr, "CEF navigation requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
+}
+
+void BrowserClient::GoBack() {
+    CEF_REQUIRE_UI_THREAD();
+    // Una tarea tardía no debe actuar sobre un navegador inexistente o que ya se está cerrando.
+    if (browser_id_ == -1 || close_requested_) {
+        return;
+    }
+    // Consultamos la instancia registrada sin conservar una referencia permanente al navegador.
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        return;
+    }
+    // CanGoBack puede conservar el estado anterior mientras se cargan recursos de la nueva página.
+    // GoBack consulta el controlador real de CEF y no retrocede si no existe una entrada anterior.
+    // Los cambios de URL seguirán llegando por OnAddressChange.
+    browser->GoBack();
+    std::fprintf(stderr, "CEF back navigation requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
 }
 
 void BrowserClient::ResizeBrowser() {
@@ -176,6 +200,26 @@ void BrowserClient::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<Cef
     if (callbacks_.on_address_changed) {
         // ToString crea una cadena UTF-8 propia que seguirá viva fuera de este callback CEF.
         callbacks_.on_address_changed(url.ToString());
+    }
+    // Incluye cambios dentro del mismo documento, como enlaces a fragmentos o history.pushState.
+    RefreshBackAvailability(browser);
+}
+
+void BrowserClient::OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool, bool, bool) {
+    CEF_REQUIRE_UI_THREAD();
+    if (close_requested_ || !browser || browser->GetIdentifier() != browser_id_) {
+        return;
+    }
+    RefreshBackAvailability(browser);
+}
+
+void BrowserClient::RefreshBackAvailability(CefRefPtr<CefBrowser> browser) {
+    CEF_REQUIRE_UI_THREAD();
+    if (callbacks_.on_back_availability_changed) {
+        // El estado de CanGoBack puede actualizarse al terminar la carga de todos los recursos.
+        // La instantánea obtiene el índice actual del historial en este mismo hilo UI.
+        browser->GetHost()->GetNavigationEntries(
+            new BrowserHistoryVisitor(callbacks_.on_back_availability_changed), true);
     }
 }
 

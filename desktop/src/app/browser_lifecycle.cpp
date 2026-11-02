@@ -52,33 +52,31 @@ void BrowserLifecycle::PrepareBrowserWindowInfo() {
 }
 
 BrowserClientCallbacks BrowserLifecycle::MakeClientCallbacks(
-    BrowserWindow& window, std::function<void(std::string)> on_address_changed) {
-    return {
-        // CEF entrega solo el identificador; Qt recibe una copia mediante su cola de eventos.
-        .on_browser_created = [&window](int browser_id) {
-            // Esta lambda interior pertenece al hilo Qt y no conserva objetos del navegador.
-            const bool queued = QMetaObject::invokeMethod(&window, [browser_id] {
-                std::fprintf(stderr, "Qt received browser creation: id %d; Qt main thread: %d.\n",
-                             browser_id, QThread::isMainThread());
-            }, Qt::QueuedConnection);
-            if (!queued) {
-                std::fputs("CEF browser creation notification could not be queued to Qt.\n", stderr);
-            }
-        },
-        // El cierre CEF publica su confirmación; Qt mantiene la ventana viva hasta recibirla.
-        .on_browser_closed = [this, &window] {
-            // Solo Qt consulta el anfitrión y confirma el cierre de su ventana.
-            const bool queued = QMetaObject::invokeMethod(&window, [this, &window] {
-                std::fprintf(stderr, "Qt close confirmed; native host valid: %d.\n",
-                             IsWindow(host_handle_) != FALSE);
-                window.ConfirmClose();
-            }, Qt::QueuedConnection);
-            if (!queued) {
-                std::fputs("Qt close confirmation could not be queued.\n", stderr);
-            }
-        },
-        .on_address_changed = std::move(on_address_changed)
+    BrowserWindow& window, BrowserClientCallbacks callbacks) {
+    // CEF entrega solo el identificador; Qt recibe una copia mediante su cola de eventos.
+    callbacks.on_browser_created = [&window](int browser_id) {
+        // Esta lambda interior pertenece al hilo Qt y no conserva objetos del navegador.
+        const bool queued = QMetaObject::invokeMethod(&window, [browser_id] {
+            std::fprintf(stderr, "Qt received browser creation: id %d; Qt main thread: %d.\n",
+                         browser_id, QThread::isMainThread());
+        }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF browser creation notification could not be queued to Qt.\n", stderr);
+        }
     };
+    // El cierre CEF publica su confirmación; Qt mantiene la ventana viva hasta recibirla.
+    callbacks.on_browser_closed = [this, &window] {
+        // Solo Qt consulta el anfitrión y confirma el cierre de su ventana.
+        const bool queued = QMetaObject::invokeMethod(&window, [this, &window] {
+            std::fprintf(stderr, "Qt close confirmed; native host valid: %d.\n",
+                         IsWindow(host_handle_) != FALSE);
+            window.ConfirmClose();
+        }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("Qt close confirmation could not be queued.\n", stderr);
+        }
+    };
+    return callbacks;
 }
 
 void BrowserLifecycle::Connect(BrowserWindow& window, CefRefPtr<BrowserClient> browser_client) {

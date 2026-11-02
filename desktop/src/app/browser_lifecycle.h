@@ -17,9 +17,9 @@ public:
     void OnContextInitialized();
     void OnHostReady(HWND host_handle);
 
-    // Instala los avisos de vida; el módulo de navegación proporciona el aviso de dirección.
+    // Añade los avisos de vida al bloque de callbacks que prepara el módulo de navegación.
     BrowserClientCallbacks MakeClientCallbacks(
-        BrowserWindow& window, std::function<void(std::string)> on_address_changed);
+        BrowserWindow& window, BrowserClientCallbacks callbacks);
     void Connect(BrowserWindow& window, CefRefPtr<BrowserClient> browser_client);
 
     // Retira referencias al cliente y al anfitrión antes de destruir la ventana.

@@ -26,10 +26,10 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Paso 4.1: Creamos el coordinador de navegación que prepara y conecta sus callbacks.
         BrowserNavigation navigation;
         // Paso 5: Preparamos los callbacks, creamos BrowserClient y conservamos una referencia administrada.
-        // MakeAddressHandler devuelve la lambda de dirección; MakeClientCallbacks la reúne con creación y cierre.
+        // MakeCallbacks agrupa los avisos de navegación; MakeClientCallbacks añade creación y cierre.
         // El constructor guarda esas funciones: sus avisos se ejecutarán después; aún no creamos el navegador CEF.
         CefRefPtr<BrowserClient> browser_client(new BrowserClient(lifecycle_.MakeClientCallbacks(
-            window, navigation.MakeAddressHandler(window, window_ui_, lifecycle_.CloseRequested()))));
+            window, navigation.MakeCallbacks(window, window_ui_, lifecycle_.CloseRequested()))));
 
         std::fputs("CEF browser client prepared.\n", stderr);
 

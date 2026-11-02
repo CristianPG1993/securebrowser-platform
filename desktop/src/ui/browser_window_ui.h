@@ -2,8 +2,10 @@
 
 #include "ui/browser_host.h"
 
+#include <QHBoxLayout>
 #include <QLineEdit>
 #include <QObject>
+#include <QPushButton>
 #include <QVBoxLayout>
 
 #include <functional>
@@ -35,14 +37,30 @@ public:
     // Guarda la función que recibirá el texto al pulsar Enter; instalarla no la ejecuta.
     void SetAddressSubmitHandler(std::function<void(const QString&)> on_address_submitted);
 
+    // Guarda la función que atenderá la petición de volver atrás; instalarla no navega.
+    void SetBackRequestHandler(std::function<void()> on_back_requested);
+
+    // CEF comunica su historial mediante una tarea Qt; el botón refleja si se puede retroceder.
+    void SetBackAvailable(bool available);
+
 protected:
     // Qt entrega aquí los eventos del campo donde instalamos este objeto como filtro.
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+    // Conecta la activación normal del botón Qt con la acción proporcionada por la sesión.
+    void ConnectBackButton();
+    void RequestBack();
+
     // El orden permite destruir los controles antes del layout y de la ventana que los contiene.
-    // Layout vertical que distribuye el campo de dirección arriba y el contenido web debajo.
+    // Layout vertical que coloca la barra de navegación arriba y el contenido web debajo.
     QVBoxLayout window_layout_;
+
+    // Fila horizontal que reúne el botón Atrás y el campo de dirección.
+    QHBoxLayout navigation_layout_;
+
+    // Botón de navegación; CEF determina su disponibilidad a partir del historial.
+    QPushButton back_button_;
 
     // Campo de texto Qt donde el usuario escribe y edita la dirección web.
     QLineEdit address_input_;
@@ -55,6 +73,9 @@ private:
 
     // Aviso síncrono de la interfaz a la sesión; ambos trabajan en el hilo principal Qt.
     std::function<void(const QString&)> on_address_submitted_;
+
+    // Acción que la sesión proporcionará para solicitar el retroceso, sin exponer CEF a la interfaz.
+    std::function<void()> on_back_requested_;
 };
 
 }  // namespace sbp
