@@ -46,6 +46,12 @@ public:
     // Guarda la acción Adelante; la sesión la proporcionará al conectar este control con CEF.
     void SetForwardRequestHandler(std::function<void()> on_forward_requested);
 
+    // Guarda la acción Recargar; la sesión la proporcionará al conectar este control con CEF.
+    void SetReloadRequestHandler(std::function<void()> on_reload_requested);
+
+    // Actualiza en Qt si se puede recargar la página actual.
+    void SetReloadAvailable(bool available);
+
     // Actualiza en Qt si existe una entrada posterior en el historial.
     void SetForwardAvailable(bool available);
 
@@ -59,6 +65,8 @@ private:
     void RequestBack();
     void ConnectForwardButton();
     void RequestForward();
+    void ConnectReloadButton();
+    void RequestReload();
 
     // El orden permite destruir los controles antes del layout y de la ventana que los contiene.
     // Layout vertical que coloca la barra de navegación arriba y el contenido web debajo.
@@ -72,6 +80,9 @@ private:
 
     // Flecha Adelante; empieza deshabilitada hasta recibir la disponibilidad desde CEF.
     QPushButton forward_button_;
+
+    // Botón Recargar; empieza deshabilitado hasta recibir la disponibilidad desde CEF.
+    QPushButton reload_button_;
 
     // Campo de texto Qt donde el usuario escribe y edita la dirección web.
     QLineEdit address_input_;
@@ -90,6 +101,9 @@ private:
 
     // Acción para avanzar en el historial; se ejecuta únicamente al activar la flecha Adelante.
     std::function<void()> on_forward_requested_;
+
+    // Acción para recargar la página; se ejecuta únicamente al activar el botón Recargar.
+    std::function<void()> on_reload_requested_;
 };
 
 }  // namespace sbp

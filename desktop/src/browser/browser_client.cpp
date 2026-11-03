@@ -116,6 +116,19 @@ void BrowserClient::GoForward() {
     browser->GoForward();
 }
 
+void BrowserClient::ReloadPage() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_id_ == -1 || close_requested_) {
+        return;
+    }
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        return;
+    }
+    browser->Reload();
+    std::fprintf(stderr, "CEF reload requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
+}
+
 void BrowserClient::ResizeBrowser() {
     CEF_REQUIRE_UI_THREAD();
     // Un aviso puede llegar antes de OnAfterCreated o mientras se está cerrando la ventana.
@@ -255,12 +268,14 @@ void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
 
 void BrowserClient::RefreshNavigationAvailability(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
-    if (callbacks_.on_back_availability_changed || callbacks_.on_forward_availability_changed) {
+    if (callbacks_.on_back_availability_changed || callbacks_.on_forward_availability_changed
+        || callbacks_.on_reload_availability_changed) {
         // CanGoBack y CanGoForward pueden actualizarse al terminar la carga de todos los recursos.
         // La instantánea obtiene el índice actual del historial en este mismo hilo UI.
         browser->GetHost()->GetNavigationEntries(
             new BrowserHistoryVisitor(callbacks_.on_back_availability_changed,
-                                      callbacks_.on_forward_availability_changed), true);
+                                      callbacks_.on_forward_availability_changed,
+                                      callbacks_.on_reload_availability_changed), true);
     }
 }
 

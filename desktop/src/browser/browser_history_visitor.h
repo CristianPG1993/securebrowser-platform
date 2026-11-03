@@ -10,7 +10,8 @@ namespace sbp {
 class BrowserHistoryVisitor final : public CefNavigationEntryVisitor {
 public:
     explicit BrowserHistoryVisitor(std::function<void(bool)> on_back_available,
-                                   std::function<void(bool)> on_forward_available);
+                                   std::function<void(bool)> on_forward_available,
+                                   std::function<void(bool)> on_reload_available);
     BrowserHistoryVisitor(const BrowserHistoryVisitor&) = delete;
     BrowserHistoryVisitor& operator=(const BrowserHistoryVisitor&) = delete;
 
@@ -24,6 +25,7 @@ private:
     // Cada aviso conserva su propia función; los destinatarios publicarán solo booleanos en Qt.
     const std::function<void(bool)> on_back_available_;
     const std::function<void(bool)> on_forward_available_;
+    const std::function<void(bool)> on_reload_available_;
     IMPLEMENT_REFCOUNTING(BrowserHistoryVisitor);
 };
 

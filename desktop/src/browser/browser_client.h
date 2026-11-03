@@ -19,6 +19,8 @@ struct BrowserClientCallbacks {
     std::function<void(bool)> on_back_availability_changed;
     // Adelante tiene su aviso propio; utiliza la misma consulta de la entrada actual.
     std::function<void(bool)> on_forward_availability_changed;
+    // Recargar se habilita cuando la consulta encuentra una entrada en el historial.
+    std::function<void(bool)> on_reload_availability_changed;
 };
 
 // Crea una única instancia del navegador y recibe sus avisos de vida, dirección e historial.
@@ -56,6 +58,9 @@ public:
 
     // Solicita avanzar a la siguiente entrada del historial, desde el hilo UI de CEF.
     void GoForward();
+
+    // Solicita recargar la página actual, desde el hilo UI de CEF.
+    void ReloadPage();
 
     // Ajusta la ventana hija al área nativa actual de su padre, desde el hilo UI de CEF.
     void ResizeBrowser();

@@ -20,6 +20,7 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
       window_layout_(&window),
       back_button_(&window),
       forward_button_(&window),
+      reload_button_(&window),
       address_input_(&window),
       browser_host_(std::move(host_callbacks), &window) {
     // Aquí se configura el aspecto inicial de la ventana y la distribución de sus controles.
@@ -46,6 +47,15 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     forward_button_.installEventFilter(this);
     ConnectForwardButton();
 
+    // CEF habilitará Recargar cuando exista una entrada en el historial, aunque siga cargando.
+    reload_button_.setObjectName("reload_button");
+    reload_button_.setIcon(window.style()->standardIcon(QStyle::SP_BrowserReload));
+    reload_button_.setToolTip("Recargar");
+    reload_button_.setAccessibleName("Recargar la página actual");
+    reload_button_.setEnabled(false);
+    reload_button_.installEventFilter(this);
+    ConnectReloadButton();
+
     // El campo permite editar una dirección; Enter avisará a la sesión mediante su callback.
     address_input_.setObjectName("address_input");
     address_input_.setAccessibleName("Dirección web");
@@ -57,6 +67,7 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     // Las flechas quedan a la izquierda; el factor 1 reserva el espacio restante a la dirección.
     navigation_layout_.addWidget(&back_button_);
     navigation_layout_.addWidget(&forward_button_);
+    navigation_layout_.addWidget(&reload_button_);
     navigation_layout_.addWidget(&address_input_, 1);
     // El layout principal mantiene la barra completa encima del contenido web.
     window_layout_.addLayout(&navigation_layout_);
@@ -105,6 +116,10 @@ void BrowserWindowUi::SetForwardRequestHandler(std::function<void()> on_forward_
     on_forward_requested_ = std::move(on_forward_requested);
 }
 
+void BrowserWindowUi::SetReloadRequestHandler(std::function<void()> on_reload_requested) {
+    on_reload_requested_ = std::move(on_reload_requested);
+}
+
 void BrowserWindowUi::SetForwardAvailable(bool available) {
     forward_button_.setEnabled(available);
 }
@@ -141,6 +156,27 @@ void BrowserWindowUi::ConnectForwardButton() {
     }
 }
 
+void BrowserWindowUi::ConnectReloadButton() {
+    const QMetaObject* button_meta = reload_button_.metaObject();
+    const int clicked_index = button_meta->indexOfSignal("clicked(bool)");
+    // La señal Qt delega la activación del botón en nuestro método privado.
+    const auto connection = QMetaObject::connect(&reload_button_, button_meta->method(clicked_index),
+                                                this, [this] { RequestReload(); });
+    if (!connection) {
+        std::fputs("Qt reload button activation could not be connected.\n", stderr);
+    }
+}
+
+void BrowserWindowUi::RequestReload() {
+    if (on_reload_requested_) {
+        on_reload_requested_();
+    }
+}
+
+void BrowserWindowUi::SetReloadAvailable(bool available) {
+    reload_button_.setEnabled(available);
+}
+
 void BrowserWindowUi::RequestForward() {
     // Qt reconoce la activación; ejecutamos la acción que instaló el coordinador de navegación.
     if (on_forward_requested_) {
@@ -155,7 +191,8 @@ bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
     }
     // CEF puede conservar el foco nativo aunque Qt recuerde un control de la barra como enfocado.
     // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.
-    if ((watched == &address_input_ || watched == &back_button_ || watched == &forward_button_)
+    if ((watched == &address_input_ || watched == &back_button_ || watched == &forward_button_
+         || watched == &reload_button_)
         && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::FocusIn)) {
         QWidget* qt_window = address_input_.window();
         if (qt_window->isActiveWindow()) {

@@ -47,11 +47,16 @@ la acción guardada mediante `SetBackRequestHandler`. La acción encola
 `BrowserClient::GoBack`, que delega el retroceso en el controlador de CEF.
 La flecha Adelante usa `SetForwardRequestHandler` y `BrowserClient::GoForward`
 para avanzar por el mismo historial después de retroceder.
+El botón Recargar guarda su acción con `SetReloadRequestHandler`; el coordinador
+publica `BrowserClient::ReloadPage` en CEF, donde `CefBrowser::Reload` solicita
+recargar la página actual.
 `CefLoadHandler::OnLoadingStateChange` y los cambios de dirección consultan la
 entrada actual mediante `GetNavigationEntries` y `BrowserHistoryVisitor`.
 El visitante calcula Atrás con `index > 0` y Adelante con `index + 1 < total`.
-Los avisos `on_back_availability_changed` y `on_forward_availability_changed`
-encolan esos booleanos en Qt para actualizar sus respectivos botones.
+Recargar se habilita cuando existe una entrada (`total > 0`). Los avisos
+`on_back_availability_changed`, `on_forward_availability_changed` y
+`on_reload_availability_changed` encolan esos booleanos en Qt para actualizar
+sus respectivos botones.
 No se espera a que terminen
 de cargar imágenes u otros recursos. `CanGoBack` puede conservar el estado anterior
 durante esa carga; la operación `GoBack` mantiene su propia comprobación interna.
@@ -166,7 +171,8 @@ la composición de módulos, el bucle Qt y la vida de los objetos. El estado de 
 se consulta por referencia en Qt y permanece vivo durante todos los callbacks.
 
 `BrowserNavigation::Connect` delega cada control en un método privado:
-`ConnectAddressControl` para la dirección y `ConnectBackControl` para Atrás.
+`ConnectAddressControl` para la dirección, `ConnectBackControl` para Atrás,
+`ConnectForwardControl` para Adelante y `ConnectReloadControl` para Recargar.
 La clase declara su interfaz pública y sus métodos privados en el header,
 y mantiene sus implementaciones en el `.cpp`.
 
@@ -872,7 +878,8 @@ esa función encola `ConfirmClose` en la ventana principal. `OnAddressChange`
 entrega una copia UTF-8 a `on_address_changed`, que encola su recepción en Qt.
 `OnLoadingStateChange` y `OnAddressChange` solicitan `RefreshNavigationAvailability`.
 El visitante notifica Atrás a `on_back_availability_changed` y Adelante a
-`on_forward_availability_changed`; cada función encola el estado de su botón en Qt.
+`on_forward_availability_changed`, y la disponibilidad de Recargar a
+`on_reload_availability_changed`; cada función encola el estado de su botón en Qt.
 `NotifyClosed` evita publicar dos confirmaciones.
 El cliente no guarda un `CefBrowser`
 ni transfiere esa referencia a las funciones encoladas.

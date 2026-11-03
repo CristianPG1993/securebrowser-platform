@@ -24,6 +24,7 @@ BrowserClientCallbacks BrowserNavigation::MakeCallbacks(
     callbacks.on_address_changed = MakeAddressHandler(window, window_ui, close_requested);
     callbacks.on_back_availability_changed = MakeBackAvailabilityHandler(window, window_ui, close_requested);
     callbacks.on_forward_availability_changed = MakeForwardAvailabilityHandler(window, window_ui, close_requested);
+    callbacks.on_reload_availability_changed = MakeReloadAvailabilityHandler(window, window_ui, close_requested);
     return callbacks;
 }
 
@@ -33,6 +34,7 @@ void BrowserNavigation::Connect(BrowserWindowUi& window_ui,
     // El método público coordina las conexiones; cada control mantiene su implementación separada.
     ConnectBackControl(window_ui, browser_client, close_requested);
     ConnectForwardControl(window_ui, browser_client, close_requested);
+    ConnectReloadControl(window_ui, browser_client, close_requested);
     ConnectAddressControl(window_ui, browser_client, close_requested);
 }
 
@@ -66,6 +68,22 @@ void BrowserNavigation::ConnectForwardControl(BrowserWindowUi& window_ui,
         // BindOnce conserva el cliente hasta ejecutar su método GoForward en CEF.
         if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::GoForward, browser_client))) {
             std::fputs("Qt forward navigation request could not be posted to CEF.\n", stderr);
+        }
+    });
+}
+
+void BrowserNavigation::ConnectReloadControl(BrowserWindowUi& window_ui,
+                                            const CefRefPtr<BrowserClient>& browser_client,
+                                            const bool& close_requested) const {
+    // Esta lambda recibe Recargar en Qt y publica su ejecución en el hilo UI de CEF.
+    window_ui.SetReloadRequestHandler([browser_client, &close_requested] {
+        // Ignoramos una activación tardía si ya se ha solicitado cerrar la ventana.
+        if (close_requested) {
+            return;
+        }
+        // BindOnce conserva una referencia al cliente hasta ejecutar o descartar la tarea.
+        if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::ReloadPage, browser_client))) {
+            std::fputs("Qt reload request could not be posted to CEF.\n", stderr);
         }
     });
 }
@@ -164,6 +182,26 @@ std::function<void(bool)> BrowserNavigation::MakeForwardAvailabilityHandler(
             }, Qt::QueuedConnection);
         if (!queued) {
             std::fputs("CEF forward availability could not be queued to Qt.\n", stderr);
+        }
+    };
+}
+
+std::function<void(bool)> BrowserNavigation::MakeReloadAvailabilityHandler(
+    BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const {
+    // CEF entrega un booleano; esta lambda publica el aviso sin acceder a controles Qt.
+    return [&window, &window_ui, &close_requested](bool available) {
+        // Solo la lambda interior consulta la vida de los controles y habilita Recargar en Qt.
+        const bool queued = QMetaObject::invokeMethod(&window,
+            [&window_ui, &close_requested, available] {
+                if (close_requested || window_ui == nullptr) {
+                    return;
+                }
+                window_ui->SetReloadAvailable(available);
+                std::fprintf(stderr, "Qt reload availability updated; available: %d; Qt main thread: %d.\n",
+                             available, QThread::isMainThread());
+            }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF reload availability could not be queued to Qt.\n", stderr);
         }
     };
 }
