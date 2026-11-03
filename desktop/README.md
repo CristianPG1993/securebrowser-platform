@@ -74,9 +74,11 @@ El aviso de dirección entrega una copia UTF-8 a la sesión, que la conserva en
 una lambda encolada sobre la ventana Qt. La recepción convierte el texto a
 `QString` y llama a `BrowserWindowUi::SetAddress`, que actualiza el `QLineEdit`.
 La sesión guarda un puntero no propietario a los controles solo mientras existen;
-lo consulta en el hilo Qt y lo retira antes de destruirlos. Mientras la barra
-tiene el foco, conserva el texto y la selección del usuario. La última URL
-recibida se guarda y se muestra cuando el campo pierde el foco.
+lo consulta en el hilo Qt y lo retira antes de destruirlos. La sesión de edición
+conserva el borrador durante Alt+Tab y los menús contextuales, también si CEF
+notifica otra URL mientras el campo pierde temporalmente el foco. La última URL
+recibida se guarda y se muestra al terminar realmente la edición, al pasar a
+otro control o al entregar el teclado al contenido web.
 Los objetos `CefBrowser` y `CefFrame` permanecen en CEF.
 Las pestañas quedan fuera del alcance de Foundation.
 En el primer bloque se comprobó en Debug y Release: edición, Enter sin

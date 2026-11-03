@@ -3,6 +3,7 @@
 #include "ui/browser_window.h"
 
 #include <QEvent>
+#include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMetaMethod>
 #include <QStyle>
@@ -82,8 +83,8 @@ BrowserHost& BrowserWindowUi::GetBrowserHost() {
 void BrowserWindowUi::SetAddress(const QString& address) {
     // Recordamos siempre la URL real, aunque el usuario esté escribiendo otra dirección.
     latest_address_ = address;
-    // Tener el foco reserva el texto y la selección para la edición del usuario.
-    if (address_input_.hasFocus()) {
+    // La sesión de edición conserva el borrador también durante Alt+Tab o un menú contextual.
+    if (address_editing_) {
         return;
     }
     // QLineEdit guarda el texto y Qt programa su repintado para mostrar la nueva dirección.
@@ -94,6 +95,15 @@ void BrowserWindowUi::ClearAddressFocus() {
     // clearFocus entrega a QLineEdit su FocusOut normal, que detiene el caret.
     if (address_input_.hasFocus()) {
         address_input_.clearFocus();
+    }
+    // El puente llama aquí cuando el teclado pertenece a CEF, incluso tras una pérdida temporal de foco.
+    FinishAddressEditing();
+}
+
+void BrowserWindowUi::FinishAddressEditing() {
+    if (address_editing_) {
+        address_editing_ = false;
+        address_input_.setText(latest_address_);
     }
 }
 
@@ -185,9 +195,22 @@ void BrowserWindowUi::RequestForward() {
 }
 
 bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
-    // Al abandonar la barra, mostramos la última URL recibida, incluso si hubo avisos durante la edición.
+    // Entrar en la barra inicia una edición que puede sobrevivir a pérdidas temporales de foco.
+    if (watched == &address_input_ && event->type() == QEvent::FocusIn) {
+        address_editing_ = true;
+    }
+    // Alt+Tab y los menús no terminan la edición ni sustituyen el borrador por la URL de CEF.
     if (watched == &address_input_ && event->type() == QEvent::FocusOut) {
-        address_input_.setText(latest_address_);
+        const auto* focus_event = static_cast<const QFocusEvent*>(event);
+        if (focus_event->reason() != Qt::ActiveWindowFocusReason
+            && focus_event->reason() != Qt::PopupFocusReason) {
+            FinishAddressEditing();
+        }
+    }
+    // Pasar a otro control Qt termina la edición, también al regresar desde otra aplicación.
+    if ((watched == &back_button_ || watched == &forward_button_ || watched == &reload_button_)
+        && event->type() == QEvent::FocusIn) {
+        FinishAddressEditing();
     }
     // CEF puede conservar el foco nativo aunque Qt recuerde un control de la barra como enfocado.
     // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.

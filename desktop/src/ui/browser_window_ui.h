@@ -28,7 +28,7 @@ public:
     // La sesión necesita el anfitrión para obtener su ventana nativa y coordinar el foco.
     BrowserHost& GetBrowserHost();
 
-    // Recibe la URL actual en el hilo Qt; conserva la edición si la barra tiene el foco.
+    // Recibe la URL actual en Qt; conserva el borrador mientras la sesión de edición siga abierta.
     void SetAddress(const QString& address);
 
     // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
@@ -60,6 +60,9 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+    // Termina la edición al abandonar realmente la barra y muestra la última dirección de CEF.
+    void FinishAddressEditing();
+
     // Conecta la activación normal del botón Qt con la acción proporcionada por la sesión.
     void ConnectBackButton();
     void RequestBack();
@@ -89,6 +92,9 @@ private:
 
     // Última URL recibida del navegador; permite mostrarla al terminar de editar la barra.
     QString latest_address_;
+
+    // La edición continúa durante Alt+Tab o un menú, aunque el campo pierda temporalmente el foco.
+    bool address_editing_ = false;
 
     // Widget Qt con ventana nativa que aloja la ventana hija del navegador CEF.
     BrowserHost browser_host_;
