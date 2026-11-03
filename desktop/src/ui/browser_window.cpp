@@ -46,7 +46,7 @@ void BrowserWindow::ConfirmClose() {
     }
     close_confirmed_ = true;
     // close() provoca otro closeEvent, que ahora encontrará el cierre confirmado.
-    close();
+    QWidget::close();
 }
 
 void BrowserWindow::CancelClose() {

@@ -430,6 +430,11 @@ void BrowserClient::NotifyClosed() {
         return;
     }
     close_notified_ = true;
+    // El aviso final es definitivo, también si CEF inició el cierre o falló la creación.
+    // Las tareas tardías encontrarán la misma guarda de cierre que las peticiones nacidas en Qt.
+    close_requested_ = true;
+    // Una petición de foco anterior a la creación ya no debe sobrevivir al cierre del cliente.
+    focus_requested_ = false;
     // La tarea solo conserva la función: ninguna referencia al navegador sale del callback.
     // Se ejecutará después de regresar de OnBeforeClose y liberarse sus referencias temporales.
     if (!CefPostTask(TID_UI, base::BindOnce([](std::function<void()> on_closed) {
