@@ -1,23 +1,35 @@
 #include "browser_client.h"
 
+#include "browser/browser_history_visitor.h"
+
 #include "include/base/cef_callback.h"
+#include "include/cef_frame.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
+
+#include <windows.h>
 
 #include <cstdio>
 #include <utility>
 
 namespace sbp {
 
-BrowserClient::BrowserClient(std::function<void(int)> on_browser_created,
-                             std::function<void()> on_browser_closed)
-    : on_browser_created_(std::move(on_browser_created)),
-      on_browser_closed_(std::move(on_browser_closed)) {}
+BrowserClient::BrowserClient(BrowserClientCallbacks callbacks)
+    : callbacks_(std::move(callbacks)) {}
 
 BrowserClient::~BrowserClient() = default;
 
 CefRefPtr<CefLifeSpanHandler> BrowserClient::GetLifeSpanHandler() {
     // CEF recibe una referencia al mismo cliente, visto como receptor del ciclo de vida.
+    return this;
+}
+
+CefRefPtr<CefDisplayHandler> BrowserClient::GetDisplayHandler() {
+    // Devolvemos una referencia al cliente existente, visto como manejador de presentación.
+    return this;
+}
+
+CefRefPtr<CefLoadHandler> BrowserClient::GetLoadHandler() {
     return this;
 }
 
@@ -39,6 +51,82 @@ void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
         std::fputs("CEF browser creation failed: request rejected.\n", stderr);
         NotifyClosed();
     }
+}
+
+void BrowserClient::Navigate(std::string url) {
+    CEF_REQUIRE_UI_THREAD();
+    // La tarea puede llegar antes de la creación o después de que se haya solicitado cerrar.
+    if (browser_id_ == -1 || close_requested_) {
+        std::fputs("CEF navigation skipped: browser unavailable or closing.\n", stderr);
+        return;
+    }
+    // Obtenemos una referencia temporal; ningún objeto navegador se comparte con el hilo Qt.
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        std::fputs("CEF navigation skipped: registered browser unavailable.\n", stderr);
+        return;
+    }
+    // El frame principal representa el documento de la página, frente a sus posibles subframes.
+    const CefRefPtr<CefFrame> frame = browser->GetMainFrame();
+    if (!frame) {
+        std::fputs("CEF navigation skipped: main frame unavailable.\n", stderr);
+        return;
+    }
+    // LoadURL solicita la carga asíncrona; CEF mantiene sus comprobaciones normales de certificados.
+    frame->LoadURL(CefString(url));
+    std::fprintf(stderr, "CEF navigation requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
+}
+
+void BrowserClient::GoBack() {
+    CEF_REQUIRE_UI_THREAD();
+    // Una tarea tardía no debe actuar sobre un navegador inexistente o que ya se está cerrando.
+    if (browser_id_ == -1 || close_requested_) {
+        return;
+    }
+    // Consultamos la instancia registrada sin conservar una referencia permanente al navegador.
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        return;
+    }
+    // CanGoBack puede conservar el estado anterior mientras se cargan recursos de la nueva página.
+    // GoBack consulta el controlador real de CEF y no retrocede si no existe una entrada anterior.
+    // Los cambios de URL seguirán llegando por OnAddressChange.
+    browser->GoBack();
+    std::fprintf(stderr, "CEF back navigation requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
+}
+
+void BrowserClient::GoForward() {
+    CEF_REQUIRE_UI_THREAD();
+    // Una tarea tardía no debe actuar sobre un navegador inexistente o que ya se está cerrando.
+    if (browser_id_ == -1 || close_requested_) {
+        return;
+    }
+    // Consultamos la instancia registrada sin conservar una referencia permanente al navegador.
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        return;
+    }
+    // CanGoForward puede conservar el estado anterior mientras se cargan recursos de la nueva página.
+    // GoForward consulta el controlador real de CEF y no avanza si no existe una entrada siguiente.
+    // Los cambios de URL seguirán llegando por OnAddressChange.
+    // GetTickCount64 mide milisegundos desde el arranque de Windows; las diferencias indican duración.
+    // Registramos el instante antes de llamar a CEF para compararlo con los callbacks de carga.
+    std::fprintf(stderr, "CEF forward navigation requested; CEF UI thread: %d. time_ms: %llu.\n",
+                 CefCurrentlyOn(TID_UI), static_cast<unsigned long long>(GetTickCount64()));
+    browser->GoForward();
+}
+
+void BrowserClient::ReloadPage() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_id_ == -1 || close_requested_) {
+        return;
+    }
+    const CefRefPtr<CefBrowser> browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        return;
+    }
+    browser->Reload();
+    std::fprintf(stderr, "CEF reload requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
 }
 
 void BrowserClient::ResizeBrowser() {
@@ -134,6 +222,63 @@ void BrowserClient::RequestClose() {
     NotifyClosed();
 }
 
+void BrowserClient::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                   const CefString& url) {
+    CEF_REQUIRE_UI_THREAD();
+    // Ignoramos avisos de cierre, de otra instancia o de documentos dentro de un iframe.
+    if (close_requested_ || !browser || !frame || !frame->IsMain()
+        || browser->GetIdentifier() != browser_id_) {
+        return;
+    }
+    // Verificamos el aviso sin imprimir la URL ni acceder a controles Qt.
+    std::fprintf(stderr, "CEF main address changed; length %zu; CEF UI thread: %d.\n",
+                 url.length(), CefCurrentlyOn(TID_UI));
+    if (callbacks_.on_address_changed) {
+        // ToString crea una cadena UTF-8 propia que seguirá viva fuera de este callback CEF.
+        callbacks_.on_address_changed(url.ToString());
+    }
+    // Incluye cambios dentro del mismo documento, como enlaces a fragmentos o history.pushState.
+    RefreshNavigationAvailability(browser);
+}
+
+void BrowserClient::OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool is_loading, bool, bool) {
+    CEF_REQUIRE_UI_THREAD();
+    if (close_requested_ || !browser || browser->GetIdentifier() != browser_id_) {
+        return;
+    }
+    // El final de carga puede indicar finalización, cancelación o fallo; no acredita un pintado correcto.
+    std::fprintf(stderr, "CEF loading state changed; loading: %d; time_ms: %llu.\n",
+                 is_loading, static_cast<unsigned long long>(GetTickCount64()));
+    RefreshNavigationAvailability(browser);
+}
+
+void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                TransitionType) {
+    CEF_REQUIRE_UI_THREAD();
+    // Filtramos los iframes y los avisos tardíos igual que en OnAddressChange.
+    if (close_requested_ || !browser || !frame || !frame->IsMain()
+        || browser->GetIdentifier() != browser_id_) {
+        return;
+    }
+    // CEF confirma aquí la navegación del documento; esta marca no mide su primer pintado.
+    // No registramos la URL ni conservamos referencias al navegador o al frame.
+    std::fprintf(stderr, "CEF main document load started; time_ms: %llu.\n",
+                 static_cast<unsigned long long>(GetTickCount64()));
+}
+
+void BrowserClient::RefreshNavigationAvailability(CefRefPtr<CefBrowser> browser) {
+    CEF_REQUIRE_UI_THREAD();
+    if (callbacks_.on_back_availability_changed || callbacks_.on_forward_availability_changed
+        || callbacks_.on_reload_availability_changed) {
+        // CanGoBack y CanGoForward pueden actualizarse al terminar la carga de todos los recursos.
+        // La instantánea obtiene el índice actual del historial en este mismo hilo UI.
+        browser->GetHost()->GetNavigationEntries(
+            new BrowserHistoryVisitor(callbacks_.on_back_availability_changed,
+                                      callbacks_.on_forward_availability_changed,
+                                      callbacks_.on_reload_availability_changed), true);
+    }
+}
+
 void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
     const int browser_id = browser->GetIdentifier();
@@ -147,8 +292,8 @@ void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     }
     std::fprintf(stderr, "CEF browser created: id %d.\n", browser_id);
     // Solo entregamos el identificador; no conservamos el navegador ni lo pasamos a la cola Qt.
-    if (on_browser_created_) {
-        on_browser_created_(browser_id);
+    if (callbacks_.on_browser_created) {
+        callbacks_.on_browser_created(browser_id);
     }
     if (close_requested_) {
         // Esperamos a que termine este callback de creación antes de solicitar el cierre real.
@@ -203,7 +348,7 @@ void BrowserClient::NotifyClosed() {
             if (on_closed) {
                 on_closed();
             }
-        }, on_browser_closed_))) {
+        }, callbacks_.on_browser_closed))) {
         std::fputs("CEF final close notification could not be posted.\n", stderr);
     }
 }

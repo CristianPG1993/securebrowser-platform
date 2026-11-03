@@ -1,18 +1,37 @@
 #pragma once
 
 #include "include/cef_client.h"
+#include "include/cef_display_handler.h"
 #include "include/cef_life_span_handler.h"
+#include "include/cef_load_handler.h"
 #include <functional>
+#include <string>
 
 namespace sbp {
 
-// Crea una única instancia del navegador y recibe los avisos de su ciclo de vida.
-// Sus callbacks de vida se ejecutan en el hilo UI de CEF, distinto del hilo principal de Qt.
-class BrowserClient final : public CefClient, public CefLifeSpanHandler {
+// Agrupa los avisos del cliente. Se fijan al construirlo y se ejecutan en el hilo UI de CEF.
+struct BrowserClientCallbacks {
+    std::function<void(int)> on_browser_created;
+    std::function<void()> on_browser_closed;
+    // La dirección se entrega como una copia de texto UTF-8, sin compartir objetos de CEF.
+    std::function<void(std::string)> on_address_changed;
+    // Solo transmitimos la disponibilidad del historial, sin transferir objetos CEF a Qt.
+    std::function<void(bool)> on_back_availability_changed;
+    // Adelante tiene su aviso propio; utiliza la misma consulta de la entrada actual.
+    std::function<void(bool)> on_forward_availability_changed;
+    // Recargar se habilita cuando la consulta encuentra una entrada en el historial.
+    std::function<void(bool)> on_reload_availability_changed;
+};
+
+// Crea una única instancia del navegador y recibe sus avisos de vida, dirección e historial.
+// Estos callbacks se ejecutan en el hilo UI de CEF, distinto del hilo principal de Qt.
+class BrowserClient final : public CefClient,
+                            public CefLifeSpanHandler,
+                            public CefDisplayHandler,
+                            public CefLoadHandler {
 public:
-    // Conservamos las funciones que recibirán el identificador creado y el aviso de cierre.
-    explicit BrowserClient(std::function<void(int)> on_browser_created,
-                           std::function<void()> on_browser_closed);
+    // Conservamos los avisos juntos, sin añadir un argumento por cada nuevo evento.
+    explicit BrowserClient(BrowserClientCallbacks callbacks);
 
     // Compartimos referencias al cliente, sin copiar el objeto ni su contador.
     BrowserClient(const BrowserClient&) = delete;
@@ -21,9 +40,27 @@ public:
     // Este mismo objeto atiende los avisos del ciclo de vida del navegador.
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
 
+    // CEF solicita el receptor de los avisos de presentación; este mismo cliente los atiende.
+    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
+
+    // CEF solicita el receptor de los cambios de carga e historial.
+    CefRefPtr<CefLoadHandler> GetLoadHandler() override;
+
     // Recibe una copia de los parámetros preparados por Qt y solicita la creación asíncrona.
     // Este método y el estado del cliente pertenecen al hilo UI de CEF.
     void CreateBrowser(CefWindowInfo window_info);
+
+    // Carga la URL validada por la sesión en el documento principal, desde el hilo UI de CEF.
+    void Navigate(std::string url);
+
+    // Solicita volver a la entrada anterior del historial, desde el hilo UI de CEF.
+    void GoBack();
+
+    // Solicita avanzar a la siguiente entrada del historial, desde el hilo UI de CEF.
+    void GoForward();
+
+    // Solicita recargar la página actual, desde el hilo UI de CEF.
+    void ReloadPage();
 
     // Ajusta la ventana hija al área nativa actual de su padre, desde el hilo UI de CEF.
     void ResizeBrowser();
@@ -33,6 +70,18 @@ public:
 
     // Solicita el cierre y espera OnBeforeClose, incluso si la creación todavía está pendiente.
     void RequestClose();
+
+    // CEF entrega la dirección real del frame que ha cambiado; filtramos el documento principal.
+    void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                         const CefString& url) override;
+
+    // CEF avisa de cambios de carga; aprovechamos el aviso para consultar la entrada actual.
+    void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool is_loading,
+                              bool can_go_back, bool can_go_forward) override;
+
+    // Marca cuándo se confirma el documento principal; todavía puede quedar contenido por cargar o pintar.
+    void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                     TransitionType transition_type) override;
 
     // CEF notificará aquí que una instancia del navegador ya ha sido creada.
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
@@ -58,9 +107,11 @@ private:
     // Publica una sola confirmación después de que termine el callback CEF actual.
     void NotifyClosed();
 
+    // Consulta una sola entrada sin esperar al final de la carga; los avisos actualizan ambas flechas en Qt.
+    void RefreshNavigationAvailability(CefRefPtr<CefBrowser> browser);
+
     // Se fijan al construir el cliente; quien las proporciona controla la vida de sus capturas.
-    const std::function<void(int)> on_browser_created_;
-    const std::function<void()> on_browser_closed_;
+    const BrowserClientCallbacks callbacks_;
 
     // Solo se lee o modifica en el hilo UI de CEF. -1 significa que no hay navegador registrado.
     // Guardamos un identificador, sin mantener una referencia circular navegador -> cliente -> navegador.

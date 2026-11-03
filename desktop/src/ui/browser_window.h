@@ -18,7 +18,7 @@ public:
     // Se instala antes de mostrar la ventana; recibir la solicitud no equivale a confirmar el cierre.
     void SetCloseRequestHandler(std::function<void()> on_close_requested);
 
-    // Atiende el foco que Windows entrega al marco, aunque Qt conserve su estado lógico anterior.
+    // Atiende los cambios de foco nativo del marco, aunque Qt conserve su estado lógico anterior.
     void SetNativeFocusHandler(std::function<void()> on_native_focus);
 
     // La confirmación interna permite un nuevo closeEvent, que esta vez se aceptará.
@@ -28,7 +28,7 @@ protected:
     // Qt llama aquí al pulsar la X o al solicitar close() sobre esta ventana.
     void closeEvent(QCloseEvent* event) override;
 
-    // Observa WM_SETFOCUS sin impedir el procesamiento normal del mensaje por Qt.
+    // Observa WM_SETFOCUS y WM_KILLFOCUS sin impedir su procesamiento normal por Qt.
     bool nativeEvent(const QByteArray& event_type, void* message, qintptr* result) override;
 
 private:

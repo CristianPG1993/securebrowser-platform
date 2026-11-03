@@ -10,7 +10,7 @@ class QFocusEvent;
 namespace sbp {
 
 // Agrupa los avisos del anfitrión. Cada campo indica qué evento atiende la función guardada.
-// Las funciones se ejecutan desde Qt; app_entry_win conecta sus avisos con las tareas CEF.
+// Las funciones se ejecutan desde Qt; BrowserSession conecta sus avisos con las tareas CEF.
 struct BrowserHostCallbacks {
     std::function<void()> on_resized;
     std::function<void()> on_focus_requested;
