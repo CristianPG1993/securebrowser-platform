@@ -17,6 +17,18 @@
 
 namespace sbp {
 
+bool BrowserNavigation::IsHostWithPort(const QString& address) {
+    // Una dirección con :// ya declara su esquema y conserva la validación HTTP/HTTPS habitual.
+    if (address.contains(QStringLiteral("://"))) {
+        return false;
+    }
+    // El prefijo permite a QUrl interpretar localhost:8443 como servidor y puerto, no como esquema.
+    const QUrl candidate(QStringLiteral("https://") + address, QUrl::StrictMode);
+    // Un puerto debe ser válido y explícito; no reinterpretamos user:password@host como servidor:puerto.
+    return candidate.isValid() && !candidate.host().isEmpty()
+        && candidate.userInfo().isEmpty() && candidate.port(-1) >= 0;
+}
+
 BrowserClientCallbacks BrowserNavigation::MakeCallbacks(
     BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const {
     // Preparamos el bloque con la misma sintaxis que utilizará BrowserLifecycle al completarlo.
@@ -104,8 +116,13 @@ void BrowserNavigation::ConnectAddressControl(BrowserWindowUi& window_ui,
         // Quitamos espacios exteriores y analizamos la dirección en modo estricto.
         const QString address_text = address.trimmed();
         QUrl url(address_text, QUrl::StrictMode);
-        // Si el usuario escribe un servidor sin esquema, usamos HTTPS por defecto: google.com -> https://google.com.
-        if (!address_text.isEmpty() && url.scheme().isEmpty()) {
+        // QUrl puede confundir servidor:puerto con un esquema; conservamos los esquemas HTTP/HTTPS explícitos.
+        const QString entered_scheme = url.scheme();
+        const bool explicit_web_scheme = entered_scheme == QStringLiteral("http")
+            || entered_scheme == QStringLiteral("https");
+        // Los servidores sin protocolo, también con puerto, utilizan HTTPS por defecto.
+        if (!address_text.isEmpty() && (entered_scheme.isEmpty()
+            || (!explicit_web_scheme && IsHostWithPort(address_text)))) {
             url = QUrl(QStringLiteral("https://") + address_text, QUrl::StrictMode);
         }
         // Validamos el resultado completo, tanto si el esquema venía escrito como si lo añadimos.

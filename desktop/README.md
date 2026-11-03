@@ -33,7 +33,12 @@ Ambos objetos utilizan referencias de CEF. Se cancelan las ventanas emergentes.
 Los primeros bloques de #90 añaden un campo Qt editable encima del contenido
 web. Enter entrega su texto a `BrowserSession` mediante un callback en el mismo
 hilo Qt. La sesión elimina espacios exteriores y añade HTTPS cuando falta el
-esquema, por ejemplo `as.com` se interpreta como `https://as.com`. Después
+esquema, por ejemplo `as.com` se interpreta como `https://as.com`. También
+reconoce servidor y puerto: `example.org:8443/path` se interpreta como
+`https://example.org:8443/path` y `localhost:8443` como `https://localhost:8443`.
+Las entradas ambiguas con forma de servidor y puerto numérico se interpretan
+como direcciones HTTPS; los esquemas HTTP/HTTPS explícitos conservan su análisis.
+Después
 valida con `QUrl::StrictMode` que exista un servidor y que el esquema resultante
 sea HTTP o HTTPS. La dirección aceptada se codifica y se envía mediante
 `CefPostTask` al hilo UI de CEF, donde

@@ -5,6 +5,8 @@
 #include <functional>
 #include <string>
 
+class QString;
+
 namespace sbp {
 
 class BrowserClient;
@@ -25,6 +27,9 @@ public:
         BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
 
 private:
+    // Reconoce una autoridad host:puerto sin esquema mediante el mismo análisis estricto de QUrl.
+    static bool IsHostWithPort(const QString& address);
+
     // Prepara los avisos CEF→Qt sin transferir referencias a objetos del navegador.
     std::function<void(std::string)> MakeAddressHandler(
         BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
