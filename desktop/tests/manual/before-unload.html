@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Prueba manual de beforeunload</title>
+</head>
+<body>
+    <h1>Confirmar la salida de una página</h1>
+    <p>Escribe en el campo y después intenta cerrar SecureBrowser, recargar o seguir el enlace.</p>
+
+    <label for="draft">Borrador de prueba:</label><br>
+    <textarea id="draft" rows="6" cols="60" autocomplete="off"></textarea>
+    <p id="state" role="status">Sin cambios pendientes.</p>
+    <button id="mark-saved" type="button">Marcar como guardado (simulación)</button>
+    <p><a href="https://example.org/">Salir hacia example.org</a></p>
+    <p>El borrador solo existe en esta página. El botón simula el guardado retirando el aviso.</p>
+
+    <script>
+        const draft = document.getElementById("draft");
+        const state = document.getElementById("state");
+        const markSavedButton = document.getElementById("mark-saved");
+
+        // La página solicita confirmación; CEF decidirá cuándo mostrar el diálogo de la aplicación.
+        function askBeforeLeave(event) {
+            event.preventDefault();
+            event.returnValue = "";
+        }
+
+        // Escribir proporciona una interacción real del usuario y registra el aviso de salida.
+        function markUnsaved() {
+            window.addEventListener("beforeunload", askBeforeLeave);
+            state.textContent = "Hay cambios pendientes: salir debe pedir confirmación.";
+        }
+
+        // Simulamos el guardado sin enviar ni almacenar el texto; se puede salir sin aviso.
+        function markSaved() {
+            window.removeEventListener("beforeunload", askBeforeLeave);
+            state.textContent = "Cambios marcados como guardados: salir no debe pedir confirmación.";
+        }
+
+        draft.addEventListener("input", markUnsaved);
+        markSavedButton.addEventListener("click", markSaved);
+    </script>
+</body>
+</html>

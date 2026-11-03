@@ -33,6 +33,11 @@ CefRefPtr<CefLoadHandler> BrowserClient::GetLoadHandler() {
     return this;
 }
 
+CefRefPtr<CefJSDialogHandler> BrowserClient::GetJSDialogHandler() {
+    // Devolvemos una referencia al cliente existente, visto como manejador de diálogos.
+    return this;
+}
+
 void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
     CEF_REQUIRE_UI_THREAD();
     // Si Qt pidió cerrar antes de ejecutar esta tarea, ya no se debe crear una ventana hija.
@@ -222,6 +227,87 @@ void BrowserClient::RequestClose() {
     NotifyClosed();
 }
 
+void BrowserClient::CancelClose() {
+    CEF_REQUIRE_UI_THREAD();
+    // Ignoramos avisos repetidos y cualquier cancelación posterior a la notificación del cierre final.
+    if (!close_requested_ || close_notified_) {
+        return;
+    }
+    // Las operaciones del cliente podrán atender nuevas peticiones; el navegador continúa vivo.
+    close_requested_ = false;
+    std::fputs("CEF close cancelled; browser remains available.\n", stderr);
+    // El destinatario publicará el aviso para Qt; aquí no se accede a su ventana ni a sus controles.
+    if (callbacks_.on_browser_close_cancelled) {
+        callbacks_.on_browser_close_cancelled();
+    }
+}
+
+bool BrowserClient::OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser, const CefString&,
+                                         bool is_reload, CefRefPtr<CefJSDialogCallback> callback) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!browser || browser->GetIdentifier() != browser_id_ || !callback
+        || !callbacks_.on_page_leave_requested) {
+        // Sin receptor propio, CEF conserva la responsabilidad de mostrar su diálogo predeterminado.
+        return false;
+    }
+    if (page_leave_callback_) {
+        // No sustituimos una pregunta pendiente por otra; cada callback se resuelve una sola vez.
+        callback->Continue(false, CefString());
+        return true;
+    }
+    // El aviso también puede corresponder a una recarga o navegación, sin una petición de cierre Qt.
+    // Registramos el contexto sin imprimir el mensaje de la página ni acceder a widgets Qt.
+    std::fprintf(stderr,
+                 "CEF before-unload dialog requested; closing: %d; reload: %d; CEF UI thread: %d.\n",
+                 close_requested_, is_reload, CefCurrentlyOn(TID_UI));
+    page_leave_callback_ = callback;
+    const std::uint64_t request_id = ++page_leave_request_id_;
+    // Esta respuesta puede llegar desde Qt; conserva el cliente y publica el resultado para CEF.
+    callbacks_.on_page_leave_requested(
+        [client = CefRefPtr<BrowserClient>(this), request_id](bool allow_leave) {
+            if (!CefPostTask(TID_UI, base::BindOnce(&BrowserClient::CompletePageLeave,
+                                                  client, request_id, allow_leave))) {
+                std::fputs("Qt page leave response could not be posted to CEF.\n", stderr);
+            }
+        });
+    // true indica que gestionamos este diálogo y resolveremos su callback al recibir la respuesta.
+    return true;
+}
+
+void BrowserClient::CompletePageLeave(std::uint64_t request_id, bool allow_leave) {
+    CEF_REQUIRE_UI_THREAD();
+    // Una respuesta repetida o de una pregunta retirada no debe afectar a la navegación actual.
+    if (request_id != page_leave_request_id_ || !page_leave_callback_) {
+        return;
+    }
+    // Retiramos el callback antes de Continue: CEF puede llamar a OnResetDialogState dentro de él.
+    const CefRefPtr<CefJSDialogCallback> callback = std::move(page_leave_callback_);
+    callback->Continue(allow_leave, CefString());
+    // Quedarme también debe retirar la petición de cierre en CEF y, mediante su aviso, en Qt.
+    if (!allow_leave && browser_id_ != -1) {
+        CancelClose();
+    }
+}
+
+void BrowserClient::OnResetDialogState(CefRefPtr<CefBrowser> browser) {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser && browser->GetIdentifier() == browser_id_) {
+        ResetPageLeave();
+    }
+}
+
+void BrowserClient::ResetPageLeave() {
+    CEF_REQUIRE_UI_THREAD();
+    if (!page_leave_callback_) {
+        return;
+    }
+    // El aviso se encola antes de cualquier cierre final Qt, para retirar primero el diálogo modal.
+    if (callbacks_.on_page_leave_reset) {
+        callbacks_.on_page_leave_reset();
+    }
+    CompletePageLeave(page_leave_request_id_, false);
+}
+
 void BrowserClient::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                    const CefString& url) {
     CEF_REQUIRE_UI_THREAD();
@@ -333,6 +419,8 @@ void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     // Retiramos el identificador antes de avisar a Qt; ya no se solicitarán acciones a esta instancia.
     browser_id_ = -1;
     focus_requested_ = false;
+    // Ninguna confirmación de abandono debe sobrevivir al navegador al que pertenecía.
+    ResetPageLeave();
     NotifyClosed();
 }
 

@@ -76,6 +76,22 @@ BrowserClientCallbacks BrowserLifecycle::MakeClientCallbacks(
             std::fputs("Qt close confirmation could not be queued.\n", stderr);
         }
     };
+    // El cliente emite la cancelación en CEF; publicamos su recepción para el hilo principal Qt.
+    callbacks.on_browser_close_cancelled = [this, &window] {
+        // Solo esta lambda interior cambia el estado de la coordinación y de la ventana Qt.
+        const bool queued = QMetaObject::invokeMethod(&window, [this, &window] {
+            if (!close_requested_) {
+                return;
+            }
+            close_requested_ = false;
+            std::fprintf(stderr, "Qt received CEF close cancellation; Qt main thread: %d.\n",
+                         QThread::isMainThread());
+            window.CancelClose();
+        }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF close cancellation could not be queued to Qt.\n", stderr);
+        }
+    };
     return callbacks;
 }
 

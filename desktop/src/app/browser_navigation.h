@@ -39,6 +39,11 @@ private:
         BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
     std::function<void(bool)> MakeReloadAvailabilityHandler(
         BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const;
+    // Esta pregunta también debe llegar a Qt durante el cierre, por eso no filtra close_requested.
+    std::function<void(std::function<void(bool)>)> MakePageLeaveRequestHandler(
+        BrowserWindow& window, BrowserWindowUi* const& window_ui) const;
+    std::function<void()> MakePageLeaveResetHandler(
+        BrowserWindow& window, BrowserWindowUi* const& window_ui) const;
 
     // Cada método instala únicamente la acción correspondiente a su control Qt.
     void ConnectBackControl(BrowserWindowUi& window_ui,

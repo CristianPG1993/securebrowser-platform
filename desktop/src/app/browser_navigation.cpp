@@ -37,6 +37,8 @@ BrowserClientCallbacks BrowserNavigation::MakeCallbacks(
     callbacks.on_back_availability_changed = MakeBackAvailabilityHandler(window, window_ui, close_requested);
     callbacks.on_forward_availability_changed = MakeForwardAvailabilityHandler(window, window_ui, close_requested);
     callbacks.on_reload_availability_changed = MakeReloadAvailabilityHandler(window, window_ui, close_requested);
+    callbacks.on_page_leave_requested = MakePageLeaveRequestHandler(window, window_ui);
+    callbacks.on_page_leave_reset = MakePageLeaveResetHandler(window, window_ui);
     return callbacks;
 }
 
@@ -141,6 +143,41 @@ void BrowserNavigation::ConnectAddressControl(BrowserWindowUi& window_ui,
             std::fputs("Qt navigation request could not be posted to CEF.\n", stderr);
         }
     });
+}
+
+std::function<void(std::function<void(bool)>)> BrowserNavigation::MakePageLeaveRequestHandler(
+    BrowserWindow& window, BrowserWindowUi* const& window_ui) const {
+    // CEF entrega cómo responder; esta lambda publica la pregunta para el hilo principal Qt.
+    return [&window, &window_ui](std::function<void(bool)> reply) {
+        // Solo Qt abre el diálogo. La función reply publicará después la decisión para CEF.
+        const bool queued = QMetaObject::invokeMethod(&window,
+            [&window_ui, reply] {
+                // Si los controles ya se retiraron, cancelamos la salida en lugar de dejar CEF esperando.
+                const bool allow_leave = window_ui != nullptr && window_ui->ConfirmPageLeave();
+                reply(allow_leave);
+            }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF page leave request could not be queued to Qt.\n", stderr);
+            // Conservamos una copia fuera de la tarea para responder también si Qt rechaza el envío.
+            reply(false);
+        }
+    };
+}
+
+std::function<void()> BrowserNavigation::MakePageLeaveResetHandler(
+    BrowserWindow& window, BrowserWindowUi* const& window_ui) const {
+    // CEF ha retirado la pregunta; solo publicamos el aviso, sin tocar controles desde su hilo.
+    return [&window, &window_ui] {
+        // Qt cierra el diálogo pendiente; su respuesta tardía quedará descartada por el cliente CEF.
+        const bool queued = QMetaObject::invokeMethod(&window, [&window_ui] {
+            if (window_ui != nullptr) {
+                window_ui->CancelPageLeave();
+            }
+        }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF page leave reset could not be queued to Qt.\n", stderr);
+        }
+    };
 }
 
 std::function<void(std::string)> BrowserNavigation::MakeAddressHandler(

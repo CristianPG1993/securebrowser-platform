@@ -11,6 +11,7 @@
 #include <functional>
 
 class QEvent;
+class QMessageBox;
 
 namespace sbp {
 
@@ -33,6 +34,12 @@ public:
 
     // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
     void ClearAddressFocus();
+
+    // Pregunta desde el hilo Qt si se permite abandonar la página; devuelve true solo al elegir Salir.
+    bool ConfirmPageLeave();
+
+    // Cierra la pregunta si CEF la ha retirado antes de recibir la respuesta del usuario.
+    void CancelPageLeave();
 
     // Guarda la función que recibirá el texto al pulsar Enter; instalarla no la ejecuta.
     void SetAddressSubmitHandler(std::function<void(const QString&)> on_address_submitted);
@@ -110,6 +117,9 @@ private:
 
     // Acción para recargar la página; se ejecuta únicamente al activar el botón Recargar.
     std::function<void()> on_reload_requested_;
+
+    // Referencia no propietaria al diálogo local de ConfirmPageLeave; solo se utiliza en Qt.
+    QMessageBox* page_leave_dialog_ = nullptr;
 };
 
 }  // namespace sbp
