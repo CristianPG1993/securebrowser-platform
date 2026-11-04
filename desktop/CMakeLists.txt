@@ -120,6 +120,8 @@ add_library(SecureBrowser SHARED
     src/browser/browser_client.h
     src/browser/browser_history_visitor.cpp
     src/browser/browser_history_visitor.h
+    src/diagnostics/diagnostics_log.cpp
+    src/diagnostics/diagnostics_log.h
     src/ui/browser_host.cpp
     src/ui/browser_host.h
     src/ui/browser_window.cpp
