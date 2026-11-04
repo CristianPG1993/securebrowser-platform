@@ -2,8 +2,10 @@
 
 #include "include/cef_client.h"
 #include "include/cef_display_handler.h"
+#include "include/cef_jsdialog_handler.h"
 #include "include/cef_life_span_handler.h"
 #include "include/cef_load_handler.h"
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -13,6 +15,12 @@ namespace sbp {
 struct BrowserClientCallbacks {
     std::function<void(int)> on_browser_created;
     std::function<void()> on_browser_closed;
+    // Se ejecutará en el hilo UI de CEF cuando retiremos una petición de cierre cancelada.
+    std::function<void()> on_browser_close_cancelled;
+    // Qt recibe una petición y utiliza la función de respuesta para devolver la decisión del usuario.
+    std::function<void(std::function<void(bool)>)> on_page_leave_requested;
+    // CEF ha retirado la petición; Qt debe descartar su diálogo si todavía está abierto.
+    std::function<void()> on_page_leave_reset;
     // La dirección se entrega como una copia de texto UTF-8, sin compartir objetos de CEF.
     std::function<void(std::string)> on_address_changed;
     // Solo transmitimos la disponibilidad del historial, sin transferir objetos CEF a Qt.
@@ -28,7 +36,8 @@ struct BrowserClientCallbacks {
 class BrowserClient final : public CefClient,
                             public CefLifeSpanHandler,
                             public CefDisplayHandler,
-                            public CefLoadHandler {
+                            public CefLoadHandler,
+                            public CefJSDialogHandler {
 public:
     // Conservamos los avisos juntos, sin añadir un argumento por cada nuevo evento.
     explicit BrowserClient(BrowserClientCallbacks callbacks);
@@ -45,6 +54,9 @@ public:
 
     // CEF solicita el receptor de los cambios de carga e historial.
     CefRefPtr<CefLoadHandler> GetLoadHandler() override;
+
+    // CEF obtiene este mismo cliente como receptor de los avisos de diálogos JavaScript.
+    CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override;
 
     // Recibe una copia de los parámetros preparados por Qt y solicita la creación asíncrona.
     // Este método y el estado del cliente pertenecen al hilo UI de CEF.
@@ -70,6 +82,16 @@ public:
 
     // Solicita el cierre y espera OnBeforeClose, incluso si la creación todavía está pendiente.
     void RequestClose();
+
+    // Retira la petición pendiente en el hilo UI de CEF y comunica su cancelación mediante el callback.
+    void CancelClose();
+
+    // CEF solicita confirmar el abandono; enviamos la pregunta a Qt sin bloquear el hilo UI de CEF.
+    bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser, const CefString& message_text,
+                              bool is_reload, CefRefPtr<CefJSDialogCallback> callback) override;
+
+    // CEF retira los diálogos pendientes al cambiar de documento o cancelar su petición.
+    void OnResetDialogState(CefRefPtr<CefBrowser> browser) override;
 
     // CEF entrega la dirección real del frame que ha cambiado; filtramos el documento principal.
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
@@ -107,6 +129,11 @@ private:
     // Publica una sola confirmación después de que termine el callback CEF actual.
     void NotifyClosed();
 
+    // Consume una única respuesta en CEF; el identificador descarta respuestas de peticiones anteriores.
+    void CompletePageLeave(std::uint64_t request_id, bool allow_leave);
+    // Retira la pregunta de Qt y resuelve cualquier callback CEF pendiente como cancelado.
+    void ResetPageLeave();
+
     // Consulta una sola entrada sin esperar al final de la carga; los avisos actualizan ambas flechas en Qt.
     void RefreshNavigationAvailability(CefRefPtr<CefBrowser> browser);
 
@@ -121,6 +148,11 @@ private:
     bool close_notified_ = false;
     // Conserva una petición anterior a OnAfterCreated; solo se utiliza en el hilo UI de CEF.
     bool focus_requested_ = false;
+
+    // El callback nativo permanece en CEF; Qt recibe únicamente una función de respuesta con un booleano.
+    CefRefPtr<CefJSDialogCallback> page_leave_callback_;
+    // Cada pregunta tiene su propio identificador, aunque la respuesta Qt llegue después de cancelarla.
+    std::uint64_t page_leave_request_id_ = 0;
 
     // CEF implementa el contador que utilizan las referencias administradas al cliente.
     IMPLEMENT_REFCOUNTING(BrowserClient);

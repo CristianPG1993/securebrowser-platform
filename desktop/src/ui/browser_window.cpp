@@ -46,7 +46,17 @@ void BrowserWindow::ConfirmClose() {
     }
     close_confirmed_ = true;
     // close() provoca otro closeEvent, que ahora encontrará el cierre confirmado.
-    close();
+    QWidget::close();
+}
+
+void BrowserWindow::CancelClose() {
+    // Un aviso tardío no puede deshacer un cierre confirmado ni cancelar una petición inexistente.
+    if (close_confirmed_ || !close_requested_) {
+        return;
+    }
+    // La ventana sigue abierta; otra pulsación de la X podrá volver a ejecutar su callback.
+    close_requested_ = false;
+    std::fputs("Qt close cancelled; another close request is allowed.\n", stderr);
 }
 
 void BrowserWindow::closeEvent(QCloseEvent* event) {

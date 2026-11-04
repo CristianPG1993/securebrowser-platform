@@ -2,10 +2,12 @@
 
 #include "ui/browser_window.h"
 
+#include <QAbstractButton>
 #include <QEvent>
 #include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMetaMethod>
+#include <QMessageBox>
 #include <QStyle>
 
 #include <cstdio>
@@ -98,6 +100,36 @@ void BrowserWindowUi::ClearAddressFocus() {
     }
     // El puente llama aquí cuando el teclado pertenece a CEF, incluso tras una pérdida temporal de foco.
     FinishAddressEditing();
+}
+
+bool BrowserWindowUi::ConfirmPageLeave() {
+    // No abrimos otro diálogo dentro del bucle modal de una pregunta que todavía está pendiente.
+    if (page_leave_dialog_ != nullptr) {
+        return false;
+    }
+    // El diálogo pertenece a nuestra ventana y toda su interacción se procesa en el hilo Qt.
+    QMessageBox dialog(QMessageBox::Warning, QStringLiteral("Abandonar página"),
+                       QStringLiteral("Puede haber cambios sin guardar. ¿Quieres salir de esta página?"),
+                       QMessageBox::Discard | QMessageBox::Cancel, address_input_.window());
+    dialog.button(QMessageBox::Discard)->setText(QStringLiteral("Salir"));
+    dialog.button(QMessageBox::Cancel)->setText(QStringLiteral("Quedarme"));
+    // Quedarme es la opción predeterminada; Escape y la X también cancelan la salida.
+    dialog.setDefaultButton(QMessageBox::Cancel);
+    dialog.setEscapeButton(QMessageBox::Cancel);
+    dialog.setWindowModality(Qt::WindowModal);
+    // Guardamos un acceso temporal para poder rechazarlo si CEF retira la petición durante exec.
+    page_leave_dialog_ = &dialog;
+    // Solo espera el hilo Qt en su bucle modal; el hilo UI de CEF sigue atendiendo sus tareas.
+    const bool allow_leave = dialog.exec() == QMessageBox::Discard;
+    page_leave_dialog_ = nullptr;
+    return allow_leave;
+}
+
+void BrowserWindowUi::CancelPageLeave() {
+    // reject termina el diálogo como Quedarme; no destruye el objeto local de ConfirmPageLeave.
+    if (page_leave_dialog_ != nullptr) {
+        page_leave_dialog_->reject();
+    }
 }
 
 void BrowserWindowUi::FinishAddressEditing() {

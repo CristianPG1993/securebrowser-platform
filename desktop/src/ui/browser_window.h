@@ -24,6 +24,9 @@ public:
     // La confirmación interna permite un nuevo closeEvent, que esta vez se aceptará.
     void ConfirmClose();
 
+    // Retira una solicitud pendiente cuando CEF cancela el cierre; se utiliza desde el hilo Qt.
+    void CancelClose();
+
 protected:
     // Qt llama aquí al pulsar la X o al solicitar close() sobre esta ventana.
     void closeEvent(QCloseEvent* event) override;

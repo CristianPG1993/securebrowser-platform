@@ -623,11 +623,11 @@ La entrada sigue este flujo:
    bloque, antes de `CefShutdown`. Apagar CEF desde el hilo principal y devolver
    el código Qt. `QApplication` se destruye al salir de `RunWinMain`.
 
-Este orden corresponde a la ventana vacía actual. Cuando exista un navegador
-incrustado se coordinará su cierre asíncrono, esperando los callbacks
-`OnBeforeClose` y liberando sus referencias antes de completar el cierre de
-la aplicación. `CefShutdown` apaga el motor global; no sustituye al cierre
-de cada instancia `CefBrowser`.
+El navegador incrustado se cierra de forma asíncrona: Qt conserva el anfitrión
+hasta recibir la confirmación posterior a `OnBeforeClose`. Después termina
+el bucle Qt y se liberan los widgets y las referencias locales al cliente.
+`CefShutdown` apaga el motor global desde el hilo principal; no sustituye al
+cierre de cada instancia `CefBrowser`.
 
 La falta de contexto de sandbox o un fallo al localizar la carpeta del
 usuario producen un diagnóstico y código `1`, antes de inicializar el motor.
@@ -706,7 +706,7 @@ Ninguna de las dos clases crea objetos Qt.
 | Objeto | Papeles | Avisos preparados |
 | --- | --- | --- |
 | `BrowserApp` | `CefApp` y `CefBrowserProcessHandler` | `OnContextInitialized`: contexto global preparado, sin argumentos, en el hilo UI de CEF. |
-| `BrowserClient` | `CefClient`, `CefLifeSpanHandler`, `CefDisplayHandler` y `CefLoadHandler` | Recibe creación, cierre, URL del documento principal y estado del historial. Los callbacks de navegación envían texto o booleanos a Qt. |
+| `BrowserClient` | `CefClient`, `CefLifeSpanHandler`, `CefDisplayHandler`, `CefLoadHandler` y `CefJSDialogHandler` | Recibe creación, cierre, URL, historial y solicitudes de confirmación de abandono. Los avisos a Qt transmiten texto, booleanos o una función de respuesta. |
 
 `GetBrowserProcessHandler` y `GetLifeSpanHandler` devuelven `this` mediante
 `CefRefPtr`: el mismo objeto visto como receptor de avisos, sin construir ni
@@ -724,6 +724,8 @@ La propiedad y liberación de referencias es la siguiente:
 | Referencia al cliente ligada a la tarea CEF | `base::BindOnce` conserva un `CefRefPtr<BrowserClient>` mientras la tarea está pendiente o ejecutándose. | Al terminar o destruirse la tarea, sin dejar un puntero al cliente sin propietario. |
 | Copia del cliente en la función de creación | `request_browser_creation`, usada solo en Qt. | Se vacía al terminar el bucle Qt, antes de destruir la ventana y de `CefShutdown`. |
 | Parámetro `browser` de los callbacks | Referencia administrada durante cada llamada. | Al terminar la llamada. El cliente no la almacena en ningún miembro. |
+| `page_leave_callback_` | `BrowserClient`, solo en el hilo UI de CEF, mientras espera una decisión de abandono. | Se retira antes de `Continue`, al cancelar el diálogo o al recibir `OnBeforeClose`. |
+| Copia del cliente en la respuesta de abandono | Lambda `reply` entregada a Qt y tarea de respuesta publicada en CEF. | Al ejecutar o descartar las funciones correspondientes. El callback nativo del diálogo permanece en el cliente CEF. |
 
 `IMPLEMENT_REFCOUNTING` proporciona `AddRef`, `Release` y el contador que
 utiliza `CefRefPtr`. Los destructores privados impiden un `delete` externo;
@@ -846,9 +848,11 @@ de `QWidget`. El header declara la clase y sus métodos; su implementación est�
 en [`browser_window.cpp`](src/ui/browser_window.cpp), que se compila como parte del
 target `SecureBrowser`. Su `closeEvent` rechaza el cierre inmediato y comunica una única
 solicitud mediante el callback registrado con `SetCloseRequestHandler`.
-`ConfirmClose` permite después aceptar el cierre, conservando los widgets
-hasta ese momento. Todos estos pasos se ejecutan en el hilo Qt y no muestran
-un diálogo de confirmación al usuario.
+`ConfirmClose` marca el cierre como confirmado y llama explícitamente a
+`QWidget::close()`, conservando los widgets hasta ese momento. El nuevo
+`closeEvent` permite entonces cerrar la ventana. Si la página solicita un
+aviso `beforeunload`, Qt muestra la pregunta de abandono descrita más abajo.
+`CancelClose` retira la solicitud de la ventana y permite otro intento con la X.
 
 La solicitud sale del hilo Qt mediante `CefPostTask(TID_UI, ...)`.
 `base::BindOnce(&BrowserClient::RequestClose, browser_client)` prepara una
@@ -887,7 +891,9 @@ entrega una copia UTF-8 a `on_address_changed`, que encola su recepción en Qt.
 El visitante notifica Atrás a `on_back_availability_changed` y Adelante a
 `on_forward_availability_changed`, y la disponibilidad de Recargar a
 `on_reload_availability_changed`; cada función encola el estado de su botón en Qt.
-`NotifyClosed` evita publicar dos confirmaciones.
+`NotifyClosed` evita publicar dos confirmaciones, marca el estado final de
+cierre y retira cualquier petición de foco pendiente. Las guardas del cliente
+descartan así operaciones tardías, también si CEF inició el cierre o falló la creación.
 El cliente no guarda un `CefBrowser`
 ni transfiere esa referencia a las funciones encoladas.
 
@@ -907,9 +913,69 @@ solo en esas ejecuciones para inspeccionar el documento y solicitar `Page.close`
 No se habilita un puerto de depuración en la configuración de la aplicación.
 El usuario confirmó después la prueba manual de apertura y cierre de la
 primera instancia. La herramienta de inspección de escritorio no pudo iniciarse.
-La carrera exacta de cierre mientras la creación está pendiente no se ha
-forzado de manera determinista. El cierre con cancelación JavaScript y su
-reintento se completará en #91; la guarda actual de Qt admite una solicitud.
+La carrera exacta de cierre mientras la creación está pendiente sigue sin
+reproducirse de forma controlada. La confirmación JavaScript, su cancelación
+y el reintento están implementados y se han comprobado manualmente en #91.
+
+## Confirmación de abandono y pruebas manuales de cierre
+
+La propia página debe registrar su aviso `beforeunload`. CEF entrega la
+solicitud a `BrowserClient::OnBeforeUnloadDialog`, que conserva el callback
+nativo y un identificador de petición. `BrowserNavigation` encola en Qt la
+pregunta de `BrowserWindowUi::ConfirmPageLeave`: **Salir** permite continuar;
+**Quedarme**, Escape o la X del diálogo cancelan la operación.
+
+La función de respuesta vuelve a publicar el resultado en el hilo UI de CEF.
+`CompletePageLeave` comprueba el identificador, retira el callback del miembro
+y ejecuta `Continue`. Una respuesta antigua o repetida se descarta. Si se
+cancela un cierre, `BrowserClient::CancelClose` avisa a `BrowserLifecycle`,
+que retira su estado en Qt y llama a `BrowserWindow::CancelClose`.
+`OnResetDialogState` retira una pregunta que CEF haya cancelado; Qt rechaza el
+diálogo pendiente. El navegador conserva sus comprobaciones habituales para
+decidir cuándo procede un aviso de salida; la aplicación no detecta cambios
+sin guardar por su cuenta.
+
+Archivos auxiliares para reproducir las comprobaciones:
+
+| Archivo | Uso |
+| --- | --- |
+| [`before-unload.html`](tests/manual/before-unload.html) | Escribir activa el aviso; el botón de guardado simulado lo retira. Permite comprobar cierre, recarga y navegación. |
+| [`popup.html`](tests/manual/popup.html) | Cada pulsación solicita `window.open()` y aumenta un contador. Debe conservarse la página sin abrir otra ventana. |
+| [`serve-slow-load.py`](tests/manual/serve-slow-load.py) | Mantiene una imagen pendiente durante 20 segundos para cerrar durante la carga. |
+
+Desde la raíz, servir las páginas HTML con:
+
+```powershell
+python -m http.server 8767 --bind 127.0.0.1 --directory desktop/tests/manual
+```
+
+Abrir en SecureBrowser `http://127.0.0.1:8767/before-unload.html` o
+`http://127.0.0.1:8767/popup.html`. Para la carga lenta, ejecutar en su lugar
+`python desktop/tests/manual/serve-slow-load.py`, abrir
+`http://127.0.0.1:8766/slow.html` y pulsar la X durante la espera del recurso.
+Ctrl+C detiene cada servidor. Estos archivos no forman parte del despliegue.
+
+El usuario ha comprobado manualmente en Debug:
+
+- Cierre normal y segundo intento tras elegir **Quedarme**.
+- Cancelar y permitir una recarga y una navegación por enlace, conservando
+  el formulario cuando se cancela.
+- Cierre mientras el servidor mantiene la imagen pendiente de carga.
+- Solicitudes repetidas de `window.open()` sin nueva ventana ni sustitución de la página.
+- Diagnóstico con anfitrión válido hasta confirmar (`native host valid: 1`),
+  salida del bucle Qt con `0` y finalización de `CefShutdown`.
+- Ausencia de procesos `SecureBrowser` cinco segundos después del cierre,
+  con ninguna otra instancia abierta.
+
+La prueba por Ctrl+clic o Mayús+clic navegó en la ventana actual; no acredita
+por sí sola el bloqueo de popups. La comprobación específica utilizó el botón
+`window.open()` de la página local. El comportamiento de esos atajos no añade
+soporte de pestañas ni de múltiples ventanas.
+
+Queda pendiente verificar el cierre mientras `creation_pending_` está activo.
+El log revisado mostraba `CEF browser created` antes de la solicitud de cierre;
+ese intento acredita un cierre del navegador ya creado. Las nuevas
+comprobaciones de este bloque no se han repetido en Release.
 
 ## Ventana Qt independiente de comprobación del kit
 
@@ -1005,8 +1071,8 @@ Release desde la carpeta temporal, con `PATH` limitado a Windows y código
 de salida `0`. Las bibliotecas Qt y el plugin de plataforma se cargan desde
 la salida preparada. Esto verifica la ventana Qt en el equipo de desarrollo;
 la ventana principal con CEF activo se verifica mediante `SecureBrowser.exe`,
-incluyendo el orden de cierre y el fin de los procesos auxiliares. El navegador
-CEF incrustado y su coordinación de cierre se incorporarán en tareas posteriores.
+incluyendo el orden de cierre y el fin de los procesos auxiliares. Su coordinación
+asíncrona y las comprobaciones actuales se describen en los apartados anteriores.
 
 La instalación Qt queda fuera del repositorio; `build/`, `CMakeCache.txt`
 y `CMakeUserPresets.json` están excluidos por `.gitignore`. Solo se versionan

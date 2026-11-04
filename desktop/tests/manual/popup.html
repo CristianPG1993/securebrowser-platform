@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Prueba manual de ventana emergente</title>
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    <h1>Ventana emergente</h1>
+    <p>El botón solicita expresamente abrir example.org en una ventana nueva.</p>
+    <button id="open-popup" type="button">Solicitar ventana emergente</button>
+    <p id="state" role="status">Solicitudes enviadas: 0.</p>
+    <p>SecureBrowser debe conservar esta página y cancelar la ventana nueva.</p>
+
+    <script>
+        // El contador permite comprobar que cada clic vuelve a ejecutar la solicitud.
+        let popupRequests = 0;
+
+        // La pulsación real del usuario solicita una apertura distinta de la navegación actual.
+        function requestPopup() {
+            popupRequests += 1;
+            window.open("https://example.org/", "_blank", "popup,width=600,height=400");
+            document.getElementById("state").textContent =
+                "Solicitudes enviadas: " + popupRequests
+                + ". Comprueba que esta página sigue abierta y no aparece otra ventana.";
+        }
+
+        document.getElementById("open-popup").addEventListener("click", requestPopup);
+    </script>
+</body>
+</html>
