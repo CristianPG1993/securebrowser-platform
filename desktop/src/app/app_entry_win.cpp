@@ -45,7 +45,7 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
 
     // El bootstrap debe aportar el contexto de aislamiento.
     if (sandbox_info == nullptr) {
-        std::fputs("CEF startup failed: missing bootstrap sandbox context.\n", stderr);
+        std::fputs("CEF startup failed: missing bootstrap sandbox context; exit code 1.\n", stderr);
         return 1;
     }
 
@@ -90,7 +90,11 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
     if (FAILED(path_result) || local_app_data == nullptr) {
         // La API exige liberar el resultado también si falla; acepta un puntero nulo.
         CoTaskMemFree(local_app_data);
-        std::fputs("CEF startup failed: could not locate the local application data directory.\n", stderr);
+        // Conservamos el resultado nativo para distinguir el motivo del fallo sin registrar la ruta.
+        std::fprintf(stderr,
+                     "CEF startup failed: could not locate the local application data directory; "
+                     "HRESULT: 0x%08lX; exit code 1.\n",
+                     static_cast<unsigned long>(path_result));
         return 1;
     }
 
@@ -102,6 +106,8 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
 
     // Inicializa el motor una sola vez en este proceso, con el contexto recibido del bootstrap.
     // get() entrega el puntero sin abandonar la referencia que conserva cef_app.
+    // Esta marca identifica la última etapa alcanzada si CEF termina sin devolver el control.
+    std::fputs("CEF initialization starting.\n", stderr);
     if (!CefInitialize(main_args, settings, cef_app.get(), sandbox_info)) {
         // CEF puede indicar un fallo o una salida anticipada normal: conservamos su código.
         // Esta rama termina sin llamar a CefShutdown, porque la inicialización no continúa.
