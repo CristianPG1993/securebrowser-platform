@@ -14,6 +14,8 @@ namespace sbp {
 // Agrupa los avisos del cliente. Se fijan al construirlo y se ejecutan en el hilo UI de CEF.
 struct BrowserClientCallbacks {
     std::function<void(int)> on_browser_created;
+    // Se emite si CEF rechaza la creación, antes de publicar la notificación final de cierre.
+    std::function<void()> on_browser_creation_failed;
     std::function<void()> on_browser_closed;
     // Se ejecutará en el hilo UI de CEF cuando retiremos una petición de cierre cancelada.
     std::function<void()> on_browser_close_cancelled;

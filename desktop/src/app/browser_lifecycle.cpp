@@ -64,6 +64,18 @@ BrowserClientCallbacks BrowserLifecycle::MakeClientCallbacks(
             std::fputs("CEF browser creation notification could not be queued to Qt.\n", stderr);
         }
     };
+    // El rechazo llega desde CEF; publicamos el fallo antes de su confirmación final de cierre.
+    callbacks.on_browser_creation_failed = [this, &window] {
+        // Solo el hilo Qt modifica este estado; la sesión lo conserva hasta después del apagado CEF.
+        const bool queued = QMetaObject::invokeMethod(&window, [this] {
+            exit_code_ = 1;
+            close_requested_ = true;
+            std::fputs("Qt received CEF browser creation failure; exit code 1.\n", stderr);
+        }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF browser creation failure could not be queued to Qt.\n", stderr);
+        }
+    };
     // El cierre CEF publica su confirmación; Qt mantiene la ventana viva hasta recibirla.
     callbacks.on_browser_closed = [this, &window] {
         // Solo Qt consulta el anfitrión y confirma el cierre de su ventana.

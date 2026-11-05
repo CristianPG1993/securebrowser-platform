@@ -54,6 +54,10 @@ void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
     if (!accepted) {
         creation_pending_ = false;
         std::fputs("CEF browser creation failed: request rejected.\n", stderr);
+        // Qt debe conservar el fallo antes de recibir la confirmación final de cierre.
+        if (callbacks_.on_browser_creation_failed) {
+            callbacks_.on_browser_creation_failed();
+        }
         NotifyClosed();
     }
 }
