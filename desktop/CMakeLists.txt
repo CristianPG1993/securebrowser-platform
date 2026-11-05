@@ -136,6 +136,10 @@ target_include_directories(SecureBrowser PRIVATE
 )
 # Evita que las macros min/max de Windows interfieran con las funciones estándar usadas por CEF.
 target_compile_definitions(SecureBrowser PRIVATE NOMINMAX)
+# Registra la configuración elegida por el generador, también en builds multiconfiguración.
+target_compile_definitions(SecureBrowser PRIVATE
+    "SBP_BUILD_CONFIGURATION=\"$<CONFIG>\""
+)
 # La etiqueta de versión Qt importa datos de QtCore e impide su carga diferida en MSVC.
 # La versión del kit ya se exige mediante find_package(Qt6 ... EXACT).
 target_compile_definitions(SecureBrowser PRIVATE QT_NO_VERSION_TAGGING)

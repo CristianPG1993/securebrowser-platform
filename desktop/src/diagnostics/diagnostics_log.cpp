@@ -1,5 +1,9 @@
 #include "diagnostics/diagnostics_log.h"
 
+#include "include/cef_version.h"
+
+#include <QtCore/qtversion.h>
+
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -15,8 +19,11 @@ bool DiagnosticsLog::Initialize(std::wstring& error_message) {
     if (!PrepareLogDirectory(error_message)) {
         return false;
     }
-    // El resultado final indica si stderr ha quedado conectado al archivo propio.
-    return RedirectStandardError(error_message);
+    // Solo escribimos la cabecera después de conectar stderr con el archivo propio.
+    if (!RedirectStandardError(error_message)) {
+        return false;
+    }
+    return WriteSessionHeader(error_message);
 }
 
 const std::wstring& DiagnosticsLog::ApplicationLogPath() const {
@@ -91,6 +98,22 @@ bool DiagnosticsLog::RedirectStandardError(std::wstring& error_message) {
         return false;
     }
     // La CRT mantiene stderr abierto después de salir de este método y lo cierra al terminar el proceso.
+    return true;
+}
+
+bool DiagnosticsLog::WriteSessionHeader(std::wstring& error_message) {
+    // CMake entrega la configuración real; las versiones son constantes de los SDK usados al compilar.
+    const int write_result = std::fprintf(stderr,
+        "SecureBrowser diagnostics session.\n"
+        "Build configuration: %s; PID: %lu.\n"
+        "SDK versions: Qt %s; CEF %s.\n",
+        SBP_BUILD_CONFIGURATION, static_cast<unsigned long>(GetCurrentProcessId()),
+        QT_VERSION_STR, CEF_VERSION);
+    // Si ni siquiera podemos escribir la cabecera, el arranque recibirá la explicación del fallo.
+    if (write_result < 0) {
+        error_message = L"No se ha podido escribir la cabecera del archivo de diagnóstico.";
+        return false;
+    }
     return true;
 }
 

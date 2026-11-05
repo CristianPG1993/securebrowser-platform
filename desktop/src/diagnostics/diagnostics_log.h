@@ -29,6 +29,9 @@ private:
     // Conecta el flujo stderr existente con el archivo propio para conservar los mensajes actuales.
     bool RedirectStandardError(std::wstring& error_message);
 
+    // Registra configuración, PID y versiones de los SDK; comunica un fallo de escritura al arranque.
+    bool WriteSessionHeader(std::wstring& error_message);
+
     // Ruta absoluta del log propio, conservada por el objeto mientras dure la ejecución.
     std::wstring application_log_path_;
 
