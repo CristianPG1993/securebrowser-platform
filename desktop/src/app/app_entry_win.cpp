@@ -1,5 +1,6 @@
 #include "app/browser_session.h"
 #include "browser/browser_app.h"
+#include "diagnostics/diagnostics_log.h"
 
 #include "include/cef_app.h"
 #include "include/cef_sandbox_win.h"
@@ -7,6 +8,7 @@
 #include <QApplication>
 #include <QMetaObject>
 
+#include <windows.h>
 #include <shlobj.h>
 
 #include <cstdio>
@@ -30,9 +32,20 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         return exit_code;
     }
 
-    // Solo el proceso principal llega aquí. El bootstrap debe aportar el contexto de aislamiento.
+    // Solo el principal prepara los logs; el objeto conserva las rutas hasta terminar el apagado.
+    sbp::DiagnosticsLog diagnostics;
+    std::wstring diagnostics_error;
+    if (!diagnostics.Initialize(diagnostics_error)) {
+        // Qt todavía no existe y stderr puede no estar disponible: mostramos el fallo mediante Windows.
+        MessageBoxW(nullptr, diagnostics_error.c_str(), L"SecureBrowser - Error de diagnóstico",
+                    MB_OK | MB_ICONERROR);
+        return 1;
+    }
+    std::fputs("Application diagnostics initialized.\n", stderr);
+
+    // El bootstrap debe aportar el contexto de aislamiento.
     if (sandbox_info == nullptr) {
-        std::fputs("CEF startup failed: missing bootstrap sandbox context.\n", stderr);
+        std::fputs("CEF startup failed: missing bootstrap sandbox context; exit code 1.\n", stderr);
         return 1;
     }
 
@@ -61,6 +74,8 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
 
     // CefSettings contiene las opciones globales del motor. Conservamos el sandbox activado.
     CefSettings settings;
+    // CEF recibe una copia de su ruta de log, dentro de la carpeta preparada para esta ejecución.
+    CefString(&settings.log_file) = diagnostics.CefLogPath();
     settings.no_sandbox = false;
     // El contenido se alojará en una ventana hija nativa, sin renderizado fuera de pantalla.
     settings.windowless_rendering_enabled = false;
@@ -75,7 +90,11 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
     if (FAILED(path_result) || local_app_data == nullptr) {
         // La API exige liberar el resultado también si falla; acepta un puntero nulo.
         CoTaskMemFree(local_app_data);
-        std::fputs("CEF startup failed: could not locate the local application data directory.\n", stderr);
+        // Conservamos el resultado nativo para distinguir el motivo del fallo sin registrar la ruta.
+        std::fprintf(stderr,
+                     "CEF startup failed: could not locate the local application data directory; "
+                     "HRESULT: 0x%08lX; exit code 1.\n",
+                     static_cast<unsigned long>(path_result));
         return 1;
     }
 
@@ -87,6 +106,8 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
 
     // Inicializa el motor una sola vez en este proceso, con el contexto recibido del bootstrap.
     // get() entrega el puntero sin abandonar la referencia que conserva cef_app.
+    // Esta marca identifica la última etapa alcanzada si CEF termina sin devolver el control.
+    std::fputs("CEF initialization starting.\n", stderr);
     if (!CefInitialize(main_args, settings, cef_app.get(), sandbox_info)) {
         // CEF puede indicar un fallo o una salida anticipada normal: conservamos su código.
         // Esta rama termina sin llamar a CefShutdown, porque la inicialización no continúa.

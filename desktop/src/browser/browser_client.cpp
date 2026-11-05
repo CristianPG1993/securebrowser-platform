@@ -54,6 +54,10 @@ void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
     if (!accepted) {
         creation_pending_ = false;
         std::fputs("CEF browser creation failed: request rejected.\n", stderr);
+        // Qt debe conservar el fallo antes de recibir la confirmación final de cierre.
+        if (callbacks_.on_browser_creation_failed) {
+            callbacks_.on_browser_creation_failed();
+        }
         NotifyClosed();
     }
 }
@@ -349,6 +353,25 @@ void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
     // CEF confirma aquí la navegación del documento; esta marca no mide su primer pintado.
     // No registramos la URL ni conservamos referencias al navegador o al frame.
     std::fprintf(stderr, "CEF main document load started; time_ms: %llu.\n",
+                 static_cast<unsigned long long>(GetTickCount64()));
+}
+
+void BrowserClient::OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                ErrorCode error_code, const CefString&, const CefString&) {
+    CEF_REQUIRE_UI_THREAD();
+    // Solo diagnosticamos el documento principal de esta instancia mientras permanece disponible.
+    if (close_requested_ || !browser || !frame || !frame->IsMain()
+        || browser->GetIdentifier() != browser_id_) {
+        return;
+    }
+    // ERR_ABORTED indica una carga cancelada; puede ocurrir al solicitar otra navegación.
+    if (error_code == ERR_ABORTED) {
+        return;
+    }
+    // El código permite identificar el fallo sin guardar direcciones ni mensajes de la página.
+    std::fprintf(stderr,
+                 "CEF main document load failed; browser_id: %d; error_code: %d; time_ms: %llu.\n",
+                 browser_id_, static_cast<int>(error_code),
                  static_cast<unsigned long long>(GetTickCount64()));
 }
 

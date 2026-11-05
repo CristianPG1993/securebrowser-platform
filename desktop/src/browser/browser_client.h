@@ -14,6 +14,8 @@ namespace sbp {
 // Agrupa los avisos del cliente. Se fijan al construirlo y se ejecutan en el hilo UI de CEF.
 struct BrowserClientCallbacks {
     std::function<void(int)> on_browser_created;
+    // Se emite si CEF rechaza la creación, antes de publicar la notificación final de cierre.
+    std::function<void()> on_browser_creation_failed;
     std::function<void()> on_browser_closed;
     // Se ejecutará en el hilo UI de CEF cuando retiremos una petición de cierre cancelada.
     std::function<void()> on_browser_close_cancelled;
@@ -104,6 +106,11 @@ public:
     // Marca cuándo se confirma el documento principal; todavía puede quedar contenido por cargar o pintar.
     void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                      TransitionType transition_type) override;
+
+    // Registra fallos del documento principal, sin incluir la URL ni el texto recibido de CEF.
+    void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                     ErrorCode error_code, const CefString& error_text,
+                     const CefString& failed_url) override;
 
     // CEF notificará aquí que una instancia del navegador ya ha sido creada.
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
