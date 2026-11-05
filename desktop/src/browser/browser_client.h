@@ -105,6 +105,11 @@ public:
     void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                      TransitionType transition_type) override;
 
+    // Registra fallos del documento principal, sin incluir la URL ni el texto recibido de CEF.
+    void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                     ErrorCode error_code, const CefString& error_text,
+                     const CefString& failed_url) override;
+
     // CEF notificará aquí que una instancia del navegador ya ha sido creada.
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
 

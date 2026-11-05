@@ -352,6 +352,25 @@ void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
                  static_cast<unsigned long long>(GetTickCount64()));
 }
 
+void BrowserClient::OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                ErrorCode error_code, const CefString&, const CefString&) {
+    CEF_REQUIRE_UI_THREAD();
+    // Solo diagnosticamos el documento principal de esta instancia mientras permanece disponible.
+    if (close_requested_ || !browser || !frame || !frame->IsMain()
+        || browser->GetIdentifier() != browser_id_) {
+        return;
+    }
+    // ERR_ABORTED indica una carga cancelada; puede ocurrir al solicitar otra navegación.
+    if (error_code == ERR_ABORTED) {
+        return;
+    }
+    // El código permite identificar el fallo sin guardar direcciones ni mensajes de la página.
+    std::fprintf(stderr,
+                 "CEF main document load failed; browser_id: %d; error_code: %d; time_ms: %llu.\n",
+                 browser_id_, static_cast<int>(error_code),
+                 static_cast<unsigned long long>(GetTickCount64()));
+}
+
 void BrowserClient::RefreshNavigationAvailability(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
     if (callbacks_.on_back_availability_changed || callbacks_.on_forward_availability_changed
