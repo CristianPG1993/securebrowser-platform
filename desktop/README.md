@@ -1031,6 +1031,62 @@ CEF arrancó y la ejecución terminó con `0`. La ruta normal está restaurada.
 Si `CefInitialize` devuelve `false`, el código conserva `CefGetExitCode` y
 regresa sin llamar a `CefShutdown`, como exige el contrato de CEF.
 
+### Errores anteriores a nuestra entrada y archivos ausentes
+
+El bootstrap oficial carga `SecureBrowser.dll`, resuelve su exportación
+`RunWinMain` y después la invoca. Si no consigue cargar la DLL o alguna de sus
+dependencias inmediatas, nuestra entrada no llega a ejecutarse y
+`DiagnosticsLog` no puede crear el log propio. El aviso y el código proceden
+entonces de Windows o del bootstrap; no tienen por qué ser el `1` que devuelve
+nuestra aplicación. En el SDK fijado hay rutas de bootstrap que terminan mediante
+`LOG(FATAL)`, con un aviso adicional según la configuración y el depurador.
+El orden y esas salidas se pueden contrastar en el
+[código oficial del bootstrap](https://github.com/chromiumembedded/cef/blob/4fa4ab516dacf6c49fc7e6e70d2b7ebce29fa35f/libcef_dll/bootstrap/bootstrap_win.cc#L1044-L1257).
+
+Las DLL Qt tienen carga diferida y su plugin de plataforma se busca al crear
+`QApplication`; sus fallos pueden ocurrir después de preparar el log propio.
+Los recursos de CEF, como `icudtl.dat`, se utilizan al arrancar el motor o sus
+subprocesos. Su ausencia puede producir un fallo nativo sin que
+`CefInitialize` llegue a devolver `false`. La última marca del log identifica la
+etapa alcanzada; no se promete convertir todos esos fallos en un retorno
+controlado. La ausencia de log propio, por sí sola, tampoco identifica la causa:
+la preparación del registro puede haber fallado y mostrado su aviso Windows.
+
+Para comprobarlo, cerrar primero todas las instancias de SecureBrowser y usar
+[`check-startup-failure.ps1`](tests/manual/check-startup-failure.ps1). El script
+crea una copia independiente en `desktop/build/startup-diagnostics-...`, conserva
+los permisos LPAC del despliegue y renombra un único archivo en esa copia.
+Excluye logs antiguos y archivos de enlace o símbolos; no modifica la salida
+original. Ejecutar los casos por separado desde la raíz:
+
+```powershell
+# DLL propia ausente: el bootstrap no puede entrar en RunWinMain.
+.\desktop\tests\manual\check-startup-failure.ps1 -Scenario ClientDll -Configuration Debug
+
+# Recurso CEF ausente: revisar el resultado nativo y la última etapa registrada.
+.\desktop\tests\manual\check-startup-failure.ps1 -Scenario CefResource -Configuration Debug
+```
+
+Cerrar cualquier aviso que aparezca. Cada caso conserva la copia y muestra el
+código de salida, `bootstrap-stderr.log` si hay contenido y el log propio que
+corresponda a su PID y fecha. Si supera 30 segundos, termina solo esa instancia
+y sus auxiliares y marca la comprobación como fallida por timeout. Anotar el
+aviso visible y el resultado real, sin sustituirlo por un `1` supuesto ni
+considerar acreditada la rama `CefInitialize == false` si no aparece su mensaje.
+
+El usuario ha comprobado `ClientDll` en Debug: salida `-2147483645`
+(`0x80000003`), diagnóstico `FATAL` del bootstrap al intentar leer
+`SecureBrowser.dll` y ausencia de log propio para ese PID. Es una terminación
+nativa anterior a `RunWinMain`, no el retorno `1` de la aplicación.
+
+También se ha comprobado `CefResource` en Debug: salida `-2147483645`
+(`0x80000003`) y log propio con la cabecera, la creación de Qt y
+`CEF initialization starting.`. A continuación aparecen el error de ICU
+`Invalid file descriptor to ICU data received.` y un `FATAL` por
+`Check failed: result.`. Este caso acredita el diagnóstico de un fallo nativo
+durante el arranque de CEF; no acredita que `CefInitialize` haya devuelto
+`false` ni que se haya llamado a `CefShutdown`.
+
 ## Ventana Qt independiente de comprobación del kit
 
 Construir el target `SecureBrowser` para preparar también las dependencias.
