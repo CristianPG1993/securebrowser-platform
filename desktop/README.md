@@ -504,17 +504,14 @@ $configuration = "Debug"
 cmake --build desktop/build --config $configuration --target SecureBrowser --parallel 4
 if ($LASTEXITCODE -ne 0) { throw "La construcción ha fallado; no ejecutar la prueba." }
 
-# Usar rutas completas y guardar el diagnóstico de stderr (salida de errores).
+# Usar rutas completas; la aplicación guarda stderr automáticamente en su log local.
 $cefExe = (Resolve-Path -LiteralPath "desktop/build/$configuration/SecureBrowser.exe").Path
-$startupLog = Join-Path $env:TEMP "sbp-cef-startup-$configuration.log"
-$process = Start-Process -FilePath $cefExe -WorkingDirectory $env:TEMP `
-    -RedirectStandardError $startupLog -PassThru
+$process = Start-Process -FilePath $cefExe -WorkingDirectory $env:TEMP -PassThru
 try {
     # Conservar el handle para leer el código aunque el proceso termine rápidamente en PowerShell 5.1.
     $null = $process.Handle
     # Interactuar con la ventana y cerrarla con la X; la terminal espera hasta entonces.
     $process.WaitForExit()
-    Get-Content -LiteralPath $startupLog
     $process.ExitCode
 } finally {
     $process.Dispose()
@@ -530,18 +527,22 @@ el tamaño disponible. Para comprobar el foco, sin hacer clic previamente en
 la página, pulsar Tab hasta seleccionar «Learn more» y Enter para abrirlo.
 Cambiar a otra aplicación con Alt+Tab y regresar: el teclado debe seguir
 funcionando en el contenido. Finalmente, cerrar con la X.
-Los mensajes del hilo principal deben seguir este orden,
+Los mensajes del hilo principal, recogidos en el
+[log local](#diagnóstico-local-de-arranque-y-carga), deben seguir este orden,
 con código final `0`:
 
 ```text
+Application diagnostics initialized.
 Qt application created in the main process.
+CEF initialization starting.
 CEF initialized successfully with bootstrap sandbox context.
 CEF browser client prepared.
 Qt event loop starting with CEF initialized.
 Qt window destroyed; event loop exit code 0.
 CEF shutdown completed.
-0
 ```
+
+El script muestra además `0` en la terminal como código de salida del proceso.
 
 Además, debe aparecer una única vez el aviso del contexto:
 
@@ -598,7 +599,9 @@ La entrada sigue este flujo:
 1. Crear `CefMainArgs` y llamar a `CefExecuteProcess` con el contexto recibido
    del bootstrap. Un resultado mayor o igual que cero termina el subproceso
    devolviendo ese mismo código, antes de crear cualquier objeto Qt.
-2. En el principal, exigir un contexto de sandbox no nulo y crear
+2. En el principal, preparar `DiagnosticsLog`, que crea la carpeta de logs y
+   conecta `stderr` con el archivo propio. Si falla, mostrar un aviso Windows
+   y devolver `1`. Después, exigir un contexto de sandbox no nulo y crear
    `QApplication`. Esta etapa entrega a Qt argumentos mínimos con el nombre
    del programa; sus buffers permanecen vivos hasta destruir la aplicación.
    CEF sigue consultando la línea de comandos nativa. Preparar `CefSettings`
@@ -631,8 +634,10 @@ cierre de cada instancia `CefBrowser`.
 
 La falta de contexto de sandbox o un fallo al localizar la carpeta del
 usuario producen un diagnóstico y código `1`, antes de inicializar el motor.
-El diagnóstico propio se escribe en `stderr`. CEF también puede escribir su
-log interno en `debug.log`, junto al ejecutable.
+El diagnóstico propio se escribe en `stderr`, conectado al archivo local de
+esta ejecución. `CefSettings::log_file` configura un archivo independiente
+para los mensajes internos de CEF; ambos se describen en
+[Diagnóstico local de arranque y carga](#diagnóstico-local-de-arranque-y-carga).
 
 Los datos internos de CEF se guardan bajo `%LOCALAPPDATA%\SecureBrowser\CEF`,
 normalmente `C:\Users\<usuario>\AppData\Local\SecureBrowser\CEF`. Windows
@@ -976,6 +981,55 @@ Queda pendiente verificar el cierre mientras `creation_pending_` está activo.
 El log revisado mostraba `CEF browser created` antes de la solicitud de cierre;
 ese intento acredita un cierre del navegador ya creado. Las nuevas
 comprobaciones de este bloque no se han repetido en Release.
+
+## Diagnóstico local de arranque y carga
+
+El proceso principal prepara `%LOCALAPPDATA%\SecureBrowser\Logs` mediante
+`DiagnosticsLog`, antes de crear `QApplication`. Los archivos se generan
+también al abrir directamente el ejecutable, sin IDE ni redirecciones en la
+terminal:
+
+- `desktop-<milisegundos>-<PID>.log`: mensajes propios enviados a `stderr`.
+- `cef-<milisegundos>-<PID>.log`: mensajes internos de CEF, configurados mediante
+  `CefSettings::log_file`. Puede no existir si el arranque termina antes de que
+  CEF prepare su registro.
+
+La pareja comparte el identificador de ejecución. La cabecera del log propio
+incluye la configuración Debug/Release, el PID y las versiones de los SDK Qt y
+CEF usados al compilar. La CRT escribe sin acumular mensajes en su búfer,
+para poder consultar el diagnóstico durante la ejecución. Los logs permanecen
+fuera del repositorio.
+
+Para consultar el último log propio después de una ejecución:
+
+```powershell
+$log = Get-ChildItem -LiteralPath "$env:LOCALAPPDATA\SecureBrowser\Logs" -Filter "desktop-*.log" |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+Get-Content -LiteralPath $log.FullName
+```
+
+`OnLoadError` registra el código del fallo del documento principal, el
+identificador del navegador y `time_ms`. Omite iframes, avisos tardíos y
+`ERR_ABORTED`, que puede corresponder a una carga cancelada. Este registro
+propio no incluye URLs ni el texto del error de la página. El log interno
+de CEF puede contener detalles adicionales; revisar su contenido antes de
+compartirlo y no versionar los archivos generados.
+
+Comprobaciones realizadas manualmente en Debug:
+
+| Caso | Resultado observado |
+| --- | --- |
+| Arranque y cierre normales | Cabecera y marca `CEF initialization starting.`, cierre con `0` y `CEF shutdown completed.`. |
+| Dominio inexistente | `OnLoadError` registra `-105` (`ERR_NAME_NOT_RESOLVED`); cierre normal con `0`. |
+| Certificado caducado (`https://expired.badssl.com/`) | `OnLoadError` registra `-201` (`ERR_CERT_DATE_INVALID`); después se carga `https://example.org/` en la misma ventana y se cierra con `0`. Se mantienen las validaciones TLS. |
+| Creación rechazada por CEF | Con renderizado sin ventana y sin `CefRenderHandler`, CEF rechaza la petición; el aviso de fallo llega a Qt antes de confirmar el cierre y la sesión devuelve `1`. La configuración temporal se retiró. |
+
+La rama de fallo de `CefInitialize` sigue pendiente de verificación: apuntar
+temporalmente `root_cache_path` al archivo de log no provocó el rechazo;
+CEF arrancó y la ejecución terminó con `0`. La ruta normal está restaurada.
+Si `CefInitialize` devuelve `false`, el código conserva `CefGetExitCode` y
+regresa sin llamar a `CefShutdown`, como exige el contrato de CEF.
 
 ## Ventana Qt independiente de comprobación del kit
 
