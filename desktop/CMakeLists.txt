@@ -233,3 +233,7 @@ set(CEF_TARGET_OUT_DIR "$<TARGET_FILE_DIR:SecureBrowser>")
 # Permite lectura y ejecución a LPAC (Less Privileged AppContainer), con herencia.
 # ACL significa Access Control List (lista de control de acceso).
 SET_LPAC_ACLS(SecureBrowser)
+
+# Prepara el inventario por configuración para las comprobaciones de Foundation.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/runtime_inventory.cmake")
+sbp_generate_runtime_inventory(SecureBrowser)

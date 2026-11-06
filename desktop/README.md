@@ -1,5 +1,8 @@
 # SecureBrowser Desktop
 
+La [guía de verificación de Foundation](tests/README.md) reúne las comprobaciones
+automáticas, la matriz visual manual y los resultados registrados para #93.
+
 ## Estado actual
 
 `SecureBrowser.exe` abre una ventana Qt con el título **SecureBrowser** y un
