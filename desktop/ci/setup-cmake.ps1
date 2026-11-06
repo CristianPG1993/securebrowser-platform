@@ -30,7 +30,7 @@ try {
     }
 
     # Reutilizamos la instalación seleccionada si ya coincide con la versión requerida.
-    $cmakePath = (Get-Command cmake -CommandType Application -ErrorAction SilentlyContinue).Source
+    $cmakePath = (Get-Command cmake -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
     if (-not (Test-CMakeVersion $cmakePath $toolchain.cmakeVersion)) {
         if ($CheckOnly) {
             throw "El CMake seleccionado en PATH no es la versión $($toolchain.cmakeVersion)."

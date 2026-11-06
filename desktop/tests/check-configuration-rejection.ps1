@@ -12,7 +12,7 @@ $testDirectory = Join-Path $buildRoot $directoryName
 $process = $null
 $exitCode = 0
 try {
-    $cmakePath = (Get-Command cmake -CommandType Application -ErrorAction Stop).Source
+    $cmakePath = (Get-Command cmake -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $null = [IO.Directory]::CreateDirectory($testDirectory)
     $outputPath = Join-Path $testDirectory 'cmake-stdout.log'
     $errorPath = Join-Path $testDirectory 'cmake-stderr.log'

@@ -19,7 +19,7 @@ try {
     }
 
     # La versión se seleccionará al preparar CI; aquí exigimos utilizar la fijada en el manifiesto.
-    $cmakePath = (Get-Command cmake -CommandType Application -ErrorAction Stop).Source
+    $cmakePath = (Get-Command cmake -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $versionOutput = @(& $cmakePath --version)
     if ($LASTEXITCODE -ne 0 -or $versionOutput.Count -eq 0 -or
         $versionOutput[0] -ne "cmake version $($toolchain.cmakeVersion)") {

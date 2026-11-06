@@ -78,7 +78,7 @@ try {
 
         # Esta revisión incorpora el soporte del repositorio Windows de Qt 6.11 y posteriores.
         # Fijamos el commit completo para que la preparación no siga una rama cambiante.
-        $pythonPath = (Get-Command $PythonExecutable -CommandType Application -ErrorAction Stop).Source
+        $pythonPath = (Get-Command $PythonExecutable -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
         $aqtEnvironment = Join-Path $desktopRoot ".deps/tools/aqt-$($qt.aqtRevision.Substring(0, 12))"
         $aqtPython = Join-Path $aqtEnvironment 'Scripts/python.exe'
         if (-not (Test-Path -LiteralPath $aqtPython -PathType Leaf)) {

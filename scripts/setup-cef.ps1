@@ -202,8 +202,8 @@ try {
     }
 }
 
-# Utiliza tar de Windows para extraer el paquete completo en una carpeta temporal.
-$tarCommand = Get-Command tar.exe -CommandType Application -ErrorAction Stop
+# Selecciona un único tar de PATH; Windows y Git pueden aportar ejecutables con ese nombre.
+$tarCommand = Get-Command tar.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $cefDirectory = Split-Path -Parent $cefRoot
 $extractionDirectory = Join-Path $cefDirectory ('.extract-' + [guid]::NewGuid().ToString('N'))
 $stagedCefRoot = Join-Path $extractionDirectory $sdkDirectoryName
