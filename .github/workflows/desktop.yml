@@ -1,0 +1,141 @@
+name: Desktop CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      use_cache:
+        description: Reutilizar la caché de dependencias
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop-build-tests:
+    name: Desktop build and tests
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read toolchain manifest
+        id: toolchain
+        run: |
+          $toolchain = Get-Content -LiteralPath desktop/ci/toolchain.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          # GitHub selecciona el runner antes de leer archivos; exigimos que coincida con el manifiesto.
+          if ($toolchain.schemaVersion -ne 1 -or $toolchain.runner -ne 'windows-2022' -or $toolchain.architecture -ne 'x64') {
+              throw 'Este workflow requiere schemaVersion 1, windows-2022 y x64.'
+          }
+          $configurations = @($toolchain.configurations)
+          if ($configurations.Count -ne 2 -or $configurations[0] -ne 'Debug' -or $configurations[1] -ne 'Release') {
+              throw 'El workflow requiere las configuraciones Debug y Release, en ese orden.'
+          }
+          $cacheIdentity = "$($toolchain.runner)-$($toolchain.architecture)-$($configurations -join '-')"
+          "cache-identity=$cacheIdentity" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      # Los SDK completos sirven para ambas configuraciones. Las salidas de build siempre se generan de nuevo.
+      - name: Restore dependency cache
+        id: dependencies
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.use_cache }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            desktop/.deps/cef
+            desktop/.deps/qt
+            desktop/.deps/tools/cmake-*
+          key: desktop-v1-${{ steps.toolchain.outputs.cache-identity }}-${{ hashFiles('desktop/ci/toolchain.json', 'desktop/cef-sdk.json', 'desktop/ci/setup-*.ps1', 'scripts/setup-cef.ps1') }}
+
+      - name: Prepare CMake
+        run: .\desktop\ci\setup-cmake.ps1
+
+      - name: Prepare Windows SDK
+        run: .\desktop\ci\setup-windows-sdk.ps1
+
+      - name: Prepare Qt
+        run: .\desktop\ci\setup-qt.ps1
+
+      - name: Prepare CEF
+        run: .\scripts\setup-cef.ps1
+
+      # Guardamos únicamente dependencias cuya preparación y comprobaciones han terminado correctamente.
+      - name: Save dependency cache
+        if: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.dependencies.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            desktop/.deps/cef
+            desktop/.deps/qt
+            desktop/.deps/tools/cmake-*
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
+
+      - name: Configure desktop
+        run: .\desktop\ci\configure.ps1
+
+      - name: Verify rejection of missing Qt
+        run: .\desktop\tests\check-configuration-rejection.ps1 -TimeoutSeconds 120
+
+      - name: Build Debug and Release
+        run: |
+          $toolchain = Get-Content -LiteralPath desktop/ci/toolchain.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          foreach ($configuration in $toolchain.configurations) {
+              Write-Host "Compilando $configuration."
+              cmake --build desktop/build --config $configuration --parallel 4
+              if ($LASTEXITCODE -ne 0) {
+                  throw "La compilación $configuration ha fallado."
+              }
+          }
+
+      - name: Verify runtime, startup and shutdown
+        run: |
+          $toolchain = Get-Content -LiteralPath desktop/ci/toolchain.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          # Las dos ejecuciones comparten el perfil CEF y deben completarse una detrás de otra.
+          foreach ($configuration in $toolchain.configurations) {
+              .\desktop\tests\check-runtime.ps1 -InventoryPath "desktop/build/runtime-inventory-$configuration.json"
+              if ($LASTEXITCODE -ne 0) {
+                  throw "El runtime $configuration está incompleto."
+              }
+              .\desktop\tests\check-startup.ps1 -Configuration $configuration -StartupTimeoutSeconds 60 -CloseTimeoutSeconds 60
+              if ($LASTEXITCODE -ne 0) {
+                  throw "La comprobación de arranque o cierre $configuration ha fallado."
+              }
+          }
+
+      - name: Describe verification coverage
+        run: |
+          @(
+              'Debug y Release: compilación, inventario de runtime, ventana hija CEF y cierre normal comprobados.'
+              ''
+              'Configuración sin Qt rechazada con el diagnóstico esperado.'
+              ''
+              'Renderizado, navegación, foco y cambio de tamaño requieren la revisión manual de desktop/tests/README.md en Windows 11.'
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Show application diagnostics on failure
+        if: failure()
+        run: |
+          $logDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'SecureBrowser/Logs'
+          if (Test-Path -LiteralPath $logDirectory -PathType Container) {
+              Get-ChildItem -LiteralPath $logDirectory -Filter '*.log' -File |
+                  Sort-Object LastWriteTimeUtc |
+                  ForEach-Object {
+                      Write-Host "Diagnóstico: $($_.Name)"
+                      Get-Content -LiteralPath $_.FullName -Tail 100
+                  }
+          }
