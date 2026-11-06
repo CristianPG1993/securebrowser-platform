@@ -65,6 +65,9 @@ try {
         throw 'El manifiesto de CI debe utilizar schemaVersion 1 y arquitectura x64.'
     }
     $qt = $toolchain.qt
+    if ($qt.aqtRevision -notmatch '^[0-9a-f]{40}$') {
+        throw 'aqtRevision debe fijar un commit completo de aqtinstall.'
+    }
     $QtDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($QtDirectory)
     $kitRoot = Join-Path $QtDirectory "$($qt.version)/$($qt.kitDirectory)"
 
@@ -73,9 +76,10 @@ try {
             throw "No existe el kit Qt requerido: $kitRoot"
         }
 
-        # aqt se instala en un entorno aislado del repositorio, con su versión fijada.
+        # Esta revisión incorpora el soporte del repositorio Windows de Qt 6.11 y posteriores.
+        # Fijamos el commit completo para que la preparación no siga una rama cambiante.
         $pythonPath = (Get-Command $PythonExecutable -CommandType Application -ErrorAction Stop).Source
-        $aqtEnvironment = Join-Path $desktopRoot ".deps/tools/aqt-$($qt.aqtVersion)"
+        $aqtEnvironment = Join-Path $desktopRoot ".deps/tools/aqt-$($qt.aqtRevision.Substring(0, 12))"
         $aqtPython = Join-Path $aqtEnvironment 'Scripts/python.exe'
         if (-not (Test-Path -LiteralPath $aqtPython -PathType Leaf)) {
             & $pythonPath -m venv $aqtEnvironment
@@ -83,9 +87,9 @@ try {
                 throw 'No se pudo crear el entorno Python para aqtinstall.'
             }
         }
-        & $aqtPython -m pip install --disable-pip-version-check "aqtinstall==$($qt.aqtVersion)"
+        & $aqtPython -m pip install --disable-pip-version-check "git+https://github.com/miurahr/aqtinstall.git@$($qt.aqtRevision)"
         if ($LASTEXITCODE -ne 0) {
-            throw "No se pudo preparar aqtinstall $($qt.aqtVersion)."
+            throw "No se pudo preparar aqtinstall en la revisión $($qt.aqtRevision)."
         }
 
         # Solo descargamos los archivos necesarios; aqt conserva su verificación de hashes.
