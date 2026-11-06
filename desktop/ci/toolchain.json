@@ -14,7 +14,14 @@
   "qt": {
     "version": "6.12.0",
     "kitDirectory": "msvc2022_64",
-    "archiveArchitecture": "win64_msvc2022_64"
+    "archiveArchitecture": "win64_msvc2022_64",
+    "aqtVersion": "3.3.0",
+    "archives": [
+      "qtbase",
+      "qtsvg",
+      "qttools",
+      "qttranslations"
+    ]
   },
   "configurations": [
     "Debug",
