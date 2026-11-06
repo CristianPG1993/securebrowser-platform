@@ -68,9 +68,22 @@ try {
                 [IO.Path]::GetFileName($resolvedTestDirectory) -ne $directoryName) {
                 throw 'La carpeta de limpieza no pertenece a esta prueba dentro de build.'
             }
-            Remove-Item -LiteralPath $resolvedTestDirectory -Recurse -Force
+            # Tras cancelar el árbol, algún archivo puede seguir bloqueado durante la finalización.
+            # Reintentamos solo en esta carpeta durante un máximo de cinco segundos.
+            $cleanupTimer = [Diagnostics.Stopwatch]::StartNew()
+            while (Test-Path -LiteralPath $resolvedTestDirectory -PathType Container) {
+                try {
+                    Remove-Item -LiteralPath $resolvedTestDirectory -Recurse -Force
+                } catch {
+                    if ($cleanupTimer.ElapsedMilliseconds -ge 5000) {
+                        throw
+                    }
+                    Start-Sleep -Milliseconds 200
+                }
+            }
+            Write-Host 'Carpeta aislada de prueba eliminada.'
         } catch {
-            [Console]::Error.WriteLine($_.Exception.Message)
+            [Console]::Error.WriteLine("Limpieza incompleta en $testDirectory. $($_.Exception.Message)")
             $exitCode = 1
         }
     }
