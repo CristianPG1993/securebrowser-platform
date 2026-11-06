@@ -1,3 +1,6 @@
 * text=auto eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# Conservamos también las líneas finales de los avisos originales de Qt.
+desktop/third_party/qt/*/licenses/* whitespace=-blank-at-eof

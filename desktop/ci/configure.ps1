@@ -32,7 +32,9 @@ try {
     }
     $QtKitDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($QtKitDirectory)
     if ([string]::IsNullOrWhiteSpace($QtLicenseDirectory)) {
-        $QtLicenseDirectory = Join-Path $QtKitDirectory '../../Licenses'
+        # aqt entrega el kit sin la carpeta común Licenses del instalador gráfico.
+        # CI utiliza los textos conservados para esta versión de Qt en el repositorio.
+        $QtLicenseDirectory = Join-Path $desktopRoot "third_party/qt/$($toolchain.qt.version)/licenses"
     }
 
     # El manifiesto CEF existente conserva la versión y el nombre de su directorio extraído.

@@ -377,6 +377,10 @@ añadir `"-DSBP_QT_LICENSE_DIR=<carpeta-que-contiene-LICENSE>"` al comando de
 configuración. CMake diagnostica la ausencia de ese archivo o de cualquiera
 de los tres inventarios Qt requeridos.
 
+El script `desktop/ci/configure.ps1` utiliza por defecto los
+[avisos conservados para Qt 6.12.0](third_party/qt/6.12.0/README.md) en el
+repositorio. Se puede elegir otra carpeta con `-QtLicenseDirectory`.
+
 El aviso `Could NOT find WrapVulkanHeaders` indica que no se han encontrado
 las cabeceras de desarrollo de Vulkan. El programa actual no las necesita;
 si aparecen `Configuring done` y `Generating done` sin errores, la
