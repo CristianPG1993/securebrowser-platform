@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "runner": "windows-2022",
+  "architecture": "x64",
+  "generator": "Visual Studio 17 2022",
+  "toolset": "v143",
+  "cmakeVersion": "3.29.2",
+  "windowsSdk": {
+    "packageVersion": "10.0.28000.2270",
+    "targetVersion": "10.0.28000.0"
+  },
+  "qt": {
+    "version": "6.12.0",
+    "kitDirectory": "msvc2022_64",
+    "archiveArchitecture": "win64_msvc2022_64"
+  },
+  "configurations": [
+    "Debug",
+    "Release"
+  ]
+}
