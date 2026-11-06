@@ -7,7 +7,9 @@
   "cmakeVersion": "3.29.2",
   "windowsSdk": {
     "packageVersion": "10.0.28000.2270",
-    "targetVersion": "10.0.28000.0"
+    "targetVersion": "10.0.28000.0",
+    "installerUrl": "https://download.microsoft.com/download/78b533c3-6724-4e28-a984-b9fa93265781/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/winsdksetup.exe",
+    "installerSha256": "e9f1bde566381355e594e2f90daf4f714eb5c7ef2c45c501ce236afe2abea300"
   },
   "qt": {
     "version": "6.12.0",
