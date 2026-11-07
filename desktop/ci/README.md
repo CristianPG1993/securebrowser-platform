@@ -1,0 +1,102 @@
+# CI de Desktop
+
+El workflow [Desktop CI](../../.github/workflows/desktop.yml) corresponde a la
+[tarea #94](https://github.com/CristianPG1993/securebrowser-platform/issues/94).
+Se ejecuta en PR hacia `main`, con los pushes a `main` y mediante ejecución
+manual. El job se llama `Desktop build and tests` y utiliza `windows-2022`.
+
+## Preparación y comprobaciones
+
+[toolchain.json](toolchain.json) fija las herramientas y el kit Qt; CEF conserva
+su [manifiesto propio](../cef-sdk.json). Los scripts utilizan sus rutas
+predeterminadas dentro de `desktop/.deps`, sin rutas del equipo del autor ni
+credenciales de descarga.
+
+aqtinstall se fija por commit completo en `qt.aqtRevision`. La versión 3.3.0
+publicada no reconoce la nueva ruta del repositorio Windows de Qt 6.11 y
+posteriores; la [revisión seleccionada](https://github.com/miurahr/aqtinstall/commit/7e5a5c3d95cf962cfc2f36c86ffa0d2c07f1a0d4)
+incorpora ese soporte. Su instalación desde Git requiere el Git y Python
+disponibles en el runner.
+
+Los scripts seleccionan el primer ejecutable de PATH cuando `Get-Command`
+encuentra varias instalaciones de una herramienta. Esto evita combinar, por
+ejemplo, las rutas de los `tar.exe` de Windows y de Git en una sola llamada.
+
+| Paso | Implementación |
+| --- | --- |
+| Preparar y seleccionar CMake | [setup-cmake.ps1](setup-cmake.ps1); verifica la versión y el SHA-256 del ZIP antes de extraer una descarga. |
+| Preparar Windows SDK | [setup-windows-sdk.ps1](setup-windows-sdk.ps1); comprueba el paquete registrado y sus componentes x64, o verifica hash y firma del instalador antes de ejecutarlo. |
+| Preparar Qt | [setup-qt.ps1](setup-qt.ps1); usa aqtinstall en un entorno Python aislado, mantiene sus comprobaciones de hashes y revisa los archivos del kit. |
+| Preparar CEF | [setup-cef.ps1](setup-cef.ps1); selecciona el 7-Zip fijado para el runner y llama al [módulo compartido](../../scripts/setup-cef.ps1), que verifica o prepara el SDK. |
+| Configurar CMake | [configure.ps1](configure.ps1); selecciona los SDK, las configuraciones y los avisos de Qt conservados en el repositorio. |
+| Comprobar rechazo de Qt ausente | [check-configuration-rejection.ps1](../tests/check-configuration-rejection.ps1). |
+| Compilar | `cmake --build desktop/build --config <configuración> --parallel 4`, primero Debug y después Release. |
+| Comprobar las dos salidas | [check-runtime.ps1](../tests/check-runtime.ps1) y [check-startup.ps1](../tests/check-startup.ps1), de forma secuencial. |
+
+Los programas externos deben devolver el código esperado. Un fallo de
+compilación o verificación detiene el job. Si la aplicación ha generado logs,
+el paso de diagnóstico muestra sus últimas líneas cuando falla el workflow.
+
+La extracción de CEF en CI utiliza 7-Zip en dos pasos: descomprime la capa BZip2
+y extrae el TAR resultante. Cada paso comprueba su código de salida; después se
+validan los archivos, la versión y la arquitectura del SDK antes de publicarlo
+en `.deps/cef`. El paso completo tiene un límite de diez minutos. El script
+compartido mantiene `tar` como opción predeterminada para las ejecuciones locales.
+
+## Construcción limpia y caché
+
+La caché incluye los SDK extraídos de CEF y Qt y la copia portátil de CMake.
+Los paquetes contienen Debug y Release y se comparten entre ambas compilaciones.
+No se cachean `desktop/build`, los perfiles CEF ni los diagnósticos de ejecución.
+Por tanto, cada job configura y compila las fuentes de nuevo.
+
+La clave incluye runner, arquitectura, las dos configuraciones y un hash de los
+manifiestos y scripts de preparación. No se utilizan claves de restauración
+alternativas. La caché se guarda después de superar la preparación de las
+dependencias, antes de compilar el proyecto.
+
+Para acreditar la preparación inicial y la reutilización:
+
+1. Abrir la ejecución de la PR y comprobar que `Restore dependency cache`
+   informa de que no encuentra la clave. Deben completarse todos los pasos.
+2. Repetir el job de Desktop sobre la misma revisión desde Actions.
+3. Comprobar que se restaura la misma clave, que los scripts reutilizan las
+   dependencias y que la compilación y verificaciones vuelven a pasar.
+4. Registrar los enlaces a ambos intentos en la PR.
+
+Para repetir una ejecución existente, abrir **Actions → Desktop CI**, entrar en
+el intento y seleccionar **Re-run jobs → Re-run all jobs**. Para repetir solo
+los trabajos fallidos, seleccionar **Re-run failed jobs**. El reintento utiliza
+el mismo commit original; los nuevos commits enviados a una PR generan otra
+ejecución con el código actualizado.
+
+Cuando el workflow esté en `main`, el botón **Run workflow** permite desmarcar
+`use_cache` para preparar las dependencias desde cero sin restaurar ni guardar
+caché. La primera ejecución de una PR también prepara las dependencias desde
+cero si su clave todavía no existe.
+
+La primera ejecución en `main` puede necesitar preparar su propia caché:
+GitHub no permite restaurar desde `main` una caché creada exclusivamente para
+una PR. La preparación se repite cuando cambia la clave o la caché deja de
+estar disponible. El motor CEF ya está precompilado en el SDK; cada ejecución
+compila nuestra aplicación y el adaptador `libcef_dll_wrapper`, además de
+realizar las comprobaciones Debug y Release.
+
+El workflow utiliza el runner estándar y no amplía los límites de caché del
+repositorio ni publica artefactos de distribución.
+
+## Alcance de las pruebas
+
+La prueba de arranque acredita la aparición de la ventana hija nativa de CEF,
+el cierre normal, la salida 0 y las marcas de creación y apagado del mismo
+navegador. No comprueba el contenido renderizado ni navega mediante los
+controles de Qt.
+
+Renderizado, navegación, foco, cambio de tamaño y comprobación visual del
+cierre requieren la [revisión manual en Windows 11](../tests/README.md), tanto
+en Debug como en Release.
+
+Antes del merge manual, revisar los checks de la última revisión de la PR,
+incluido `Backend build and tests`. Después del merge, comprobar también la
+ejecución correspondiente al push a `main`. Este workflow no modifica las
+reglas de protección del repositorio.
