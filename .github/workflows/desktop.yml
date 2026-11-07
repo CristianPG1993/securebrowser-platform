@@ -72,7 +72,8 @@ jobs:
         run: .\desktop\ci\setup-qt.ps1
 
       - name: Prepare CEF
-        run: .\scripts\setup-cef.ps1
+        timeout-minutes: 10
+        run: .\desktop\ci\setup-cef.ps1
 
       # Guardamos únicamente dependencias cuya preparación y comprobaciones han terminado correctamente.
       - name: Save dependency cache

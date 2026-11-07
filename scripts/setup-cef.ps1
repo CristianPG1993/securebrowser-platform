@@ -4,7 +4,12 @@
 param(
     # Permite elegir otro destino; por defecto utiliza desktop/.deps.
     [ValidateNotNullOrEmpty()]
-    [string]$DependenciesDirectory = (Join-Path $PSScriptRoot '../desktop/.deps')
+    [string]$DependenciesDirectory = (Join-Path $PSScriptRoot '../desktop/.deps'),
+    # CI puede seleccionar 7-Zip; las ejecuciones locales conservan tar por defecto.
+    [ValidateSet('Tar', 'SevenZip')]
+    [string]$ArchiveExtractor = 'Tar',
+    [ValidateNotNullOrEmpty()]
+    [string]$SevenZipExecutable = '7z.exe'
 )
 
 # Detiene el script si un cmdlet encuentra un error.
@@ -202,8 +207,9 @@ try {
     }
 }
 
-# Selecciona un único tar de PATH; Windows y Git pueden aportar ejecutables con ese nombre.
-$tarCommand = Get-Command tar.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
+# Selecciona un único ejecutable; PATH puede contener varias instalaciones.
+$extractorName = if ($ArchiveExtractor -eq 'SevenZip') { $SevenZipExecutable } else { 'tar.exe' }
+$extractorCommand = Get-Command $extractorName -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $cefDirectory = Split-Path -Parent $cefRoot
 $extractionDirectory = Join-Path $cefDirectory ('.extract-' + [guid]::NewGuid().ToString('N'))
 $stagedCefRoot = Join-Path $extractionDirectory $sdkDirectoryName
@@ -219,10 +225,28 @@ foreach ($operationPath in @($extractionDirectory, $stagedCefRoot, $cefRoot)) {
 try {
     New-Item -ItemType Directory -Path $extractionDirectory -Force | Out-Null
     Write-Output 'Extracting the verified CEF archive into a temporary directory.'
-    & $tarCommand.Source -xf $archivePath -C $extractionDirectory
-    # Los programas externos requieren comprobar explícitamente su código de salida.
-    if ($LASTEXITCODE -ne 0) {
-        throw "CEF archive extraction failed with exit code $LASTEXITCODE."
+    if ($ArchiveExtractor -eq 'SevenZip') {
+        # BZip2 contiene un TAR: descomprimimos ambas capas dentro de la carpeta aislada.
+        Write-Output 'Decompressing the CEF BZip2 layer with 7-Zip.'
+        & $extractorCommand.Source x $archivePath "-o$extractionDirectory" -y -bsp0
+        if ($LASTEXITCODE -ne 0) {
+            throw "CEF BZip2 decompression failed with exit code $LASTEXITCODE."
+        }
+        $tarPath = Join-Path $extractionDirectory ($manifest.archive -replace '\.bz2$', '')
+        if (-not (Test-Path -LiteralPath $tarPath -PathType Leaf)) {
+            throw "CEF TAR archive was not produced: $tarPath"
+        }
+        Write-Output 'Extracting the CEF TAR layer with 7-Zip.'
+        & $extractorCommand.Source x $tarPath "-o$extractionDirectory" -y -bsp0
+        if ($LASTEXITCODE -ne 0) {
+            throw "CEF TAR extraction failed with exit code $LASTEXITCODE."
+        }
+    } else {
+        & $extractorCommand.Source -xf $archivePath -C $extractionDirectory
+        # Los programas externos requieren comprobar explícitamente su código de salida.
+        if ($LASTEXITCODE -ne 0) {
+            throw "CEF archive extraction failed with exit code $LASTEXITCODE."
+        }
     }
     # Valida el SDK antes de trasladarlo a la ubicación que utilizará el proyecto.
     Assert-CefSdk -Root $stagedCefRoot -ExpectedVersion $manifest.version
