@@ -431,9 +431,11 @@ y repetir un enrollment utilizado nunca lo reactiva automáticamente.
 | `createdAt` | Obligatorio; lo asigna el backend al crear la política y se conserva. |
 | `updatedAt` | Obligatorio; lo asigna y actualiza el backend, también cuando cambian sus reglas. |
 
-Una DENYLIST vacía no bloquea elementos por pertenecer a la lista. Una ALLOWLIST
-vacía bloquea todos los elementos sometidos a esa funcionalidad. Se mantienen
-las reglas de validación segura de URLs y de archivos sin extensión.
+Con la funcionalidad activada, una DENYLIST vacía no bloquea elementos por
+pertenecer a la lista y una ALLOWLIST vacía bloquea todos los elementos sometidos
+a esa funcionalidad. Desactivarla omite sus reglas, manteniendo los requisitos
+generales de política válida, autorización y validación segura. El bloqueo por
+ausencia de extensión se aplica solo con Download Control activado.
 
 La edición de la política y de sus reglas se confirma en una única transacción.
 Las modificaciones concurrentes de esa configuración se coordinan bloqueando
@@ -709,6 +711,12 @@ seguir válidos hasta caducar. El detalle se recoge en la
 Cada funcionalidad de una Policy tiene un indicador de activación:
 `urlFilteringEnabled` para URL Filtering y `downloadControlEnabled` para Download Control.
 
+El comportamiento de Desktop, sus controles generales y el alcance del MVP se
+concretan en el [diseño del Security Engine](security-engine.md) y en los
+[ADR-0012](../adr/0012-desktop-policy-availability.md),
+[ADR-0013](../adr/0013-desktop-url-filtering-boundaries.md) y
+[ADR-0014](../adr/0014-desktop-download-authorization.md).
+
 ### URL Filtering
 
 - Utiliza el modo DENYLIST o ALLOWLIST.
@@ -722,7 +730,10 @@ Cada funcionalidad de una Policy tiene un indicador de activación:
 - Utiliza el modo DENYLIST o ALLOWLIST.
 - Las extensiones se normalizan en minúsculas y sin el punto inicial.
 - Se utiliza la última extensión del archivo.
-- Los archivos sin extensión se bloquean en el MVP.
+- Los archivos sin extensión, incluidos nombres como `.env`, se bloquean con
+  Download Control activado. Con el control desactivado pueden permitirse si
+  cumplen los demás requisitos de autorización y guardado.
+- Los nombres inválidos se rechazan también con el control desactivado.
 
 ## Eventos de seguridad
 
@@ -736,6 +747,11 @@ Los tipos previstos son:
 - `DOWNLOAD_BLOCKED`.
 - `POLICY_UPDATED`: generado por Desktop cuando un dispositivo aplica
   correctamente una actualización de su política.
+
+El [ADR-0015](../adr/0015-desktop-security-event-production.md) concreta los cambios
+que producen `POLICY_UPDATED`, excluyendo primera carga, renovaciones sin cambios
+y modificaciones exclusivas de metadatos. También define la entrega con contexto
+de origen y el formato estructurado de `details` que producirá Desktop.
 
 El sistema debe soportar funcionamiento offline:
 

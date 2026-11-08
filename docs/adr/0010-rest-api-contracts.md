@@ -85,6 +85,19 @@ los registros previamente existentes. Las respuestas se entregan tras commit.
 Estos reintentos no introducen deduplicación general para todas las creaciones.
 Ante resultado incierto se consulta el estado antes de repetir una emisión.
 
+### Uso por el Security Engine (2026-11-08)
+
+Los ADR-0012 y ADR-0015 concretan cómo Desktop consume estos contratos. REST/Auth
+interpretará las respuestas y sus errores para el contexto de sesión e instalación
+que solicitó la política, y comunicará estados al motor sin introducir HTTP o JWT
+en `PolicyManager`.
+
+Desktop producirá `details` como JSON compacto versionado dentro de una cadena.
+El contrato del servidor conservará el campo cadena opcional y nullable, con su
+límite existente; no exigirá que todos los clientes envíen ese formato interno.
+Los reenvíos de Desktop conservarán el contenido serializado y el contexto de
+origen conforme al ADR-0015.
+
 ### Errores
 
 Se usan 400 para validación, 401 para autenticación, 403 para rol no permitido,
@@ -137,3 +150,5 @@ PostgreSQL real. Esta revisión documental no ejecuta pruebas de backend.
 - [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html).
 - [Spring MVC: respuestas de error](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-rest-exceptions.html).
 - [Tarea #8](https://github.com/CristianPG1993/securebrowser-platform/issues/8).
+- [ADR-0012: validación y contexto de adquisición de políticas](0012-desktop-policy-availability.md).
+- [ADR-0015: contrato de eventos producido por Desktop](0015-desktop-security-event-production.md).
