@@ -118,9 +118,22 @@ No se añade deshabilitación de cuentas ni User.active. Device.active represent
 la actividad de una instalación y su ocupación de licencia; no es un estado
 de cuenta ni una condición de login.
 
-Desktop puede seguir usando su política y registrando eventos offline al
-caducar el JWT; al recuperar conexión utiliza renovación o nuevo login según
-el estado y vigencia del refresh token.
+Desktop puede seguir usando su política offline al caducar el JWT únicamente
+mientras conserve una política vigente y autorización
+para la misma sesión e instalación. El ADR-0012 concreta una vigencia local de
+15 minutos desde la última obtención y validación correctas, medida con reloj
+monotónico. La caducidad del JWT, la desconexión o un fallo de renovación no
+iniciarán otro plazo.
+
+Desktop podrá seguir registrando eventos offline conforme al ADR-0015, incluidos
+los bloqueos aplicados por falta de una política vigente.
+
+Al recuperar conexión se utilizará renovación o nuevo login según el estado
+y vigencia del refresh token. Un `401` por sí solo no confirmará el fin de sesión;
+si REST/Auth confirma que no puede recuperarse, se terminará. Las denegaciones
+explícitas de la instalación se tratarán conforme al ADR-0012 y cancelarán las
+descargas pendientes y activas conforme al ADR-0014. Estas concreciones del
+Security Engine, aprobadas el 2026-11-08, no cambian las duraciones de los tokens.
 
 ## Consecuencias
 
@@ -166,3 +179,6 @@ con PostgreSQL real. La lista completa está en el documento de autenticación.
 - [RFC 7518](https://www.rfc-editor.org/rfc/rfc7518.html).
 - [RFC 9700: protección de refresh tokens](https://www.rfc-editor.org/rfc/rfc9700.html#section-4.14).
 - [Tarea #6](https://github.com/CristianPG1993/securebrowser-platform/issues/6).
+- [ADR-0012: vigencia local, contexto y errores de adquisición](0012-desktop-policy-availability.md).
+- [ADR-0014: autorización y cancelación de descargas](0014-desktop-download-authorization.md).
+- [ADR-0015: producción y entrega de eventos](0015-desktop-security-event-production.md).
