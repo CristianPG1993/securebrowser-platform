@@ -36,7 +36,7 @@ tabla. Las versiones de herramientas están recogidas en
 | Lenguaje | C++20. |
 | Windows SDK (Software Development Kit, kit de desarrollo de software) | Paquete `10.0.28000.2270`; identificador de instalación para CMake: `10.0.28000.0`. |
 | CMake de referencia | `3.29.2`. |
-| Extractor de la ruta principal | 7-Zip `26.05` x64, instalado en `%ProgramFiles%\7-Zip`. |
+| Extractor local | 7-Zip x64 en `%ProgramFiles%\7-Zip`; versión encontrada en la validación local: `26.06`. CI fija `26.05`. |
 | Generador y arquitectura | `Visual Studio 17 2022`, `x64`, toolset `v143`. |
 | Qt | `6.12.0`, kit `msvc2022_64`, con Qt Widgets y bibliotecas Debug y Release. |
 | CEF | `156.0.14+g4fa4ab5+chromium-156.0.8078.48`, distribución Standard `windows64`. |
@@ -53,8 +53,10 @@ Qt necesita Python 3.10 o posterior, con `venv` y `pip`, disponible como
 `python`. Ese mínimo procede de la [revisión fijada de aqtinstall](https://github.com/miurahr/aqtinstall/blob/7e5a5c3d95cf962cfc2f36c86ffa0d2c07f1a0d4/pyproject.toml).
 Git y Python son herramientas de preparación; sus versiones no están fijadas
 en el manifiesto de CI. Anotar las utilizadas al registrar la validación.
-La ruta principal de esta guía utiliza 7-Zip como CI; el script compartido
-admite también el `tar.exe` incluido en Windows.
+La ruta local indica explícitamente el ejecutable 7-Zip al script compartido.
+La versión utilizada se registra con la prueba; el wrapper de CI exige la
+versión exacta de su manifiesto. El script compartido admite también el
+`tar.exe` incluido en Windows.
 
 La preparación del runtime necesita los inventarios `sbom/` del kit Qt y
 sus avisos comunes. Estos últimos pueden proceder de `Licenses/` del
@@ -126,9 +128,19 @@ guía en la terminal habitual. Una instalación existente que supera las comprob
 se reutiliza. `-CheckOnly` permite comprobarla sin instalar nada.
 El paquete y la carpeta `10.0.28000.0` son identificadores distintos.
 
-Instalar [7-Zip 26.05 x64 desde su origen oficial](https://www.7-zip.org/),
-en su ubicación habitual `%ProgramFiles%\7-Zip`. El script de CEF comprueba
-esa ubicación y la versión del ejecutable.
+Instalar [7-Zip x64 desde su origen oficial](https://www.7-zip.org/) en su
+ubicación habitual `%ProgramFiles%\7-Zip`. Antes de preparar CEF, comprobar
+la ruta y anotar la versión:
+
+```powershell
+$sevenZipExecutable = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+(Get-Item -LiteralPath $sevenZipExecutable -ErrorAction Stop).VersionInfo.FileVersion
+```
+
+Si la ruta no existe, completar la instalación antes de continuar. El intento
+local encontró `26.06`. Esa instalación se puede utilizar con el script
+compartido; `desktop/ci/setup-cef.ps1` está reservado en esta guía al runner,
+donde comprueba exactamente la versión `26.05` fijada para CI.
 
 Preparar CMake en la terminal donde se continuará trabajando:
 
@@ -198,11 +210,20 @@ explícitamente el mismo kit y dejan preparada `$qtKitDirectory`.
 
 El [manifiesto CEF](cef-sdk.json) fija la distribución Standard `windows64`,
 su versión, URL oficial, tamaño y SHA-1. El motor ya está compilado en ese SDK.
-Desde la raíz del clon, utilizar la misma extracción con 7-Zip que CI:
+Desde la raíz del clon, utilizar el script compartido con el 7-Zip local:
 
 ```powershell
-.\desktop\ci\setup-cef.ps1
-if ($LASTEXITCODE -ne 0) { throw 'La preparación de CEF ha fallado.' }
+$sevenZipExecutable = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+.\scripts\setup-cef.ps1 -ArchiveExtractor SevenZip -SevenZipExecutable $sevenZipExecutable
+if (-not $?) { throw 'La preparación de CEF ha fallado.' }
+```
+
+Este script conserva la verificación de la descarga y del SDK. A diferencia
+del wrapper del runner, permite indicar la instalación local del extractor.
+No es necesario sustituir un 7-Zip local `26.06` por la referencia `26.05`
+de CI. Solo después de una preparación correcta, resolver la ruta del SDK:
+
+```powershell
 $cefManifest = Get-Content -LiteralPath 'desktop/cef-sdk.json' -Raw -Encoding UTF8 | ConvertFrom-Json
 $cefDirectoryName = $cefManifest.archive -replace '\.tar\.bz2$', ''
 $cefRoot = (Resolve-Path -LiteralPath (Join-Path 'desktop/.deps/cef' $cefDirectoryName)).Path
@@ -233,7 +254,7 @@ Como alternativa local, el script compartido admite `tar.exe` por defecto y
 
 ```powershell
 .\scripts\setup-cef.ps1 -DependenciesDirectory 'C:/SBP-deps'
-if ($LASTEXITCODE -ne 0) { throw 'La preparación alternativa de CEF ha fallado.' }
+if (-not $?) { throw 'La preparación alternativa de CEF ha fallado.' }
 ```
 
 En ese caso, asignar a `$cefRoot` la ruta `CEF_ROOT` mostrada antes de configurar.
@@ -559,7 +580,8 @@ distinguen esos casos de un retorno controlado de inicialización.
 | El script rechaza la versión de CMake | Repetir `setup-cmake.ps1` en esa terminal y comprobar `cmake --version`. |
 | No se encuentra Python o falla aqtinstall | Seleccionar Python 3.10 o posterior con `-PythonExecutable`; comprobar Git y conectividad. Se usa la revisión de aqtinstall del manifiesto. |
 | Qt está incompleto o no coincide | Revisar el kit indicado por el diagnóstico: versión, arquitectura, ambas configuraciones, plugins e inventarios. No continuar con una preparación fallida. |
-| Falta 7-Zip o la versión no coincide | Instalar 26.05 x64 en la ubicación de requisitos o utilizar explícitamente la alternativa con `tar.exe`. |
+| Falta 7-Zip | Instalarlo en la ubicación de requisitos y comprobar la versión antes de preparar CEF. |
+| El wrapper de CI rechaza un 7-Zip local distinto de 26.05 | Utilizar la ruta local documentada con `scripts/setup-cef.ps1 -ArchiveExtractor SevenZip -SevenZipExecutable ...`. Registrar la versión usada. |
 | La extracción tarda mucho con `tar.exe` | Utilizar la ruta principal con 7-Zip. No corresponde a compilar el motor CEF. |
 | CEF falla por tamaño, SHA-1, versión o arquitectura | Corregir o apartar la descarga/SDK que identifica el diagnóstico y repetir la preparación; se conservan los archivos existentes incorrectos. |
 | CMake no encuentra Qt o CEF | Recuperar `$qtKitDirectory` y `$cefRoot`; deben contener el kit y el SDK, respectivamente, no sus carpetas padre. |
@@ -630,10 +652,11 @@ El [registro de validación](docs/clean-clone-validation.md) diferencia:
 
 - Las verificaciones y pruebas visuales ya registradas para #93.
 - El CI limpio, con caché y posterior al merge de #94.
-- La ejecución literal de esta guía desde un clon limpio para #95, **pendiente**.
+- La preparación, compilación y prueba visual Debug/Release desde un clon
+  limpio para #95, confirmadas por el autor, con el ajuste de 7-Zip documentado.
 
-Completar el último registro con la revisión probada, entorno, resultados
-Debug/Release y diagnósticos reales. Una ejecución en el equipo o clon de
-desarrollo anterior no sustituye esa comprobación. El
+El último registro identifica revisión, entorno, resultados y límites de la
+prueba local. Las comprobaciones automáticas previas se aprovechan como
+evidencia de CI y no se presentan como repeticiones en el clon nuevo. El
 [CI de Desktop](ci/README.md) comprueba compilación, runtime y arranque/cierre;
-la validación visual se realiza en Windows 11.
+la validación visual local se ha realizado en Windows 11.

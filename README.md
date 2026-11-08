@@ -68,9 +68,9 @@ Desktop Foundation incorpora un navegador CEF embebido en Qt 6 Widgets:
 carga HTTP/HTTPS, barra de direcciones sincronizada, Atrás, Adelante y
 Recargar, adaptación al tamaño, gestión de foco y cierre coordinado. Incluye
 confirmación de abandono cuando la página la solicita y diagnósticos locales.
-Las verificaciones anteriores en Windows 11 x64 están registradas para
-Debug y Release; la validación específica de la guía desde un clon limpio
-se registra por separado y permanece pendiente.
+Las verificaciones en Windows 11 x64 y la validación de la guía desde un
+clon limpio están registradas para Debug y Release. El registro identifica
+la revisión probada, los resultados y sus límites.
 
 El [README de Desktop](desktop/README.md) reúne requisitos y versiones,
 preparación de dependencias, compilación, ejecución, sandbox, runtime, logs
