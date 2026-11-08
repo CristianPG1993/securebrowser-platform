@@ -134,7 +134,8 @@ Start-Process -FilePath $executable
 Las pruebas adicionales de confirmación `beforeunload`, bloqueo de popups y
 cierre durante una carga lenta están descritas en el
 [README de Desktop](../README.md#confirmación-de-abandono-y-pruebas-manuales-de-cierre).
-Sus resultados anteriores se conservan allí con sus limitaciones.
+Sus resultados anteriores se conservan con sus limitaciones en las
+[notas de implementación](../docs/implementation-notes.md#confirmación-de-abandono-y-pruebas-manuales-de-cierre).
 
 ## Límites de cobertura
 
