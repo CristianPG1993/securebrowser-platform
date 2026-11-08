@@ -43,7 +43,7 @@ El listado de Device limita al ADMIN a su compañía y al USER a sus instalacion
 El propietario de una instalación activa puede obtener su política y registrar
 su última comunicación con la hora del backend.
 
-Desktop puede enviar lotes atómicos de eventos desde sus instalaciones,
+La API recibe lotes atómicos de eventos desde las instalaciones,
 incluidas las inactivas. El backend reconoce reenvíos por UUID, conserva la
 primera recepción y limita las consultas de historial a la compañía o al
 propietario. Postman demuestra el recorrido de autenticación, edición de Policy,
@@ -57,19 +57,25 @@ configuración, el arranque y las 28 comprobaciones Postman.
 
 La entrega del bloque 5 cierra el backend MVP: su alcance queda congelado en
 autenticación y datos demo, Policy, consultas de Device, SecurityEvent y entrega
-reproducible. El siguiente desarrollo pasa a C++/CEF. No se incorporan CRUDs
+reproducible. El desarrollo continúa en Desktop C++/CEF. No se incorporan CRUDs
 adicionales ni nuevas funcionalidades backend; las funcionalidades aplazadas
 quedan fuera del alcance implementado.
 
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).
 
-Desktop Foundation incorpora ya un navegador CEF embebido en Qt 6 Widgets:
-carga HTTPS, adapta el contenido al tamaño de la ventana, gestiona el foco
-y coordina el cierre. Se ha comprobado localmente en Windows 11 x64, en
-Debug y Release. Las condiciones, límites y comandos están en el
-[README de Desktop](desktop/README.md). La navegación mediante controles
-propios, REST, SQLite y Security Engine se incorporarán en pasos posteriores.
+Desktop Foundation incorpora un navegador CEF embebido en Qt 6 Widgets:
+carga HTTP/HTTPS, barra de direcciones sincronizada, Atrás, Adelante y
+Recargar, adaptación al tamaño, gestión de foco y cierre coordinado. Incluye
+confirmación de abandono cuando la página la solicita y diagnósticos locales.
+Las verificaciones anteriores en Windows 11 x64 están registradas para
+Debug y Release; la validación específica de la guía desde un clon limpio
+se registra por separado y permanece pendiente.
+
+El [README de Desktop](desktop/README.md) reúne requisitos y versiones,
+preparación de dependencias, compilación, ejecución, sandbox, runtime, logs
+y problemas conocidos. Foundation todavía no se comunica con el backend ni
+implementa REST, login, políticas, Security Engine, SQLite o pestañas completas.
 
 ## Integración continua
 
@@ -89,8 +95,19 @@ antes de fusionar. CI se verificó en la PR #56 y después de su fusión.
 Los resultados y las reglas de revisión están en
 [CONTRIBUTING.md](CONTRIBUTING.md#validación-y-mantenimiento-del-check-obligatorio).
 
+El workflow [Desktop CI](.github/workflows/desktop.yml) utiliza el runner
+Windows estándar, herramientas fijadas y caché de dependencias. Compila
+Debug y Release y comprueba el runtime, la creación del navegador y el cierre
+normal, además del rechazo de una configuración sin Qt. Se ejecuta en las
+PR hacia `main`, pushes a `main` y mediante ejecución manual.
+La [guía de CI Desktop](desktop/ci/README.md) explica la preparación y los
+reintentos; el renderizado, navegación, foco y tamaño requieren las
+[pruebas visuales en Windows 11](desktop/tests/README.md#matriz-visual-manual).
+
 ## Documentación
 
+- [Compilar y ejecutar Desktop Foundation](desktop/README.md).
+- [Validación de la guía desde un clon limpio](desktop/docs/clean-clone-validation.md).
 - [Arquitectura general](docs/architecture/overview.md).
 - [Modelo de dominio del MVP](docs/architecture/domain-model.md).
 - [Decisiones arquitectónicas (ADR)](docs/adr/).
