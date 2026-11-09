@@ -14,6 +14,80 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
+# La aplicación conserva el flujo habitual; las pruebas se activan explícitamente.
+option(SBP_BUILD_DESKTOP_APP "Build the Qt and CEF desktop application" ON)
+option(BUILD_TESTING "Build the security core tests" OFF)
+include(CTest)
+
+# El núcleo se compila sin enlazar Qt, CEF ni bibliotecas de persistencia o red.
+add_library(sbp_security_core STATIC
+    src/security/filter_mode.h
+    src/security/security_action.h
+    src/security/security_reason.h
+    src/security/security_decision.h
+    src/security/security_decision.cpp
+)
+target_include_directories(sbp_security_core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+if(BUILD_TESTING)
+    # Utiliza las fuentes preparadas explícitamente por setup-googletest.ps1.
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/googletest.json" SBP_GOOGLETEST_MANIFEST)
+    string(JSON SBP_GOOGLETEST_VERSION GET "${SBP_GOOGLETEST_MANIFEST}" version)
+    set(SBP_GOOGLETEST_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/.deps/googletest/googletest-${SBP_GOOGLETEST_VERSION}"
+        CACHE PATH "Root directory of the approved GoogleTest source distribution"
+    )
+    foreach(SBP_GTEST_REQUIRED_FILE IN ITEMS
+        CMakeLists.txt googletest/CMakeLists.txt
+        googletest/include/gtest/gtest.h googletest/src/gtest-all.cc
+        googletest/src/gtest_main.cc
+    )
+        if(NOT EXISTS "${SBP_GOOGLETEST_ROOT}/${SBP_GTEST_REQUIRED_FILE}")
+            message(FATAL_ERROR
+                "GoogleTest sources not found or incomplete. Run scripts/setup-googletest.ps1 "
+                "or set -DSBP_GOOGLETEST_ROOT=<the prepared source root>."
+            )
+        endif()
+    endforeach()
+
+    # Rechaza una copia distinta de la versión fijada en el manifiesto.
+    file(STRINGS "${SBP_GOOGLETEST_ROOT}/CMakeLists.txt" SBP_GTEST_VERSION_LINE
+        REGEX "^set\\(GOOGLETEST_VERSION "
+    )
+    if(NOT SBP_GTEST_VERSION_LINE STREQUAL "set(GOOGLETEST_VERSION ${SBP_GOOGLETEST_VERSION})")
+        message(FATAL_ERROR "GoogleTest source version does not match googletest.json.")
+    endif()
+
+    # Limita estas opciones a GoogleTest: biblioteca estática y el mismo CRT dinámico.
+    block()
+        set(BUILD_SHARED_LIBS OFF)
+        set(BUILD_GMOCK OFF)
+        set(INSTALL_GTEST OFF)
+        set(GTEST_HAS_ABSL OFF)
+        set(gtest_build_tests OFF)
+        set(gtest_build_samples OFF)
+        set(gtest_force_shared_crt ON)
+        add_subdirectory("${SBP_GOOGLETEST_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/googletest"
+            EXCLUDE_FROM_ALL
+        )
+    endblock()
+
+    # GoogleTest proporciona main(); nuestras pruebas enlazan únicamente el núcleo y gtest.
+    add_executable(sbp_security_tests tests/security/security_decision_test.cpp)
+    target_link_libraries(sbp_security_tests PRIVATE sbp_security_core GTest::gtest_main)
+
+    # Descubre también cada caso parametrizado al ejecutar CTest.
+    include(GoogleTest)
+    gtest_discover_tests(sbp_security_tests DISCOVERY_MODE PRE_TEST)
+endif()
+
+# Termina la configuración antes de buscar los SDK cuando solo se construye el núcleo.
+if(NOT SBP_BUILD_DESKTOP_APP)
+    return()
+endif()
+
 set(Qt6_DIR "" CACHE PATH "Directory containing Qt6Config.cmake for the approved Qt kit")
 
 if(NOT Qt6_DIR OR NOT EXISTS "${Qt6_DIR}/Qt6Config.cmake")
@@ -155,6 +229,7 @@ target_link_options(SecureBrowser PRIVATE
 # Contienen las funciones para obtener la carpeta del usuario y liberar su resultado.
 target_link_options(SecureBrowser PRIVATE /DELAYLOAD:shell32.dll /DELAYLOAD:ole32.dll)
 target_link_libraries(SecureBrowser PRIVATE
+    sbp_security_core
     Qt6::Widgets
     libcef_dll_wrapper
     libcef_lib
