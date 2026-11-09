@@ -47,15 +47,27 @@ ctest --test-dir desktop/build/tests -C Release --output-on-failure --no-tests=e
 ```
 
 CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
-casos parametrizados. Actualmente se esperan 14 casos de
-[security_decision_test.cpp](security/security_decision_test.cpp): uno para
-`Allowed` y trece para los motivos de bloqueo. Comprueban la acción obtenida
-y la conservación del motivo recibido por el constructor.
+casos parametrizados. Actualmente se esperan 20 casos:
+
+- [security_decision_test.cpp](security/security_decision_test.cpp): 14 casos,
+  uno para `Allowed` y trece para los motivos de bloqueo. Comprueban la acción
+  obtenida y la conservación del motivo recibido por el constructor.
+- [url_filtering_config_test.cpp](security/url_filtering_config_test.cpp): tres
+  casos que comprueban la conservación del modo y las reglas al construir una
+  configuración desactivada, una `ALLOWLIST` vacía y la independencia respecto
+  a cambios posteriores en el vector de origen.
+- [download_control_config_test.cpp](security/download_control_config_test.cpp):
+  tres casos equivalentes para la configuración de extensiones de descarga.
 
 El 9 de noviembre de 2026, el usuario confirmó las 14 pruebas superadas
 en Debug y en Release. En Debug, CTest informó de 0 fallos y 4,68 segundos.
-Esta comprobación acredita `SecurityDecision`; la implementación y validación
-de `PolicySnapshot` y `PolicyManager` de la tarea #115 siguen pendientes.
+Después de incorporar `UrlFilteringConfig`, confirmó las 17 pruebas superadas
+en ambas configuraciones. Al añadir `DownloadControlConfig`, confirmó las
+20 pruebas superadas en Debug y en Release. Estas comprobaciones acreditan
+`SecurityDecision` y la conservación de datos de ambas configuraciones;
+no acreditan la evaluación de dominios o archivos ni su aplicación en CEF.
+La implementación y validación de
+`PolicySnapshot` y `PolicyManager` de la tarea #115 siguen pendientes.
 
 La aplicación conserva `SBP_BUILD_DESKTOP_APP=ON` y `BUILD_TESTING=OFF` por
 defecto. Las fuentes y salidas de GoogleTest permanecen en `.deps/` y `build/`;
