@@ -21,11 +21,15 @@ include(CTest)
 
 # El núcleo se compila sin enlazar Qt, CEF ni bibliotecas de persistencia o red.
 add_library(sbp_security_core STATIC
+    src/security/download_control_config.h
+    src/security/download_control_config.cpp
     src/security/filter_mode.h
     src/security/security_action.h
     src/security/security_reason.h
     src/security/security_decision.h
     src/security/security_decision.cpp
+    src/security/url_filtering_config.h
+    src/security/url_filtering_config.cpp
 )
 target_include_directories(sbp_security_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -75,7 +79,11 @@ if(BUILD_TESTING)
     endblock()
 
     # GoogleTest proporciona main(); nuestras pruebas enlazan únicamente el núcleo y gtest.
-    add_executable(sbp_security_tests tests/security/security_decision_test.cpp)
+    add_executable(sbp_security_tests
+        tests/security/download_control_config_test.cpp
+        tests/security/security_decision_test.cpp
+        tests/security/url_filtering_config_test.cpp
+    )
     target_link_libraries(sbp_security_tests PRIVATE sbp_security_core GTest::gtest_main)
 
     # Descubre también cada caso parametrizado al ejecutar CTest.
