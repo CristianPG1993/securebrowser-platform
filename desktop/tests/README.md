@@ -1,11 +1,67 @@
-# Verificación de Desktop Foundation
+# Verificación de Desktop
 
-Esta guía corresponde a la [tarea #93](https://github.com/CristianPG1993/securebrowser-platform/issues/93).
+Esta guía recoge la verificación de Desktop Foundation de la
+[tarea #93](https://github.com/CristianPG1993/securebrowser-platform/issues/93)
+y las pruebas unitarias del Security Engine iniciadas en la
+[tarea #115](https://github.com/CristianPG1993/securebrowser-platform/issues/115).
 Ejecutar los comandos desde la raíz del repositorio, con Windows PowerShell 5.1
 o PowerShell en Windows. La preparación de MSVC, Qt y CEF y los comandos de
 construcción están en el [README de Desktop](../README.md).
 
-## Comprobaciones automáticas
+## Pruebas unitarias del Security Engine
+
+Estas pruebas requieren CMake 3.29 o posterior, MSVC 2022 x64 con el toolset
+v143 y el SDK de Windows 10.0.28000.0 utilizado por los comandos siguientes.
+El núcleo y las pruebas se configuran sin buscar Qt ni CEF.
+
+Preparar GoogleTest con la versión y la integridad fijadas en
+[googletest.json](../googletest.json):
+
+```powershell
+.\scripts\setup-googletest.ps1
+```
+
+El script prepara las fuentes en `desktop/.deps/googletest/googletest-1.18.0`.
+CMake utiliza esas fuentes locales; no descarga dependencias al configurar.
+Para utilizar una copia preparada en otra ubicación, añadir
+`-DSBP_GOOGLETEST_ROOT="<ruta de las fuentes>"` al comando de configuración.
+
+Configurar una carpeta de compilación independiente de la aplicación:
+
+```powershell
+cmake -S desktop -B desktop/build/tests -G "Visual Studio 17 2022" -A "x64,version=10.0.28000.0" -T v143 -DSBP_BUILD_DESKTOP_APP=OFF -DBUILD_TESTING=ON
+```
+
+Compilar y ejecutar en Debug:
+
+```powershell
+cmake --build desktop/build/tests --config Debug --target sbp_security_tests --parallel 4
+ctest --test-dir desktop/build/tests -C Debug --output-on-failure --no-tests=error
+```
+
+Repetir en Release utilizando la misma carpeta del generador de Visual Studio:
+
+```powershell
+cmake --build desktop/build/tests --config Release --target sbp_security_tests --parallel 4
+ctest --test-dir desktop/build/tests -C Release --output-on-failure --no-tests=error
+```
+
+CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
+casos parametrizados. Actualmente se esperan 14 casos de
+[security_decision_test.cpp](security/security_decision_test.cpp): uno para
+`Allowed` y trece para los motivos de bloqueo. Comprueban la acción obtenida
+y la conservación del motivo recibido por el constructor.
+
+El 9 de noviembre de 2026, el usuario confirmó las 14 pruebas superadas
+en Debug y en Release. En Debug, CTest informó de 0 fallos y 4,68 segundos.
+Esta comprobación acredita `SecurityDecision`; la implementación y validación
+de `PolicySnapshot` y `PolicyManager` de la tarea #115 siguen pendientes.
+
+La aplicación conserva `SBP_BUILD_DESKTOP_APP=ON` y `BUILD_TESTING=OFF` por
+defecto. Las fuentes y salidas de GoogleTest permanecen en `.deps/` y `build/`;
+no se incorporan al control de versiones.
+
+## Comprobaciones automáticas de Desktop Foundation
 
 Preparar las salidas `desktop/build/Debug` y `desktop/build/Release`. Cerrar
 las instancias de SecureBrowser antes de iniciar la batería: ambas
@@ -150,6 +206,7 @@ foco, tamaño, diálogos de abandono o ausencia de auxiliares tras una salida
 normal. Esas comprobaciones corresponden a la matriz manual. El timeout
 forzado registrado corresponde a CMake; no simula un bloqueo del hilo UI de CEF.
 
-Las comprobaciones de esta entrega utilizan PowerShell y CMake; no se ha
-añadido GoogleTest. La validación queda centrada en la integración de
-herramientas, archivos y procesos, manteniendo las clases de producción existentes.
+Las comprobaciones de Desktop Foundation de #93 utilizan PowerShell y CMake.
+Su validación se centra en la integración de herramientas, archivos y procesos.
+Las pruebas unitarias con GoogleTest del Security Engine se describen al inicio
+de esta guía y tienen un alcance independiente.
