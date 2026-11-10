@@ -47,7 +47,7 @@ ctest --test-dir desktop/build/tests -C Release --output-on-failure --no-tests=e
 ```
 
 CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
-casos parametrizados. Actualmente se esperan 20 casos:
+casos parametrizados. Actualmente se esperan 23 casos:
 
 - [security_decision_test.cpp](security/security_decision_test.cpp): 14 casos,
   uno para `Allowed` y trece para los motivos de bloqueo. Comprueban la acción
@@ -58,6 +58,10 @@ casos parametrizados. Actualmente se esperan 20 casos:
   a cambios posteriores en el vector de origen.
 - [download_control_config_test.cpp](security/download_control_config_test.cpp):
   tres casos equivalentes para la configuración de extensiones de descarga.
+- [policy_snapshot_test.cpp](security/policy_snapshot_test.cpp): tres casos que
+  comprueban identificadores de 64 bits, nombre, fechas con microsegundos,
+  conservación separada de ambas configuraciones e independencia respecto
+  a cambios posteriores en los objetos de entrada.
 
 El 9 de noviembre de 2026, el usuario confirmó las 14 pruebas superadas
 en Debug y en Release. En Debug, CTest informó de 0 fallos y 4,68 segundos.
@@ -66,8 +70,12 @@ en ambas configuraciones. Al añadir `DownloadControlConfig`, confirmó las
 20 pruebas superadas en Debug y en Release. Estas comprobaciones acreditan
 `SecurityDecision` y la conservación de datos de ambas configuraciones;
 no acreditan la evaluación de dominios o archivos ni su aplicación en CEF.
-La implementación y validación de
-`PolicySnapshot` y `PolicyManager` de la tarea #115 siguen pendientes.
+
+El 10 de noviembre de 2026, tras incorporar `PolicySnapshot`, el usuario
+confirmó las 23 pruebas superadas en Debug y en Release. Esto acredita la
+conservación de los datos de la política mediante el constructor y los métodos
+de lectura. La validación semántica y la implementación de `PolicyManager`
+de la tarea #115 siguen pendientes, incluidos contexto, publicación y vigencia.
 
 La aplicación conserva `SBP_BUILD_DESKTOP_APP=ON` y `BUILD_TESTING=OFF` por
 defecto. Las fuentes y salidas de GoogleTest permanecen en `.deps/` y `build/`;
