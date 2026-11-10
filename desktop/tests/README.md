@@ -5,7 +5,7 @@ Esta guía recoge la verificación de Desktop Foundation de la
 y las pruebas unitarias del Security Engine iniciadas en la
 [tarea #115](https://github.com/CristianPG1993/securebrowser-platform/issues/115).
 Ejecutar los comandos desde la raíz del repositorio, con Windows PowerShell 5.1
-o PowerShell en Windows. La preparación de MSVC, Qt y CEF y los comandos de
+o PowerShell en Windows. La preparación de MSVC, Qt, CEF e ICU y los comandos de
 construcción están en el [README de Desktop](../README.md).
 
 ## Pruebas unitarias del Security Engine
@@ -13,6 +13,19 @@ construcción están en el [README de Desktop](../README.md).
 Estas pruebas requieren CMake 3.29 o posterior, MSVC 2022 x64 con el toolset
 v143 y el SDK de Windows 10.0.28000.0 utilizado por los comandos siguientes.
 El núcleo y las pruebas se configuran sin buscar Qt ni CEF.
+
+Preparar también el SDK de ICU4C con la versión y la integridad fijadas en
+[icu-sdk.json](../icu-sdk.json):
+
+```powershell
+.\scripts\setup-icu.ps1
+```
+
+El script prepara ICU `76.1`, Unicode `16.0`, en
+`desktop/.deps/icu/icu4c-76_1-Win64-MSVC2022`. CMake lo utiliza desde esa
+ubicación por defecto. Si se prepara en otro destino, añadir
+`-DSBP_ICU_ROOT="<ruta del SDK preparado>"` al comando de configuración.
+La dependencia de ICU también se exige con la aplicación desactivada.
 
 Preparar GoogleTest con la versión y la integridad fijadas en
 [googletest.json](../googletest.json):
@@ -46,6 +59,11 @@ cmake --build desktop/build/tests --config Release --target sbp_security_tests -
 ctest --test-dir desktop/build/tests -C Release --output-on-failure --no-tests=error
 ```
 
+La compilación copia `icuuc76.dll`, `icudt76.dll` y `icu-notices/` junto a
+`sbp_security_tests.exe`, tanto en Debug como en Release. Los avisos incluyen
+la licencia y una copia del manifiesto ICU. No es necesario añadir el SDK
+al `PATH` para ejecutar las pruebas.
+
 CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
 casos parametrizados. Actualmente se esperan 23 casos:
 
@@ -77,8 +95,25 @@ conservación de los datos de la política mediante el constructor y los método
 de lectura. La validación semántica y la implementación de `PolicyManager`
 de la tarea #115 siguen pendientes, incluidos contexto, publicación y vigencia.
 
+Ese mismo día, tras preparar ICU e integrar su enlace y copia de archivos en
+CMake, el usuario confirmó de nuevo la compilación y las 23 pruebas superadas
+en Debug y Release. Los casos actuales todavía no ejercitan la conversión
+Unicode de ICU ni la validación de `PolicyManager`.
+
+El autor confirmó también la compilación de la aplicación en Debug y Release,
+los comprobadores `check-runtime.ps1` y `check-startup.ps1` en ambas
+configuraciones y el rechazo esperado de Qt ausente mediante
+`check-configuration-rejection.ps1 -TimeoutSeconds 120`.
+El inventario comprobado incluye las DLL y los avisos de ICU.
+
+Durante el enlace apareció el aviso `LNK4199`: se omite la carga diferida de
+`icuuc76.dll` porque la aplicación todavía no importa funciones de esa DLL.
+El aviso no impide compilar; la opción queda preparada para cuando el motor
+utilice la API de ICU. La ejecución de CI y una nueva pasada de la matriz
+visual completa siguen pendientes con esta incorporación.
+
 La aplicación conserva `SBP_BUILD_DESKTOP_APP=ON` y `BUILD_TESTING=OFF` por
-defecto. Las fuentes y salidas de GoogleTest permanecen en `.deps/` y `build/`;
+defecto. Las fuentes de GoogleTest, el SDK ICU y sus salidas permanecen en `.deps/` y `build/`;
 no se incorporan al control de versiones.
 
 ## Comprobaciones automáticas de Desktop Foundation

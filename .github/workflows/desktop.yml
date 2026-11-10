@@ -58,9 +58,10 @@ jobs:
         with:
           path: |
             desktop/.deps/cef
+            desktop/.deps/icu
             desktop/.deps/qt
             desktop/.deps/tools/cmake-*
-          key: desktop-v1-${{ steps.toolchain.outputs.cache-identity }}-${{ hashFiles('desktop/ci/toolchain.json', 'desktop/cef-sdk.json', 'desktop/ci/setup-*.ps1', 'scripts/setup-cef.ps1') }}
+          key: desktop-v1-${{ steps.toolchain.outputs.cache-identity }}-${{ hashFiles('desktop/ci/toolchain.json', 'desktop/cef-sdk.json', 'desktop/icu-sdk.json', 'desktop/ci/setup-*.ps1', 'scripts/setup-cef.ps1', 'scripts/setup-icu.ps1') }}
 
       - name: Prepare CMake
         run: .\desktop\ci\setup-cmake.ps1
@@ -75,6 +76,10 @@ jobs:
         timeout-minutes: 10
         run: .\desktop\ci\setup-cef.ps1
 
+      - name: Prepare ICU
+        timeout-minutes: 5
+        run: .\scripts\setup-icu.ps1
+
       # Guardamos únicamente dependencias cuya preparación y comprobaciones han terminado correctamente.
       - name: Save dependency cache
         if: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.dependencies.outputs.cache-hit != 'true' }}
@@ -82,6 +87,7 @@ jobs:
         with:
           path: |
             desktop/.deps/cef
+            desktop/.deps/icu
             desktop/.deps/qt
             desktop/.deps/tools/cmake-*
           key: ${{ steps.dependencies.outputs.cache-primary-key }}

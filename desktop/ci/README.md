@@ -8,7 +8,8 @@ manual. El job se llama `Desktop build and tests` y utiliza `windows-2022`.
 ## Preparación y comprobaciones
 
 [toolchain.json](toolchain.json) fija las herramientas y el kit Qt; CEF conserva
-su [manifiesto propio](../cef-sdk.json). Los scripts utilizan sus rutas
+su [manifiesto propio](../cef-sdk.json) e ICU utiliza
+[icu-sdk.json](../icu-sdk.json). Los scripts utilizan sus rutas
 predeterminadas dentro de `desktop/.deps`, sin rutas del equipo del autor ni
 credenciales de descarga.
 
@@ -28,6 +29,7 @@ ejemplo, las rutas de los `tar.exe` de Windows y de Git en una sola llamada.
 | Preparar Windows SDK | [setup-windows-sdk.ps1](setup-windows-sdk.ps1); comprueba el paquete registrado y sus componentes x64, o verifica hash y firma del instalador antes de ejecutarlo. |
 | Preparar Qt | [setup-qt.ps1](setup-qt.ps1); usa aqtinstall en un entorno Python aislado, mantiene sus comprobaciones de hashes y revisa los archivos del kit. |
 | Preparar CEF | [setup-cef.ps1](setup-cef.ps1); selecciona el 7-Zip fijado para el runner y llama al [módulo compartido](../../scripts/setup-cef.ps1), que verifica o prepara el SDK. |
+| Preparar ICU | [setup-icu.ps1](../../scripts/setup-icu.ps1); verifica tamaño y SHA-256 del paquete y comprueba archivos y versiones de ICU y Unicode antes de configurar Desktop. |
 | Configurar CMake | [configure.ps1](configure.ps1); selecciona los SDK, las configuraciones y los avisos de Qt conservados en el repositorio. |
 | Comprobar rechazo de Qt ausente | [check-configuration-rejection.ps1](../tests/check-configuration-rejection.ps1). |
 | Compilar | `cmake --build desktop/build --config <configuración> --parallel 4`, primero Debug y después Release. |
@@ -43,10 +45,16 @@ validan los archivos, la versión y la arquitectura del SDK antes de publicarlo
 en `.deps/cef`. El paso completo tiene un límite de diez minutos. El script
 compartido mantiene `tar` como opción predeterminada para las ejecuciones locales.
 
+ICU se prepara con el mismo script compartido que se utiliza localmente y
+un límite de cinco minutos. El SDK fijado es ICU4C `76.1`, Unicode `16.0`,
+Windows x64 para MSVC 2022. CMake copia sus DLL y avisos junto a la aplicación;
+el inventario de runtime exige también esos archivos.
+
 ## Construcción limpia y caché
 
-La caché incluye los SDK extraídos de CEF y Qt y la copia portátil de CMake.
-Los paquetes contienen Debug y Release y se comparten entre ambas compilaciones.
+La caché incluye los SDK preparados de CEF, Qt e ICU y la copia portátil de CMake.
+Las dependencias se comparten entre ambas compilaciones; CEF y Qt incluyen
+sus variantes Debug/Release y el paquete ICU utiliza las mismas DLL mediante su API C.
 No se cachean `desktop/build`, los perfiles CEF ni los diagnósticos de ejecución.
 Por tanto, cada job configura y compila las fuentes de nuevo.
 
@@ -54,6 +62,8 @@ La clave incluye runner, arquitectura, las dos configuraciones y un hash de los
 manifiestos y scripts de preparación. No se utilizan claves de restauración
 alternativas. La caché se guarda después de superar la preparación de las
 dependencias, antes de compilar el proyecto.
+La clave incluye también `desktop/icu-sdk.json` y `scripts/setup-icu.ps1`;
+un cambio en cualquiera de ellos evita reutilizar una caché anterior incompatible.
 
 Para acreditar la preparación inicial y la reutilización:
 

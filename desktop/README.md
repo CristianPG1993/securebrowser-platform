@@ -10,13 +10,17 @@ Esta guía corresponde a [#95](https://github.com/CristianPG1993/securebrowser-p
 Describe cómo preparar un clon, compilar Debug y Release y abrir
 `SecureBrowser.exe` en Windows 11 x64. El backend MVP permanece congelado:
 Foundation todavía no se comunica con él ni implementa sus políticas.
+La preparación incorpora ahora ICU para el núcleo de seguridad de
+[#115](https://github.com/CristianPG1993/securebrowser-platform/issues/115).
+El registro de clon limpio conserva la evidencia de Foundation anterior a esta incorporación;
+la validación de la aplicación completa con ICU sigue pendiente.
 
 Seguir los apartados de preparación en orden y detenerse si un comando falla.
 Los scripts están bajo `ci/` porque también los utiliza Actions; se pueden
 invocar localmente con los argumentos indicados.
 
 - [Requisitos](#requisitos) y [clon limpio](#obtener-un-clon-limpio).
-- [Herramientas](#preparar-las-herramientas), [Qt](#preparar-qt) y [CEF](#preparar-cef).
+- [Herramientas](#preparar-las-herramientas), [Qt](#preparar-qt), [CEF](#preparar-cef) e [ICU](#preparar-icu).
 - [Configuración](#configurar), [construcción](#construir-y-preparar-la-carpeta-de-ejecución) y [ejecución](#ejecutar-la-ventana-con-qt-y-cef).
 - [Verificaciones](#verificaciones-automáticas-y-manuales), [diagnóstico](#diagnóstico-local-de-arranque-y-carga) y [problemas conocidos](#problemas-conocidos).
 - [Registro de validación desde un clon limpio](docs/clean-clone-validation.md).
@@ -27,7 +31,7 @@ invocar localmente con los argumentos indicados.
 Para reproducir la construcción, utilizar el entorno acordado en la siguiente
 tabla. Las versiones de herramientas están recogidas en
 [`ci/toolchain.json`](ci/toolchain.json); CEF conserva su selección en
-[`cef-sdk.json`](cef-sdk.json).
+[`cef-sdk.json`](cef-sdk.json) e ICU en [`icu-sdk.json`](icu-sdk.json).
 
 | Elemento | Versión o selección |
 | --- | --- |
@@ -40,6 +44,7 @@ tabla. Las versiones de herramientas están recogidas en
 | Generador y arquitectura | `Visual Studio 17 2022`, `x64`, toolset `v143`. |
 | Qt | `6.12.0`, kit `msvc2022_64`, con Qt Widgets y bibliotecas Debug y Release. |
 | CEF | `156.0.14+g4fa4ab5+chromium-156.0.8078.48`, distribución Standard `windows64`. |
+| ICU4C | `76.1`, Unicode `16.0`, distribución binaria Windows x64 para MSVC 2022. |
 
 El proyecto CMake admite versiones desde 3.29; los scripts de configuración
 de CI exigen `3.29.2` para reproducir la referencia fijada. El generador de
@@ -261,9 +266,41 @@ En ese caso, asignar a `$cefRoot` la ruta `CEF_ROOT` mostrada antes de configura
 Para validar una descarga limpia, utilizar el destino nuevo del clon.
 `desktop/.deps/` está excluido de Git.
 
+## Preparar ICU
+
+El núcleo de seguridad utiliza ICU para las conversiones Unicode de las
+extensiones. Su SDK es independiente de Qt y CEF y también se necesita para
+configurar las pruebas aisladas del núcleo.
+
+Desde la raíz del repositorio:
+
+```powershell
+.\scripts\setup-icu.ps1
+if (-not $?) { throw 'La preparación de ICU ha fallado.' }
+```
+
+El [manifiesto ICU](icu-sdk.json) fija versión, Unicode, revisión, paquete,
+URL, tamaño y SHA-256. El script utiliza `tar.exe` de Windows para extraer
+el ZIP verificado, comprueba archivos esenciales y versiones y prepara:
+
+```text
+desktop/.deps/icu/icu4c-76_1-Win64-MSVC2022/
+```
+
+La descarga ocupa aproximadamente 28 MB y se conserva en
+`desktop/.deps/downloads/`. Un SDK ya preparado se reutiliza después de
+comprobar archivos esenciales y versiones, sin verificar de nuevo cada
+archivo extraído. El script muestra `SBP_ICU_ROOT: <ruta-completa>`.
+
+CMake selecciona esa ubicación por defecto y no descarga ICU al configurar.
+Para preparar el SDK en otro lugar, usar `-DependenciesDirectory` en el
+script y añadir `-DSBP_ICU_ROOT:PATH=<ruta-completa-del-SDK>` al comando
+CMake directo del apartado siguiente. La raíz debe contener `include/`,
+`lib64/`, `bin64/` y `LICENSE`.
+
 ## Configurar
 
-Después de preparar las herramientas, Qt y CEF en la misma terminal:
+Después de preparar las herramientas, Qt, CEF e ICU en la misma terminal:
 
 ```powershell
 .\desktop\ci\configure.ps1 -QtKitDirectory $qtKitDirectory -CefRoot $cefRoot
@@ -275,6 +312,7 @@ El script fija el generador Visual Studio 2022, x64, v143, Windows SDK
 Selecciona los [avisos conservados de Qt 6.12.0](third_party/qt/6.12.0/README.md).
 Comprueba que CMake sea `3.29.2`; CMake comprueba el kit Qt exacto y la versión
 y arquitectura del SDK CEF.
+También comprueba las versiones de ICU y Unicode del SDK preparado.
 
 Los argumentos que recibe CMake se pueden expresar directamente así.
 Este bloque es una alternativa al anterior:
@@ -318,6 +356,9 @@ de cada configuración:
 2. Ejecuta `windeployqt` del kit seleccionado para copiar las dependencias Qt.
 3. Conserva avisos CEF y Qt y aplica los permisos de lectura y ejecución LPAC.
 
+Además, copia `icuuc76.dll`, `icudt76.dll` y `icu-notices/` junto a nuestra
+DLL. El inventario de runtime exige también esos archivos.
+
 Cada configuración termina en `desktop/build/Debug/` o `desktop/build/Release/`.
 Ejemplo abreviado de Release:
 
@@ -342,11 +383,16 @@ desktop/build/Release/
 ├── Qt6Core.dll
 ├── Qt6Gui.dll
 ├── Qt6Widgets.dll
+├── icuuc76.dll
+├── icudt76.dll
 ├── platforms/qwindows.dll
 ├── ...otras dependencias, plugins y traducciones Qt
 ├── README.txt
 ├── LICENSE.txt
 ├── CREDITS.html
+├── icu-notices/
+│   ├── LICENSE
+│   └── icu-sdk.json
 └── qt-notices/
     ├── licenses/
     └── sbom/
@@ -365,6 +411,8 @@ ejecutable; `locales/` se copia completo.
 | `libcef.dll` y otros binarios CEF | Motor y auxiliares precompilados del SDK fijado. |
 | `libcef_dll_wrapper` | Adaptador oficial compilado y enlazado con nuestra DLL. |
 | DLL, plugins y traducciones Qt | Copiados desde el kit seleccionado mediante `windeployqt`. |
+| `icuuc76.dll` e `icudt76.dll` | Bibliotecas precompiladas de ICU y sus datos, copiadas desde el SDK fijado para ambas configuraciones. |
+| `icu-notices/` | Licencia de la distribución ICU y copia de su manifiesto. |
 | `sbp_toolchain_check.exe` | Comprobación independiente de una ventana Qt; no es el navegador. |
 | `runtime-inventory-Debug.json` y `runtime-inventory-Release.json` | Inventarios generados en `desktop/build/` para comprobar las salidas. |
 
