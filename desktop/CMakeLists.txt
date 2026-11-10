@@ -24,6 +24,8 @@ add_library(sbp_security_core STATIC
     src/security/download_control_config.h
     src/security/download_control_config.cpp
     src/security/filter_mode.h
+    src/security/policy_snapshot.h
+    src/security/policy_snapshot.cpp
     src/security/security_action.h
     src/security/security_reason.h
     src/security/security_decision.h
@@ -81,6 +83,7 @@ if(BUILD_TESTING)
     # GoogleTest proporciona main(); nuestras pruebas enlazan únicamente el núcleo y gtest.
     add_executable(sbp_security_tests
         tests/security/download_control_config_test.cpp
+        tests/security/policy_snapshot_test.cpp
         tests/security/security_decision_test.cpp
         tests/security/url_filtering_config_test.cpp
     )
