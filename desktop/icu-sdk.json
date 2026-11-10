@@ -1,0 +1,12 @@
+{
+  "version": "76.1",
+  "unicodeVersion": "16.0",
+  "revision": "8eca245c7484ac6cc179e3e5f7c1ea7680810f39",
+  "platform": "windows64",
+  "toolset": "MSVC2022",
+  "distribution": "binary",
+  "archive": "icu4c-76_1-Win64-MSVC2022.zip",
+  "url": "https://github.com/unicode-org/icu/releases/download/release-76-1/icu4c-76_1-Win64-MSVC2022.zip",
+  "sizeBytes": 28408114,
+  "sha256": "bedba77dd1feca09e9ae9922109a285c0ecf46d09c80b65eae6eae63a4e155dc"
+}
