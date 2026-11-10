@@ -155,6 +155,7 @@ if(BUILD_TESTING)
     # GoogleTest proporciona main(); nuestras pruebas enlazan únicamente el núcleo y gtest.
     add_executable(sbp_security_tests
         tests/security/download_control_config_test.cpp
+        tests/security/policy_manager_test.cpp
         tests/security/policy_snapshot_test.cpp
         tests/security/security_decision_test.cpp
         tests/security/url_filtering_config_test.cpp
