@@ -65,7 +65,7 @@ la licencia y una copia del manifiesto ICU. No es necesario añadir el SDK
 al `PATH` para ejecutar las pruebas.
 
 CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
-casos parametrizados. Actualmente se esperan 23 casos:
+casos parametrizados. Actualmente se esperan 132 casos:
 
 - [security_decision_test.cpp](security/security_decision_test.cpp): 14 casos,
   uno para `Allowed` y trece para los motivos de bloqueo. Comprueban la acción
@@ -80,6 +80,14 @@ casos parametrizados. Actualmente se esperan 23 casos:
   comprueban identificadores de 64 bits, nombre, fechas con microsegundos,
   conservación separada de ambas configuraciones e independencia respecto
   a cambios posteriores en los objetos de entrada.
+- [policy_manager_test.cpp](security/policy_manager_test.cpp): 109 casos de
+  validación mediante `PolicyManager::Validate`: una política válida, cinco
+  identidades inválidas o ajenas, 23 nombres, ocho combinaciones de modos,
+  24 configuraciones de dominios, 25 configuraciones básicas de extensiones,
+  20 configuraciones de extensiones Unicode y tres prioridades entre errores.
+  Se comprueban listas vacías, límites de longitud, formato y duplicados
+  normalizados, también con las protecciones desactivadas. Las pruebas de
+  reglas comprueban además que validar conserva los datos originales del snapshot.
 
 El 9 de noviembre de 2026, el usuario confirmó las 14 pruebas superadas
 en Debug y en Release. En Debug, CTest informó de 0 fallos y 4,68 segundos.
@@ -92,13 +100,29 @@ no acreditan la evaluación de dominios o archivos ni su aplicación en CEF.
 El 10 de noviembre de 2026, tras incorporar `PolicySnapshot`, el usuario
 confirmó las 23 pruebas superadas en Debug y en Release. Esto acredita la
 conservación de los datos de la política mediante el constructor y los métodos
-de lectura. La validación semántica y la implementación de `PolicyManager`
-de la tarea #115 siguen pendientes, incluidos contexto, publicación y vigencia.
+de lectura. En ese punto seguían pendientes la validación semántica y el estado
+de `PolicyManager` de la tarea #115.
 
 Ese mismo día, tras preparar ICU e integrar su enlace y copia de archivos en
 CMake, el usuario confirmó de nuevo la compilación y las 23 pruebas superadas
-en Debug y Release. Los casos actuales todavía no ejercitan la conversión
-Unicode de ICU ni la validación de `PolicyManager`.
+en Debug y Release. Aquella batería de 23 casos todavía no ejercitaba la
+conversión Unicode de ICU ni la validación de `PolicyManager`.
+
+Después de incorporar la validación y sus pruebas, el 10 de noviembre de 2026
+el usuario confirmó las 132 pruebas superadas en Debug y Release. Los casos
+Unicode ejercitan ICU para detectar duplicados como `Ñ`/`ñ`, la expansión de
+`İ` a `i` seguida de punto combinado y la sigma griega final. Comprueban que el
+límite de 20 puntos de código se aplica después de convertir a minúsculas y
+que se conservan las diferencias entre acentos, secuencias combinadas y otras
+cadenas distintas. Las conversiones especiales se contrastaron con
+[SpecialCasing de Unicode 16.0](https://www.unicode.org/Public/16.0.0/ucd/SpecialCasing.txt).
+
+Este resultado acredita la validación de datos; siguen pendientes el contexto
+de sesión e instalación, la publicación de un estado inmutable y la vigencia
+mediante reloj monotónico. `Validate` no publica ni modifica el snapshot.
+La presencia y conversión de los campos REST, incluidas las fechas, corresponden
+al adaptador de adquisición todavía pendiente. Tampoco se acredita con estas
+pruebas la evaluación de una navegación o descarga ni su aplicación en CEF.
 
 El autor confirmó también la compilación de la aplicación en Debug y Release,
 los comprobadores `check-runtime.ps1` y `check-startup.ps1` en ambas
