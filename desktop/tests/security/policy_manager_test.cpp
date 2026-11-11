@@ -2,12 +2,21 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <atomic>
+#include <barrier>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <latch>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace sbp {
@@ -1062,6 +1071,568 @@ TEST(PolicyManagerTest, RetainedStateRemainsReadableAfterContextEnds) {
     EXPECT_EQ(*context, retained->context);
     EXPECT_EQ(policy.Id(), retained->policy->Id());
     EXPECT_EQ(policy.Name(), retained->policy->Name());
+}
+
+// Sin contexto actual no se devuelve un estado de política utilizable.
+TEST(PolicyManagerTest, ReadsInvalidPolicyContextBeforeBeginningOne) {
+    const PolicyManager manager;
+
+    const auto result = manager.ReadPolicy(SecurityContext(1, 10, 20));
+
+    EXPECT_EQ(PolicyAvailability::InvalidContext, result.availability);
+    EXPECT_FALSE(result.state);
+}
+
+// Un contexto iniciado conserva su estado aunque todavía no disponga de política.
+TEST(PolicyManagerTest, ReadsUnavailablePolicyBeforeFirstPublication) {
+    PolicyManager manager;
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+
+    const auto result = manager.ReadPolicy(*context);
+
+    EXPECT_EQ(PolicyAvailability::Unavailable, result.availability);
+    ASSERT_TRUE(result.state);
+    EXPECT_EQ(*context, result.state->context);
+    EXPECT_FALSE(result.state->policy);
+    EXPECT_FALSE(result.state->validatedAt.has_value());
+}
+
+// La consulta de una sesión anterior no recibe el estado de la sesión nueva.
+TEST(PolicyManagerTest, ReadsInvalidPolicyContextForPreviousSession) {
+    PolicyManager manager;
+    const auto previous = manager.BeginContext(10, 20);
+    ASSERT_TRUE(previous.has_value());
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    const auto result = manager.ReadPolicy(*previous);
+
+    EXPECT_EQ(PolicyAvailability::InvalidContext, result.availability);
+    EXPECT_FALSE(result.state);
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+struct PolicyManagerLifetimeCase {
+    const char* label;
+    PolicyManager::Clock::duration elapsed;
+    PolicyAvailability expectedAvailability;
+};
+
+class PolicyManagerLifetimeTest : public ::testing::TestWithParam<PolicyManagerLifetimeCase> {};
+
+// El reloj se adelanta sin esperas; la disponibilidad y el estado devuelto deben corresponderse.
+TEST_P(PolicyManagerLifetimeTest, ExpiresExactlyAtFifteenMinutes) {
+    const PolicyManagerLifetimeCase& testCase = GetParam();
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager::Clock::time_point now{};
+    const auto publishedAt = now;
+
+    // La variable de tiempo sigue viva durante la publicación y la consulta secuenciales.
+    PolicyManager manager([&now] { return now; });
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, policy));
+    const auto publishedState = manager.ReadState();
+
+    now += testCase.elapsed;
+    const auto result = manager.ReadPolicy(*context);
+
+    EXPECT_EQ(testCase.expectedAvailability, result.availability);
+    EXPECT_EQ(publishedState, result.state);
+    ASSERT_TRUE(result.state);
+    ASSERT_TRUE(result.state->policy);
+    ASSERT_TRUE(result.state->validatedAt.has_value());
+    EXPECT_EQ(*context, result.state->context);
+    EXPECT_EQ(policy.Id(), result.state->policy->Id());
+    EXPECT_EQ(publishedAt, *result.state->validatedAt);
+}
+
+// Una unidad de duración representa el menor incremento del reloj utilizado por el núcleo.
+INSTANTIATE_TEST_SUITE_P(
+    PolicyLifetime,
+    PolicyManagerLifetimeTest,
+    ::testing::Values(
+        PolicyManagerLifetimeCase{
+            "JustPublished", PolicyManager::Clock::duration{0}, PolicyAvailability::Available},
+        PolicyManagerLifetimeCase{
+            "ImmediatelyBeforeDeadline", std::chrono::minutes{15} - PolicyManager::Clock::duration{1},
+            PolicyAvailability::Available},
+        PolicyManagerLifetimeCase{
+            "ExactlyAtDeadline", std::chrono::minutes{15}, PolicyAvailability::Expired},
+        PolicyManagerLifetimeCase{
+            "ImmediatelyAfterDeadline", std::chrono::minutes{15} + PolicyManager::Clock::duration{1},
+            PolicyAvailability::Expired}),
+    // Nombra cada ejecución según su posición respecto al límite de caducidad.
+    [](const ::testing::TestParamInfo<PolicyManagerLifetimeCase>& info) {
+        return std::string(info.param.label);
+    });
+
+// Una obtención válida renueva el plazo aunque no cambie ningún dato del backend.
+TEST(PolicyManagerTest, SamePolicyPublicationRenewsValidity) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager::Clock::time_point now{};
+
+    // El tiempo se controla desde la prueba y permanece vivo durante todas las consultas.
+    PolicyManager manager([&now] { return now; });
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, policy));
+    const auto original = manager.ReadState();
+    ASSERT_TRUE(original);
+    ASSERT_TRUE(original->validatedAt.has_value());
+    const auto originalValidatedAt = *original->validatedAt;
+
+    now += std::chrono::minutes{14};
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, policy));
+    const auto renewed = manager.ReadState();
+    ASSERT_TRUE(renewed);
+    ASSERT_TRUE(renewed->policy);
+    ASSERT_TRUE(renewed->validatedAt.has_value());
+    EXPECT_EQ(now, *renewed->validatedAt);
+    EXPECT_EQ(timestamp, renewed->policy->UpdatedAt());
+    EXPECT_EQ(originalValidatedAt, *original->validatedAt);
+
+    // En el minuto 15 solo ha transcurrido un minuto desde la renovación del minuto 14.
+    now += std::chrono::minutes{1};
+    const auto available = manager.ReadPolicy(*context);
+    EXPECT_EQ(PolicyAvailability::Available, available.availability);
+    EXPECT_EQ(renewed, available.state);
+
+    // En el minuto 29 se alcanzan los nuevos 15 minutos de vigencia.
+    now += std::chrono::minutes{14};
+    EXPECT_EQ(PolicyAvailability::Expired, manager.ReadPolicy(*context).availability);
+}
+
+// Consultar y conservar una referencia no inicia otro plazo de vigencia.
+TEST(PolicyManagerTest, ReadingPolicyDoesNotRenewValidity) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager::Clock::time_point now{};
+    const auto publishedAt = now;
+
+    // El reloj permite separar la lectura del minuto 14 de la caducidad del minuto 15.
+    PolicyManager manager([&now] { return now; });
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, policy));
+
+    now += std::chrono::minutes{14};
+    const auto retained = manager.ReadPolicy(*context);
+    ASSERT_EQ(PolicyAvailability::Available, retained.availability);
+    ASSERT_TRUE(retained.state);
+
+    now += std::chrono::minutes{1};
+    const auto expired = manager.ReadPolicy(*context);
+
+    EXPECT_EQ(PolicyAvailability::Expired, expired.availability);
+    EXPECT_EQ(retained.state, expired.state);
+    ASSERT_TRUE(retained.state->validatedAt.has_value());
+    EXPECT_EQ(publishedAt, *retained.state->validatedAt);
+}
+
+// Una regla inválida rechaza toda la actualización y conserva el plazo de la política anterior.
+TEST(PolicyManagerTest, InvalidPolicyPublicationDoesNotRenewValidity) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+        timestamp, timestamp);
+    const PolicySnapshot invalidPolicy(
+        2, 20, "Rejected update",
+        UrlFilteringConfig(false, FilterMode::Allowlist, {"allowed.example", "https://invalid.example"}),
+        DownloadControlConfig(false, FilterMode::Allowlist, {"pdf"}),
+        timestamp, timestamp);
+    PolicyManager::Clock::time_point now{};
+
+    // Las dos respuestas se evalúan con un reloj controlado, sin esperas reales.
+    PolicyManager manager([&now] { return now; });
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, policy));
+    const auto original = manager.ReadState();
+    ASSERT_TRUE(original);
+
+    now += std::chrono::minutes{14};
+    EXPECT_EQ(PolicyPublicationResult::InvalidPolicy, manager.PublishPolicy(*context, invalidPolicy));
+    EXPECT_EQ(original, manager.ReadState());
+    EXPECT_EQ(PolicyAvailability::Available, manager.ReadPolicy(*context).availability);
+
+    now += std::chrono::minutes{1};
+    const auto result = manager.ReadPolicy(*context);
+    EXPECT_EQ(PolicyAvailability::Expired, result.availability);
+    EXPECT_EQ(original, result.state);
+    ASSERT_TRUE(result.state);
+    ASSERT_TRUE(result.state->policy);
+    EXPECT_EQ(policy.Id(), result.state->policy->Id());
+}
+
+// Una respuesta tardía de otra sesión no renueva la política de la sesión actual.
+TEST(PolicyManagerTest, PreviousContextPublicationDoesNotRenewCurrentPolicy) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager::Clock::time_point now{};
+
+    // La sesión nueva empieza en el minuto 5 y su política debe caducar en el minuto 20.
+    PolicyManager manager([&now] { return now; });
+    const auto previous = manager.BeginContext(10, 20);
+    ASSERT_TRUE(previous.has_value());
+    now += std::chrono::minutes{5};
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*current, policy));
+    const auto original = manager.ReadState();
+    ASSERT_TRUE(original);
+
+    now += std::chrono::minutes{9};
+    EXPECT_EQ(PolicyPublicationResult::InvalidContext, manager.PublishPolicy(*previous, policy));
+    EXPECT_EQ(original, manager.ReadState());
+    EXPECT_EQ(PolicyAvailability::Available, manager.ReadPolicy(*current).availability);
+
+    now += std::chrono::minutes{6};
+    EXPECT_EQ(PolicyAvailability::Expired, manager.ReadPolicy(*current).availability);
+}
+
+// Un cierre mientras se consulta el reloj impide devolver la política como disponible.
+TEST(PolicyManagerTest, ReadPolicyRejectsContextEndedDuringClockRead) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+        timestamp, timestamp);
+    std::function<void()> onClockRead;
+
+    // La acción se configura después de publicar y se ejecuta en el mismo hilo de la consulta.
+    PolicyManager manager([&onClockRead] {
+        if (onClockRead) {
+            onClockRead();
+        }
+        return PolicyManager::Clock::time_point{};
+    });
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, policy));
+    bool ended = false;
+
+    // El gestor, el contexto y la variable de resultado siguen vivos durante ReadPolicy.
+    onClockRead = [&manager, &context, &ended] {
+        ended = manager.EndContext(*context);
+    };
+
+    const auto result = manager.ReadPolicy(*context);
+
+    EXPECT_TRUE(ended);
+    EXPECT_EQ(PolicyAvailability::InvalidContext, result.availability);
+    EXPECT_FALSE(result.state);
+    EXPECT_FALSE(manager.ReadState());
+}
+
+// La lectura de la sesión anterior no entrega el estado de una sesión iniciada durante la consulta.
+TEST(PolicyManagerTest, ReadPolicyRejectsContextChangedDuringClockRead) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+        timestamp, timestamp);
+    std::function<void()> onClockRead;
+
+    // La consulta del reloj provoca el cambio una vez alcanzada la lectura de la política anterior.
+    PolicyManager manager([&onClockRead] {
+        if (onClockRead) {
+            onClockRead();
+        }
+        return PolicyManager::Clock::time_point{};
+    });
+    const auto previous = manager.BeginContext(10, 20);
+    ASSERT_TRUE(previous.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*previous, policy));
+    std::optional<SecurityContext> current;
+
+    // Las referencias locales siguen vivas durante la creación del contexto y su comprobación.
+    onClockRead = [&manager, &current] {
+        current = manager.BeginContext(10, 20);
+    };
+
+    const auto result = manager.ReadPolicy(*previous);
+
+    EXPECT_EQ(PolicyAvailability::InvalidContext, result.availability);
+    EXPECT_FALSE(result.state);
+    ASSERT_TRUE(current.has_value());
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+    const auto currentState = manager.ReadState();
+    ASSERT_TRUE(currentState);
+    EXPECT_EQ(*current, currentState->context);
+    EXPECT_FALSE(currentState->policy);
+}
+
+// La disponibilidad calculada debe acompañar al estado leído, aunque se publique otro entretanto.
+TEST(PolicyManagerTest, ReadPolicyKeepsAvailabilityAndStateCoherentDuringReplacement) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot firstPolicy(
+        1, 20, "First policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+        timestamp, timestamp);
+    const PolicySnapshot secondPolicy(
+        2, 20, "Second policy",
+        UrlFilteringConfig(true, FilterMode::Allowlist, {"allowed.example"}),
+        DownloadControlConfig(false, FilterMode::Allowlist, {"pdf"}),
+        timestamp, timestamp);
+    PolicyManager::Clock::time_point now{};
+    std::function<void()> onClockRead;
+
+    // Extrae y vacía la acción antes de ejecutarla: la publicación interna consultará el reloj de nuevo.
+    PolicyManager manager([&now, &onClockRead] {
+        auto action = std::exchange(onClockRead, {});
+        if (action) {
+            action();
+        }
+        return now;
+    });
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, firstPolicy));
+    const auto firstState = manager.ReadState();
+    ASSERT_TRUE(firstState);
+    now += std::chrono::minutes{15};
+    PolicyPublicationResult replacementResult = PolicyPublicationResult::InvalidContext;
+
+    // Las referencias siguen vivas durante la publicación anidada y la devolución de la lectura original.
+    onClockRead = [&manager, &context, &secondPolicy, &replacementResult] {
+        replacementResult = manager.PublishPolicy(*context, secondPolicy);
+    };
+
+    const auto result = manager.ReadPolicy(*context);
+
+    ASSERT_EQ(PolicyPublicationResult::Published, replacementResult);
+    EXPECT_EQ(PolicyAvailability::Expired, result.availability);
+    EXPECT_EQ(firstState, result.state);
+    ASSERT_TRUE(result.state);
+    ASSERT_TRUE(result.state->policy);
+    EXPECT_EQ(firstPolicy.Id(), result.state->policy->Id());
+
+    const auto currentState = manager.ReadState();
+    ASSERT_TRUE(currentState);
+    ASSERT_TRUE(currentState->policy);
+    ASSERT_TRUE(currentState->validatedAt.has_value());
+    EXPECT_EQ(secondPolicy.Id(), currentState->policy->Id());
+    EXPECT_EQ(now, *currentState->validatedAt);
+    EXPECT_EQ(PolicyAvailability::Available, manager.ReadPolicy(*context).availability);
+}
+
+// Un lector y un publicador trabajan en hilos distintos conservando estados anteriores.
+TEST(PolicyManagerTest, ConcurrentPublicationAndReadsKeepCompleteImmutableStates) {
+    constexpr std::int64_t rounds = 64;
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    std::atomic<std::int64_t> clockTicks{1};
+
+    // El reloj comparte solo un contador atómico; admite las consultas simultáneas de ambos hilos.
+    PolicyManager manager([&clockTicks] {
+        return PolicyManager::Clock::time_point{PolicyManager::Clock::duration{clockTicks.load()}};
+    });
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+
+    // Cada versión codifica su identidad en campos distintos para detectar publicaciones parciales.
+    const auto makePolicy = [timestamp](std::int64_t version) {
+        const auto text = std::to_string(version);
+        const bool even = version % 2 == 0;
+        const auto createdAt = timestamp + std::chrono::microseconds{version};
+        return PolicySnapshot(
+            version, 20, "Policy " + text,
+            UrlFilteringConfig(even, even ? FilterMode::Allowlist : FilterMode::Denylist,
+                {"domain" + text + ".example"}),
+            DownloadControlConfig(!even, even ? FilterMode::Denylist : FilterMode::Allowlist,
+                {"ext" + text}),
+            createdAt, createdAt + std::chrono::microseconds{1});
+    };
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, makePolicy(1)));
+
+    // El estado leído debe contener una única versión, incluidos sus metadatos y la vigencia local.
+    const auto isCoherent = [context, timestamp, rounds](const std::shared_ptr<const PolicyManager::State>& state) {
+        if (!state || !state->policy || !state->validatedAt.has_value()) {
+            return false;
+        }
+        const auto& policy = *state->policy;
+        const auto version = policy.Id();
+        if (version < 1 || version > rounds + 1) {
+            return false;
+        }
+        const auto text = std::to_string(version);
+        const bool even = version % 2 == 0;
+        const auto createdAt = timestamp + std::chrono::microseconds{version};
+        const PolicyManager::Clock::time_point validatedAt{PolicyManager::Clock::duration{version}};
+        return state->context == *context
+            && policy.CompanyId() == 20
+            && policy.Name() == "Policy " + text
+            && policy.CreatedAt() == createdAt
+            && policy.UpdatedAt() == createdAt + std::chrono::microseconds{1}
+            && *state->validatedAt == validatedAt
+            && policy.UrlFiltering().Enabled() == even
+            && policy.UrlFiltering().Mode() == (even ? FilterMode::Allowlist : FilterMode::Denylist)
+            && policy.UrlFiltering().Rules() == std::vector<std::string>{"domain" + text + ".example"}
+            && policy.DownloadControl().Enabled() == !even
+            && policy.DownloadControl().Mode() == (even ? FilterMode::Denylist : FilterMode::Allowlist)
+            && policy.DownloadControl().Rules() == std::vector<std::string>{"ext" + text};
+    };
+
+    std::barrier<> rendezvous{2};
+    bool publicationsSucceeded = true;
+    bool readsCoherent = true;
+
+    // Las referencias permanecen vivas hasta join; solo el publicador escribe su indicador de resultado.
+    std::jthread publisher([rounds, &manager, &context, &clockTicks, &makePolicy,
+                              &rendezvous, &publicationsSucceeded] {
+        for (std::int64_t version = 2; version <= rounds + 1; ++version) {
+            rendezvous.arrive_and_wait();
+            try {
+                clockTicks.store(version);
+                if (manager.PublishPolicy(*context, makePolicy(version))
+                    != PolicyPublicationResult::Published) {
+                    publicationsSucceeded = false;
+                }
+            } catch (...) {
+                publicationsSucceeded = false;
+            }
+            rendezvous.arrive_and_wait();
+        }
+    });
+
+    for (std::int64_t round = 0; round < rounds; ++round) {
+        const auto retained = manager.ReadState();
+        const auto retainedVersion = retained && retained->policy ? retained->policy->Id() : 0;
+        rendezvous.arrive_and_wait();
+        try {
+            for (int sample = 0; sample < 8; ++sample) {
+                const auto result = manager.ReadPolicy(*context);
+                if (result.availability != PolicyAvailability::Available || !isCoherent(result.state)) {
+                    readsCoherent = false;
+                }
+            }
+        } catch (...) {
+            readsCoherent = false;
+        }
+        rendezvous.arrive_and_wait();
+        try {
+            if (!isCoherent(retained) || retained->policy->Id() != retainedVersion) {
+                readsCoherent = false;
+            }
+        } catch (...) {
+            readsCoherent = false;
+        }
+    }
+    publisher.join();
+
+    EXPECT_TRUE(publicationsSucceeded);
+    EXPECT_TRUE(readsCoherent);
+    const auto finalState = manager.ReadState();
+    ASSERT_TRUE(finalState);
+    ASSERT_TRUE(finalState->policy);
+    EXPECT_EQ(rounds + 1, finalState->policy->Id());
+}
+
+// Cuatro hilos crean generaciones y solicitan cierres de identidades que ya han sustituido.
+TEST(PolicyManagerTest, ConcurrentContextChangesKeepUniqueGenerationsAndRejectStaleEnds) {
+    constexpr std::size_t workerCount = 4;
+    constexpr std::size_t contextsPerWorker = 32;
+    PolicyManager manager;
+    const auto initial = manager.BeginContext(10, 20);
+    ASSERT_TRUE(initial.has_value());
+    std::array<std::vector<SecurityContext>, workerCount> contexts;
+    std::array<bool, workerCount> workersSucceeded;
+    workersSucceeded.fill(true);
+    for (auto& row : contexts) {
+        row.reserve(contextsPerWorker);
+    }
+    std::latch start{1};
+    std::vector<std::jthread> workers;
+    workers.reserve(workerCount);
+
+    try {
+        for (std::size_t workerIndex = 0; workerIndex < workerCount; ++workerIndex) {
+            // Cada hilo escribe en su propia fila e indicador; todos los objetos viven hasta join.
+            workers.emplace_back([workerIndex, initial, contextsPerWorker,
+                                     &manager, &contexts, &workersSucceeded, &start] {
+                start.wait();
+                try {
+                    SecurityContext previous = *initial;
+                    for (std::size_t index = 0; index < contextsPerWorker; ++index) {
+                        const auto current = manager.BeginContext(10, 20);
+                        if (!current.has_value()) {
+                            workersSucceeded[workerIndex] = false;
+                            continue;
+                        }
+                        contexts[workerIndex].push_back(*current);
+                        if (manager.EndContext(previous)) {
+                            workersSucceeded[workerIndex] = false;
+                        }
+                        previous = *current;
+                    }
+                } catch (...) {
+                    workersSucceeded[workerIndex] = false;
+                }
+            });
+        }
+    } catch (...) {
+        // Si no se puede crear algún hilo, se liberan y unen los ya iniciados antes de propagar el error.
+        start.count_down();
+        for (auto& worker : workers) {
+            worker.join();
+        }
+        throw;
+    }
+    start.count_down();
+    for (auto& worker : workers) {
+        worker.join();
+    }
+
+    std::unordered_set<std::uint64_t> generations{initial->Generation()};
+    const SecurityContext* newest = &*initial;
+    for (std::size_t workerIndex = 0; workerIndex < workerCount; ++workerIndex) {
+        EXPECT_TRUE(workersSucceeded[workerIndex]);
+        EXPECT_EQ(contextsPerWorker, contexts[workerIndex].size());
+        for (const auto& context : contexts[workerIndex]) {
+            EXPECT_TRUE(generations.insert(context.Generation()).second);
+            EXPECT_EQ(10, context.DeviceId());
+            EXPECT_EQ(20, context.CompanyId());
+            if (context.Generation() > newest->Generation()) {
+                newest = &context;
+            }
+        }
+    }
+
+    EXPECT_EQ(workerCount * contextsPerWorker + 1, generations.size());
+    EXPECT_EQ(workerCount * contextsPerWorker + 1, newest->Generation());
+    EXPECT_TRUE(manager.IsCurrentContext(*newest));
+    for (const auto& row : contexts) {
+        for (const auto& context : row) {
+            if (!(context == *newest)) {
+                EXPECT_FALSE(manager.EndContext(context));
+            }
+        }
+    }
+    EXPECT_TRUE(manager.IsCurrentContext(*newest));
 }
 
 }  // namespace sbp

@@ -110,6 +110,30 @@ std::shared_ptr<const PolicyManager::State> PolicyManager::ReadState() const {
     return state_;
 }
 
+// Comprueba la disponibilidad sobre una referencia coherente, sin modificar su vigencia.
+PolicyManager::PolicyReadResult PolicyManager::ReadPolicy(const SecurityContext& context) const {
+    const auto state = ReadState();
+    if (!state || !(state->context == context)) {
+        return {};
+    }
+
+    if (!state->policy || !state->validatedAt.has_value()) {
+        return {PolicyAvailability::Unavailable, state};
+    }
+
+    // El reloj se consulta fuera del mutex; el contexto puede cambiar durante esa consulta.
+    const Clock::time_point now = now_();
+    if (!IsCurrentContext(context)) {
+        return {};
+    }
+
+    if (now - *state->validatedAt >= std::chrono::minutes{15}) {
+        return {PolicyAvailability::Expired, state};
+    }
+
+    return {PolicyAvailability::Available, state};
+}
+
 // Detiene la validación en el primer error, sin publicar ni modificar la política recibida.
 PolicyValidationError PolicyManager::Validate(
     const PolicySnapshot& policy, std::int64_t expectedCompanyId) const {

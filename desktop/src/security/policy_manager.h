@@ -1,5 +1,6 @@
 #pragma once
 
+#include "security/policy_availability.h"
 #include "security/policy_publication_result.h"
 #include "security/policy_snapshot.h"
 #include "security/policy_validation_error.h"
@@ -36,6 +37,12 @@ public:
         std::optional<Clock::time_point> validatedAt{};
     };
 
+    // La disponibilidad corresponde exactamente al estado compartido que acompaña al resultado.
+    struct PolicyReadResult {
+        PolicyAvailability availability = PolicyAvailability::InvalidContext;
+        std::shared_ptr<const State> state{};
+    };
+
     // Utiliza el reloj monotónico real cuando no se proporciona uno de pruebas.
     PolicyManager() = default;
 
@@ -65,6 +72,10 @@ public:
     // Obtiene el estado completo de solo lectura; devuelve un puntero vacío si no existe contexto.
     // Conservarlo no renueva su vigencia ni sustituye las comprobaciones actuales de autorización.
     [[nodiscard]] std::shared_ptr<const State> ReadState() const;
+
+    // Comprueba contexto y vigencia sin renovar el plazo; solo Available indica una política utilizable.
+    // Conserva la referencia al estado comprobado y no evalúa reglas de navegación o descarga.
+    [[nodiscard]] PolicyReadResult ReadPolicy(const SecurityContext& context) const;
 
     // Comprueba el conjunto y devuelve el primer error, o None si todos los datos son válidos.
     // La compañía esperada debe proceder del contexto de instalación, no de la política.

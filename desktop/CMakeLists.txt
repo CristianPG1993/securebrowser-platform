@@ -92,6 +92,7 @@ add_library(sbp_security_core STATIC
     src/security/download_control_config.h
     src/security/download_control_config.cpp
     src/security/filter_mode.h
+    src/security/policy_availability.h
     src/security/policy_manager.h
     src/security/policy_manager.cpp
     src/security/policy_publication_result.h

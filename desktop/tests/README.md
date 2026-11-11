@@ -49,14 +49,14 @@ Compilar y ejecutar en Debug:
 
 ```powershell
 cmake --build desktop/build/tests --config Debug --target sbp_security_tests --parallel 4
-ctest --test-dir desktop/build/tests -C Debug --output-on-failure --no-tests=error
+ctest --test-dir desktop/build/tests -C Debug --output-on-failure --no-tests=error --timeout 60
 ```
 
 Repetir en Release utilizando la misma carpeta del generador de Visual Studio:
 
 ```powershell
 cmake --build desktop/build/tests --config Release --target sbp_security_tests --parallel 4
-ctest --test-dir desktop/build/tests -C Release --output-on-failure --no-tests=error
+ctest --test-dir desktop/build/tests -C Release --output-on-failure --no-tests=error --timeout 60
 ```
 
 La compilación copia `icuuc76.dll`, `icudt76.dll` y `icu-notices/` junto a
@@ -65,7 +65,7 @@ la licencia y una copia del manifiesto ICU. No es necesario añadir el SDK
 al `PATH` para ejecutar las pruebas.
 
 CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
-casos parametrizados. Actualmente se esperan 172 casos:
+casos parametrizados. Actualmente se esperan 188 casos:
 
 - [security_decision_test.cpp](security/security_decision_test.cpp): 14 casos,
   uno para `Allowed` y trece para los motivos de bloqueo. Comprueban la acción
@@ -80,7 +80,7 @@ casos parametrizados. Actualmente se esperan 172 casos:
   comprueban identificadores de 64 bits, nombre, fechas con microsegundos,
   conservación separada de ambas configuraciones e independencia respecto
   a cambios posteriores en los objetos de entrada.
-- [policy_manager_test.cpp](security/policy_manager_test.cpp): 144 casos.
+- [policy_manager_test.cpp](security/policy_manager_test.cpp): 160 casos.
   Los 109 casos de validación mediante `PolicyManager::Validate` incluyen una
   política válida, cinco identidades inválidas o ajenas, 23 nombres, ocho combinaciones de modos,
   24 configuraciones de dominios, 25 configuraciones básicas de extensiones,
@@ -100,6 +100,9 @@ casos parametrizados. Actualmente se esperan 172 casos:
   Cinco casos comprueban `ReadState`: ausencia de estado, contexto sin política,
   contenido completo publicado, instante del reloj inyectado y conservación de
   una referencia anterior tras sustituir o cerrar el estado actual.
+  Otros 16 casos cubren `ReadPolicy`, el límite exacto de 15 minutos, la renovación
+  con una política idéntica, la conservación del plazo ante lecturas o respuestas
+  rechazadas, los cambios durante la consulta y dos recorridos con hilos concurrentes.
 - [security_context_test.cpp](security/security_context_test.cpp): cinco casos
   que comprueban la conservación de identificadores de 64 bits y la igualdad
   de contextos. Una generación, un dispositivo o una compañía distintos hacen
@@ -171,12 +174,24 @@ y permanece legible después del cierre, aunque el gestor ya no reconozca su con
 como actual. El instante del reloj inyectado se comprueba por separado de las fechas
 de auditoría del backend.
 
-Estos casos se ejecutan de forma secuencial y los cambios se provocan en el mismo
-hilo; todavía no se han probado la concurrencia ni el agotamiento del contador.
-Quedan pendientes la caducidad, la renovación y conservación de la vigencia ante
-actualizaciones rechazadas, y el tratamiento de errores de adquisición asociados
-a su contexto. La conservación de una referencia no acredita por sí sola que la
-política pueda seguir autorizando operaciones.
+Tras incorporar `ReadPolicy` y las pruebas de vigencia y concurrencia, se superaron
+las 188 pruebas en Debug y Release el 11 de noviembre de 2026. Se comprueba que la
+política está disponible antes del límite y caduca al alcanzar exactamente los
+15 minutos, sin esperar tiempo real. Publicar de nuevo una política válida e
+idéntica renueva el plazo; leerla o rechazar una actualización inválida o de otra
+sesión conserva la vigencia anterior.
+
+Tres casos provocan cambios en el mismo hilo durante la lectura del reloj para
+comprobar el contexto final y la correspondencia entre disponibilidad y estado.
+Dos casos adicionales utilizan hilos reales: uno realiza 64 rondas de publicación
+y lectura con referencias conservadas; otro crea 32 contextos desde cada uno de
+cuatro hilos y comprueba la unicidad de las generaciones y el rechazo de cierres
+anteriores. Los hilos se unen antes de las comprobaciones finales. No se ha probado
+por ejecución el agotamiento del contador de generaciones de 64 bits.
+
+La conservación de una referencia no acredita por sí sola que la política pueda
+seguir autorizando operaciones. La adquisición HTTP y el tratamiento de sus errores
+asociados al contexto corresponden a las tareas #122 y #123.
 
 También se comprobaron la compilación de la aplicación en Debug y Release,
 los comprobadores `check-runtime.ps1` y `check-startup.ps1` en ambas
