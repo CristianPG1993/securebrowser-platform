@@ -65,7 +65,7 @@ la licencia y una copia del manifiesto ICU. No es necesario añadir el SDK
 al `PATH` para ejecutar las pruebas.
 
 CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
-casos parametrizados. Actualmente se esperan 158 casos:
+casos parametrizados. Actualmente se esperan 172 casos:
 
 - [security_decision_test.cpp](security/security_decision_test.cpp): 14 casos,
   uno para `Allowed` y trece para los motivos de bloqueo. Comprueban la acción
@@ -80,7 +80,7 @@ casos parametrizados. Actualmente se esperan 158 casos:
   comprueban identificadores de 64 bits, nombre, fechas con microsegundos,
   conservación separada de ambas configuraciones e independencia respecto
   a cambios posteriores en los objetos de entrada.
-- [policy_manager_test.cpp](security/policy_manager_test.cpp): 130 casos.
+- [policy_manager_test.cpp](security/policy_manager_test.cpp): 144 casos.
   Los 109 casos de validación mediante `PolicyManager::Validate` incluyen una
   política válida, cinco identidades inválidas o ajenas, 23 nombres, ocho combinaciones de modos,
   24 configuraciones de dominios, 25 configuraciones básicas de extensiones,
@@ -94,6 +94,12 @@ casos parametrizados. Actualmente se esperan 158 casos:
   de generación, dispositivo y compañía. Incluyen cierre correcto, cierre
   repetido, reapertura sin reutilizar generación y rechazo de cierres tardíos
   o con identidad de instalación distinta.
+  Un caso comprueba el rechazo de una función de reloj vacía y ocho casos cubren
+  los resultados de `PublishPolicy`, incluidos el cierre y el cambio de contexto
+  durante la preparación del estado.
+  Cinco casos comprueban `ReadState`: ausencia de estado, contexto sin política,
+  contenido completo publicado, instante del reloj inyectado y conservación de
+  una referencia anterior tras sustituir o cerrar el estado actual.
 - [security_context_test.cpp](security/security_context_test.cpp): cinco casos
   que comprueban la conservación de identificadores de 64 bits y la igualdad
   de contextos. Una generación, un dispositivo o una compañía distintos hacen
@@ -150,9 +156,27 @@ comprueban que cerrar el contexto deja de reconocerlo como actual, que un cierre
 repetido devuelve `false`, que volver a iniciar no reutiliza la generación y que
 un cierre tardío o de otra instalación no termina el contexto actual.
 
-Estos casos se han ejecutado de forma secuencial; todavía no se han probado la concurrencia
-ni el agotamiento del contador. Siguen pendientes la publicación de políticas,
-su caducidad y el descarte efectivo de respuestas y errores tardíos durante su aplicación.
+Al incorporar el reloj inyectable y `PublishPolicy`, se superaron las 167 pruebas
+en Debug y Release el 11 de noviembre de 2026. Se comprueban el rechazo del reloj
+vacío, la publicación válida y los rechazos por contexto ausente, terminado o
+anterior, política inválida y compañía ajena. Dos casos utilizan la función de
+reloj para provocar un cierre o cambio de contexto después de validar los datos
+y antes de sustituir el estado, comprobando la correspondencia final del contexto.
+
+Tras incorporar `ReadState`, se superaron las 172 pruebas en Debug y Release el
+11 de noviembre de 2026. Los cinco casos nuevos verifican los datos de la política,
+su contexto y el instante local de validación como un estado coherente. Una
+referencia conservada mantiene los datos e instante anteriores tras otra publicación
+y permanece legible después del cierre, aunque el gestor ya no reconozca su contexto
+como actual. El instante del reloj inyectado se comprueba por separado de las fechas
+de auditoría del backend.
+
+Estos casos se ejecutan de forma secuencial y los cambios se provocan en el mismo
+hilo; todavía no se han probado la concurrencia ni el agotamiento del contador.
+Quedan pendientes la caducidad, la renovación y conservación de la vigencia ante
+actualizaciones rechazadas, y el tratamiento de errores de adquisición asociados
+a su contexto. La conservación de una referencia no acredita por sí sola que la
+política pueda seguir autorizando operaciones.
 
 También se comprobaron la compilación de la aplicación en Debug y Release,
 los comprobadores `check-runtime.ps1` y `check-startup.ps1` en ambas
