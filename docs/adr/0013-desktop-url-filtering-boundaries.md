@@ -25,7 +25,7 @@ usos internos necesarios de CEF y el contrato existente del backend.
 
 ## Decisión
 
-Las siguientes decisiones han sido aprobadas por el autor en la tarea #114.
+En la tarea #114 se adoptaron las siguientes decisiones.
 
 ### Interpretación y evaluación separadas
 

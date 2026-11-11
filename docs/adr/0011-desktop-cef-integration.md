@@ -155,7 +155,7 @@ La salida tendrá las siguientes responsabilidades:
 | `SecureBrowser.dll` | Aplicación propia C++/Qt; exporta la entrada `RunWinMain`. |
 | `libcef.dll` | Motor CEF precompilado de la misma versión y configuración. |
 
-Al arrancar, el bootstrap carga nuestra DLL en el mismo proceso y llama a
+Al arrancar, el bootstrap carga la DLL de SecureBrowser en el mismo proceso y llama a
 `RunWinMain`, pasando los argumentos y el contexto de sandbox. Cargar la DLL
 no crea por sí mismo otro proceso.
 
@@ -344,7 +344,7 @@ en el PATH es 5.15.2 y pertenece a Anaconda.
 Se ha comprobado documentalmente la disponibilidad de Qt 6.12.0 con el kit
 MSVC 2022 de 64 bits y del generador CMake elegido.
 
-El usuario confirma que ha descargado el Windows SDK `10.0.28000.2270`.
+Se ha descargado el Windows SDK `10.0.28000.2270`.
 La comprobación local todavía no identifica la instalación del SDK 28000 en
 Windows Kits. Quedan pendientes verificar su instalación y la selección
 efectiva del SDK durante la configuración con CMake.

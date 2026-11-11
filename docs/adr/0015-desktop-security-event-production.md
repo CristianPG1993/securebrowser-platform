@@ -25,7 +25,7 @@ motor, la semántica de actualización y el contenido entregado a esos bloques.
 
 ## Decisión
 
-Las siguientes decisiones han sido aprobadas por el autor en la tarea #114.
+En la tarea #114 se adoptaron las siguientes decisiones.
 
 ### Producción y receptor
 

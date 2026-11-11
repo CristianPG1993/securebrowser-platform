@@ -7,6 +7,11 @@ function(sbp_generate_runtime_inventory SBP_TARGET)
         "$<TARGET_FILE_NAME:Qt6::Core>"
         "$<TARGET_FILE_NAME:Qt6::Gui>"
         "$<TARGET_FILE_NAME:Qt6::Widgets>"
+        # ICU aporta las operaciones Unicode y sus datos, junto a sus avisos de distribución.
+        "$<TARGET_FILE_NAME:sbp_icu_uc>"
+        "$<TARGET_FILE_NAME:sbp_icu_data>"
+        "icu-notices/LICENSE"
+        "icu-notices/icu-sdk.json"
         # El kit Windows fijado utiliza qwindowsd.dll en Debug y qwindows.dll en Release.
         "platforms/qwindows$<$<CONFIG:Debug>:d>.dll"
         ${CEF_BINARY_FILES}

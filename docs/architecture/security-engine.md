@@ -1,7 +1,7 @@
 # Security Engine MVP
 
 Documento de diseño para la [tarea #114](https://github.com/CristianPG1993/securebrowser-platform/issues/114).
-Los acuerdos de este documento están aprobados por el autor; su implementación está pendiente.
+En este documento se recogen las decisiones adoptadas en la tarea #114.
 
 ## Componentes y contratos internos
 

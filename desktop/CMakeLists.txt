@@ -14,6 +14,170 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
+# La aplicación conserva el flujo habitual; las pruebas se activan explícitamente.
+option(SBP_BUILD_DESKTOP_APP "Build the Qt and CEF desktop application" ON)
+option(BUILD_TESTING "Build the security core tests" OFF)
+include(CTest)
+
+# ICU se prepara explícitamente; la configuración utiliza únicamente el SDK local fijado.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/icu-sdk.json" SBP_ICU_MANIFEST)
+string(JSON SBP_ICU_VERSION GET "${SBP_ICU_MANIFEST}" version)
+string(JSON SBP_ICU_UNICODE_VERSION GET "${SBP_ICU_MANIFEST}" unicodeVersion)
+string(JSON SBP_ICU_ARCHIVE GET "${SBP_ICU_MANIFEST}" archive)
+get_filename_component(SBP_ICU_DIRECTORY_NAME "${SBP_ICU_ARCHIVE}" NAME_WE)
+string(REPLACE "." ";" SBP_ICU_VERSION_PARTS "${SBP_ICU_VERSION}")
+list(GET SBP_ICU_VERSION_PARTS 0 SBP_ICU_MAJOR_VERSION)
+set(SBP_ICU_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/.deps/icu/${SBP_ICU_DIRECTORY_NAME}"
+    CACHE PATH "Root directory of the approved ICU binary SDK"
+)
+foreach(SBP_ICU_REQUIRED_FILE IN ITEMS
+    LICENSE include/unicode/uvernum.h include/unicode/uchar.h
+    include/unicode/ustring.h include/unicode/ucasemap.h
+    lib64/icuuc.lib lib64/icudt.lib
+    bin64/icuuc${SBP_ICU_MAJOR_VERSION}.dll bin64/icudt${SBP_ICU_MAJOR_VERSION}.dll
+)
+    if(NOT EXISTS "${SBP_ICU_ROOT}/${SBP_ICU_REQUIRED_FILE}")
+        message(FATAL_ERROR
+            "ICU SDK not found or incomplete. Run scripts/setup-icu.ps1 "
+            "or set -DSBP_ICU_ROOT=<the prepared SDK root>."
+        )
+    endif()
+endforeach()
+file(STRINGS "${SBP_ICU_ROOT}/include/unicode/uvernum.h" SBP_ICU_VERSION_LINE
+    REGEX "^#define U_ICU_VERSION "
+)
+file(STRINGS "${SBP_ICU_ROOT}/include/unicode/uchar.h" SBP_ICU_UNICODE_VERSION_LINE
+    REGEX "^#define U_UNICODE_VERSION "
+)
+if(NOT SBP_ICU_VERSION_LINE STREQUAL "#define U_ICU_VERSION \"${SBP_ICU_VERSION}\""
+    OR NOT SBP_ICU_UNICODE_VERSION_LINE STREQUAL "#define U_UNICODE_VERSION \"${SBP_ICU_UNICODE_VERSION}\"")
+    message(FATAL_ERROR "ICU SDK or Unicode version does not match icu-sdk.json.")
+endif()
+
+# El SDK contiene bibliotecas de importación .lib y las DLL precompiladas correspondientes.
+# Se utilizará su API C para mantener la frontera sin objetos C++ compartidos entre runtimes.
+add_library(sbp_icu_data SHARED IMPORTED)
+set_target_properties(sbp_icu_data PROPERTIES
+    IMPORTED_IMPLIB "${SBP_ICU_ROOT}/lib64/icudt.lib"
+    IMPORTED_LOCATION "${SBP_ICU_ROOT}/bin64/icudt${SBP_ICU_MAJOR_VERSION}.dll"
+)
+add_library(sbp_icu_uc SHARED IMPORTED)
+set_target_properties(sbp_icu_uc PROPERTIES
+    IMPORTED_IMPLIB "${SBP_ICU_ROOT}/lib64/icuuc.lib"
+    IMPORTED_LOCATION "${SBP_ICU_ROOT}/bin64/icuuc${SBP_ICU_MAJOR_VERSION}.dll"
+    INTERFACE_INCLUDE_DIRECTORIES "${SBP_ICU_ROOT}/include"
+)
+target_link_libraries(sbp_icu_uc INTERFACE sbp_icu_data)
+
+# Prepara el runtime y sus avisos junto al consumidor, sin depender del PATH del equipo.
+function(sbp_deploy_icu SBP_TARGET)
+    add_custom_command(TARGET ${SBP_TARGET} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:sbp_icu_uc>" "$<TARGET_FILE:sbp_icu_data>"
+            "$<TARGET_FILE_DIR:${SBP_TARGET}>"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${SBP_TARGET}>/icu-notices"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${SBP_ICU_ROOT}/LICENSE" "$<TARGET_FILE_DIR:${SBP_TARGET}>/icu-notices/LICENSE"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/icu-sdk.json"
+            "$<TARGET_FILE_DIR:${SBP_TARGET}>/icu-notices/icu-sdk.json"
+        COMMENT "Deploying ICU libraries and notices..."
+        VERBATIM
+    )
+endfunction()
+
+# El núcleo se compila sin enlazar Qt, CEF ni bibliotecas de persistencia o red.
+add_library(sbp_security_core STATIC
+    src/security/download_control_config.h
+    src/security/download_control_config.cpp
+    src/security/filter_mode.h
+    src/security/policy_availability.h
+    src/security/policy_manager.h
+    src/security/policy_manager.cpp
+    src/security/policy_publication_result.h
+    src/security/policy_snapshot.h
+    src/security/policy_snapshot.cpp
+    src/security/policy_validation_error.h
+    src/security/security_action.h
+    src/security/security_context.h
+    src/security/security_context.cpp
+    src/security/security_reason.h
+    src/security/security_decision.h
+    src/security/security_decision.cpp
+    src/security/url_filtering_config.h
+    src/security/url_filtering_config.cpp
+)
+target_include_directories(sbp_security_core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(sbp_security_core PRIVATE sbp_icu_uc)
+
+if(BUILD_TESTING)
+    # Utiliza las fuentes preparadas explícitamente por setup-googletest.ps1.
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/googletest.json" SBP_GOOGLETEST_MANIFEST)
+    string(JSON SBP_GOOGLETEST_VERSION GET "${SBP_GOOGLETEST_MANIFEST}" version)
+    set(SBP_GOOGLETEST_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/.deps/googletest/googletest-${SBP_GOOGLETEST_VERSION}"
+        CACHE PATH "Root directory of the approved GoogleTest source distribution"
+    )
+    foreach(SBP_GTEST_REQUIRED_FILE IN ITEMS
+        CMakeLists.txt googletest/CMakeLists.txt
+        googletest/include/gtest/gtest.h googletest/src/gtest-all.cc
+        googletest/src/gtest_main.cc
+    )
+        if(NOT EXISTS "${SBP_GOOGLETEST_ROOT}/${SBP_GTEST_REQUIRED_FILE}")
+            message(FATAL_ERROR
+                "GoogleTest sources not found or incomplete. Run scripts/setup-googletest.ps1 "
+                "or set -DSBP_GOOGLETEST_ROOT=<the prepared source root>."
+            )
+        endif()
+    endforeach()
+
+    # Rechaza una copia distinta de la versión fijada en el manifiesto.
+    file(STRINGS "${SBP_GOOGLETEST_ROOT}/CMakeLists.txt" SBP_GTEST_VERSION_LINE
+        REGEX "^set\\(GOOGLETEST_VERSION "
+    )
+    if(NOT SBP_GTEST_VERSION_LINE STREQUAL "set(GOOGLETEST_VERSION ${SBP_GOOGLETEST_VERSION})")
+        message(FATAL_ERROR "GoogleTest source version does not match googletest.json.")
+    endif()
+
+    # Limita estas opciones a GoogleTest: biblioteca estática y el mismo CRT dinámico.
+    block()
+        set(BUILD_SHARED_LIBS OFF)
+        set(BUILD_GMOCK OFF)
+        set(INSTALL_GTEST OFF)
+        set(GTEST_HAS_ABSL OFF)
+        set(gtest_build_tests OFF)
+        set(gtest_build_samples OFF)
+        set(gtest_force_shared_crt ON)
+        add_subdirectory("${SBP_GOOGLETEST_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/googletest"
+            EXCLUDE_FROM_ALL
+        )
+    endblock()
+
+    # GoogleTest proporciona main(); nuestras pruebas enlazan únicamente el núcleo y gtest.
+    add_executable(sbp_security_tests
+        tests/security/download_control_config_test.cpp
+        tests/security/policy_manager_test.cpp
+        tests/security/policy_snapshot_test.cpp
+        tests/security/security_context_test.cpp
+        tests/security/security_decision_test.cpp
+        tests/security/url_filtering_config_test.cpp
+    )
+    target_link_libraries(sbp_security_tests PRIVATE sbp_security_core GTest::gtest_main)
+    sbp_deploy_icu(sbp_security_tests)
+
+    # Descubre también cada caso parametrizado al ejecutar CTest.
+    include(GoogleTest)
+    gtest_discover_tests(sbp_security_tests DISCOVERY_MODE PRE_TEST)
+endif()
+
+# Termina la configuración antes de buscar los SDK cuando solo se construye el núcleo.
+if(NOT SBP_BUILD_DESKTOP_APP)
+    return()
+endif()
+
 set(Qt6_DIR "" CACHE PATH "Directory containing Qt6Config.cmake for the approved Qt kit")
 
 if(NOT Qt6_DIR OR NOT EXISTS "${Qt6_DIR}/Qt6Config.cmake")
@@ -154,12 +318,16 @@ target_link_options(SecureBrowser PRIVATE
 # Carga estas DLL de Windows al usarlas, después de distinguir los subprocesos de CEF.
 # Contienen las funciones para obtener la carpeta del usuario y liberar su resultado.
 target_link_options(SecureBrowser PRIVATE /DELAYLOAD:shell32.dll /DELAYLOAD:ole32.dll)
+# Difiere ICU hasta su uso por el motor, conservando el arranque de los subprocesos CEF.
+target_link_options(SecureBrowser PRIVATE "/DELAYLOAD:$<TARGET_FILE_NAME:sbp_icu_uc>")
 target_link_libraries(SecureBrowser PRIVATE
+    sbp_security_core
     Qt6::Widgets
     libcef_dll_wrapper
     libcef_lib
     ${CEF_STANDARD_LIBS}
 )
+sbp_deploy_icu(SecureBrowser)
 
 # Copia el bootstrap de la configuración elegida junto a nuestra DLL y lo renombra.
 COPY_SINGLE_FILE(SecureBrowser

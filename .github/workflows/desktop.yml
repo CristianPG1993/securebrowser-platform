@@ -58,9 +58,11 @@ jobs:
         with:
           path: |
             desktop/.deps/cef
+            desktop/.deps/googletest
+            desktop/.deps/icu
             desktop/.deps/qt
             desktop/.deps/tools/cmake-*
-          key: desktop-v1-${{ steps.toolchain.outputs.cache-identity }}-${{ hashFiles('desktop/ci/toolchain.json', 'desktop/cef-sdk.json', 'desktop/ci/setup-*.ps1', 'scripts/setup-cef.ps1') }}
+          key: desktop-v1-${{ steps.toolchain.outputs.cache-identity }}-${{ hashFiles('desktop/ci/toolchain.json', 'desktop/cef-sdk.json', 'desktop/googletest.json', 'desktop/icu-sdk.json', 'desktop/ci/setup-*.ps1', 'scripts/setup-cef.ps1', 'scripts/setup-googletest.ps1', 'scripts/setup-icu.ps1') }}
 
       - name: Prepare CMake
         run: .\desktop\ci\setup-cmake.ps1
@@ -75,6 +77,14 @@ jobs:
         timeout-minutes: 10
         run: .\desktop\ci\setup-cef.ps1
 
+      - name: Prepare ICU
+        timeout-minutes: 5
+        run: .\scripts\setup-icu.ps1
+
+      - name: Prepare GoogleTest
+        timeout-minutes: 5
+        run: .\scripts\setup-googletest.ps1
+
       # Guardamos únicamente dependencias cuya preparación y comprobaciones han terminado correctamente.
       - name: Save dependency cache
         if: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.dependencies.outputs.cache-hit != 'true' }}
@@ -82,9 +92,45 @@ jobs:
         with:
           path: |
             desktop/.deps/cef
+            desktop/.deps/googletest
+            desktop/.deps/icu
             desktop/.deps/qt
             desktop/.deps/tools/cmake-*
           key: ${{ steps.dependencies.outputs.cache-primary-key }}
+
+      - name: Configure security core tests
+        timeout-minutes: 5
+        run: |
+          $toolchain = Get-Content -LiteralPath desktop/ci/toolchain.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $cmakeArguments = @(
+              '-S', 'desktop',
+              '-B', 'desktop/build/tests',
+              '-G', $toolchain.generator,
+              '-A', "$($toolchain.architecture),version=$($toolchain.windowsSdk.targetVersion)",
+              '-T', $toolchain.toolset,
+              "-DCMAKE_CONFIGURATION_TYPES:STRING=$($toolchain.configurations -join ';')",
+              '-DSBP_BUILD_DESKTOP_APP=OFF',
+              '-DBUILD_TESTING=ON'
+          )
+          cmake @cmakeArguments
+          if ($LASTEXITCODE -ne 0) {
+              throw 'La configuración de las pruebas del núcleo ha fallado.'
+          }
+
+      - name: Build and run security core tests
+        timeout-minutes: 15
+        run: |
+          $toolchain = Get-Content -LiteralPath desktop/ci/toolchain.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          foreach ($configuration in $toolchain.configurations) {
+              cmake --build desktop/build/tests --config $configuration --target sbp_security_tests --parallel 4
+              if ($LASTEXITCODE -ne 0) {
+                  throw "La compilación del núcleo $configuration ha fallado."
+              }
+              ctest --test-dir desktop/build/tests -C $configuration --output-on-failure --no-tests=error --timeout 60
+              if ($LASTEXITCODE -ne 0) {
+                  throw "Las pruebas del núcleo $configuration han fallado."
+              }
+          }
 
       - name: Configure desktop
         run: .\desktop\ci\configure.ps1
@@ -122,6 +168,8 @@ jobs:
         run: |
           @(
               'Debug y Release: compilación, inventario de runtime, ventana hija CEF y cierre normal comprobados.'
+              ''
+              'Security Engine: pruebas unitarias del núcleo ejecutadas en Debug y Release sin inicializar Qt ni CEF.'
               ''
               'Configuración sin Qt rechazada con el diagnóstico esperado.'
               ''

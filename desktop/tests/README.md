@@ -1,11 +1,215 @@
-# Verificación de Desktop Foundation
+# Verificación de Desktop
 
-Esta guía corresponde a la [tarea #93](https://github.com/CristianPG1993/securebrowser-platform/issues/93).
+Esta guía recoge la verificación de Desktop Foundation de la
+[tarea #93](https://github.com/CristianPG1993/securebrowser-platform/issues/93)
+y las pruebas unitarias del Security Engine iniciadas en la
+[tarea #115](https://github.com/CristianPG1993/securebrowser-platform/issues/115).
 Ejecutar los comandos desde la raíz del repositorio, con Windows PowerShell 5.1
-o PowerShell en Windows. La preparación de MSVC, Qt y CEF y los comandos de
+o PowerShell en Windows. La preparación de MSVC, Qt, CEF e ICU y los comandos de
 construcción están en el [README de Desktop](../README.md).
 
-## Comprobaciones automáticas
+## Pruebas unitarias del Security Engine
+
+Estas pruebas requieren CMake 3.29 o posterior, MSVC 2022 x64 con el toolset
+v143 y el SDK de Windows 10.0.28000.0 utilizado por los comandos siguientes.
+El núcleo y las pruebas se configuran sin buscar Qt ni CEF.
+
+Preparar también el SDK de ICU4C con la versión y la integridad fijadas en
+[icu-sdk.json](../icu-sdk.json):
+
+```powershell
+.\scripts\setup-icu.ps1
+```
+
+El script prepara ICU `76.1`, Unicode `16.0`, en
+`desktop/.deps/icu/icu4c-76_1-Win64-MSVC2022`. CMake lo utiliza desde esa
+ubicación por defecto. Si se prepara en otro destino, añadir
+`-DSBP_ICU_ROOT="<ruta del SDK preparado>"` al comando de configuración.
+La dependencia de ICU también se exige con la aplicación desactivada.
+
+Preparar GoogleTest con la versión y la integridad fijadas en
+[googletest.json](../googletest.json):
+
+```powershell
+.\scripts\setup-googletest.ps1
+```
+
+El script prepara las fuentes en `desktop/.deps/googletest/googletest-1.18.0`.
+CMake utiliza esas fuentes locales; no descarga dependencias al configurar.
+Para utilizar una copia preparada en otra ubicación, añadir
+`-DSBP_GOOGLETEST_ROOT="<ruta de las fuentes>"` al comando de configuración.
+
+Configurar una carpeta de compilación independiente de la aplicación:
+
+```powershell
+cmake -S desktop -B desktop/build/tests -G "Visual Studio 17 2022" -A "x64,version=10.0.28000.0" -T v143 -DSBP_BUILD_DESKTOP_APP=OFF -DBUILD_TESTING=ON
+```
+
+Compilar y ejecutar en Debug:
+
+```powershell
+cmake --build desktop/build/tests --config Debug --target sbp_security_tests --parallel 4
+ctest --test-dir desktop/build/tests -C Debug --output-on-failure --no-tests=error --timeout 60
+```
+
+Repetir en Release utilizando la misma carpeta del generador de Visual Studio:
+
+```powershell
+cmake --build desktop/build/tests --config Release --target sbp_security_tests --parallel 4
+ctest --test-dir desktop/build/tests -C Release --output-on-failure --no-tests=error --timeout 60
+```
+
+La compilación copia `icuuc76.dll`, `icudt76.dll` y `icu-notices/` junto a
+`sbp_security_tests.exe`, tanto en Debug como en Release. Los avisos incluyen
+la licencia y una copia del manifiesto ICU. No es necesario añadir el SDK
+al `PATH` para ejecutar las pruebas.
+
+CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
+casos parametrizados. Actualmente se esperan 188 casos:
+
+- [security_decision_test.cpp](security/security_decision_test.cpp): 14 casos,
+  uno para `Allowed` y trece para los motivos de bloqueo. Comprueban la acción
+  obtenida y la conservación del motivo recibido por el constructor.
+- [url_filtering_config_test.cpp](security/url_filtering_config_test.cpp): tres
+  casos que comprueban la conservación del modo y las reglas al construir una
+  configuración desactivada, una `ALLOWLIST` vacía y la independencia respecto
+  a cambios posteriores en el vector de origen.
+- [download_control_config_test.cpp](security/download_control_config_test.cpp):
+  tres casos equivalentes para la configuración de extensiones de descarga.
+- [policy_snapshot_test.cpp](security/policy_snapshot_test.cpp): tres casos que
+  comprueban identificadores de 64 bits, nombre, fechas con microsegundos,
+  conservación separada de ambas configuraciones e independencia respecto
+  a cambios posteriores en los objetos de entrada.
+- [policy_manager_test.cpp](security/policy_manager_test.cpp): 160 casos.
+  Los 109 casos de validación mediante `PolicyManager::Validate` incluyen una
+  política válida, cinco identidades inválidas o ajenas, 23 nombres, ocho combinaciones de modos,
+  24 configuraciones de dominios, 25 configuraciones básicas de extensiones,
+  20 configuraciones de extensiones Unicode y tres prioridades entre errores.
+  Se comprueban listas vacías, límites de longitud, formato y duplicados
+  normalizados, también con las protecciones desactivadas. Las pruebas de
+  reglas comprueban además que validar conserva los datos originales del snapshot.
+  Los otros 21 casos cubren `BeginContext`, `IsCurrentContext` y `EndContext`: creación y
+  sustitución de contextos, IDs inválidos, conservación de generaciones y del
+  contexto actual ante intentos rechazados, ausencia de estado y correspondencia
+  de generación, dispositivo y compañía. Incluyen cierre correcto, cierre
+  repetido, reapertura sin reutilizar generación y rechazo de cierres tardíos
+  o con identidad de instalación distinta.
+  Un caso comprueba el rechazo de una función de reloj vacía y ocho casos cubren
+  los resultados de `PublishPolicy`, incluidos el cierre y el cambio de contexto
+  durante la preparación del estado.
+  Cinco casos comprueban `ReadState`: ausencia de estado, contexto sin política,
+  contenido completo publicado, instante del reloj inyectado y conservación de
+  una referencia anterior tras sustituir o cerrar el estado actual.
+  Otros 16 casos cubren `ReadPolicy`, el límite exacto de 15 minutos, la renovación
+  con una política idéntica, la conservación del plazo ante lecturas o respuestas
+  rechazadas, los cambios durante la consulta y dos recorridos con hilos concurrentes.
+- [security_context_test.cpp](security/security_context_test.cpp): cinco casos
+  que comprueban la conservación de identificadores de 64 bits y la igualdad
+  de contextos. Una generación, un dispositivo o una compañía distintos hacen
+  que la comparación devuelva `false`; se comprueban ambos órdenes de comparación.
+
+El 9 de noviembre de 2026 se superaron las 14 pruebas
+en Debug y en Release. En Debug, CTest informó de 0 fallos y 4,68 segundos.
+Después de incorporar `UrlFilteringConfig`, se superaron las 17 pruebas
+en ambas configuraciones. Al añadir `DownloadControlConfig`, se superaron las
+20 pruebas en Debug y en Release. Estas comprobaciones acreditan
+`SecurityDecision` y la conservación de datos de ambas configuraciones.
+No acreditan la evaluación de dominios o archivos ni su aplicación en CEF.
+
+El 10 de noviembre de 2026, tras incorporar `PolicySnapshot`, se superaron
+las 23 pruebas en Debug y en Release. Este resultado acredita la
+conservación de los datos de la política mediante el constructor y los métodos
+de lectura. En ese punto seguían pendientes la validación semántica y el estado
+de `PolicyManager` de la tarea #115.
+
+Ese mismo día, tras preparar ICU e integrar su enlace y copia de archivos en
+CMake, se comprobó de nuevo la compilación y se superaron las 23 pruebas
+en Debug y Release. Aquella batería de 23 casos todavía no ejercitaba la
+conversión Unicode de ICU ni la validación de `PolicyManager`.
+
+Después de incorporar la validación y sus pruebas, el 10 de noviembre de 2026
+se superaron las 132 pruebas en Debug y Release. Los casos
+Unicode ejercitan ICU para detectar duplicados como `Ñ`/`ñ`, la expansión de
+`İ` a `i` seguida de punto combinado y la sigma griega final. Comprueban que el
+límite de 20 puntos de código se aplica después de convertir a minúsculas y
+que se conservan las diferencias entre acentos, secuencias combinadas y otras
+cadenas distintas. Las conversiones especiales se contrastaron con
+[SpecialCasing de Unicode 16.0](https://www.unicode.org/Public/16.0.0/ucd/SpecialCasing.txt).
+
+Este resultado acredita la validación de datos. En ese momento seguían pendientes
+la gestión del contexto de sesión e instalación, la publicación de políticas en
+un estado inmutable y la vigencia mediante reloj monotónico.
+`Validate` no publica ni modifica el snapshot.
+La presencia y conversión de los campos REST, incluidas las fechas, corresponden
+al adaptador de adquisición todavía pendiente. Tampoco se acredita con estas
+pruebas la evaluación de una navegación o descarga ni su aplicación en CEF.
+
+El 11 de noviembre de 2026, después de incorporar `SecurityContext`, se superaron
+las 137 pruebas en Debug y Release. Estos cinco casos nuevos
+acreditan el objeto de contexto y su comparación.
+
+Ese mismo día, tras incorporar `BeginContext` e `IsCurrentContext`, se superaron las
+151 pruebas en Debug y Release. Los 14 casos nuevos comprueban la
+creación de generaciones y la sustitución y consulta del contexto publicado.
+Una identidad anterior deja de coincidir aunque se repitan dispositivo y compañía;
+una creación con IDs inválidos no reemplaza el contexto ni consume generaciones.
+Tras incorporar `EndContext`, se superaron también las 158 pruebas
+en Debug y Release el 11 de noviembre de 2026. Los siete casos nuevos
+comprueban que cerrar el contexto deja de reconocerlo como actual, que un cierre
+repetido devuelve `false`, que volver a iniciar no reutiliza la generación y que
+un cierre tardío o de otra instalación no termina el contexto actual.
+
+Al incorporar el reloj inyectable y `PublishPolicy`, se superaron las 167 pruebas
+en Debug y Release el 11 de noviembre de 2026. Se comprueban el rechazo del reloj
+vacío, la publicación válida y los rechazos por contexto ausente, terminado o
+anterior, política inválida y compañía ajena. Dos casos utilizan la función de
+reloj para provocar un cierre o cambio de contexto después de validar los datos
+y antes de sustituir el estado, comprobando la correspondencia final del contexto.
+
+Tras incorporar `ReadState`, se superaron las 172 pruebas en Debug y Release el
+11 de noviembre de 2026. Los cinco casos nuevos verifican los datos de la política,
+su contexto y el instante local de validación como un estado coherente. Una
+referencia conservada mantiene los datos e instante anteriores tras otra publicación
+y permanece legible después del cierre, aunque el gestor ya no reconozca su contexto
+como actual. El instante del reloj inyectado se comprueba por separado de las fechas
+de auditoría del backend.
+
+Tras incorporar `ReadPolicy` y las pruebas de vigencia y concurrencia, se superaron
+las 188 pruebas en Debug y Release el 11 de noviembre de 2026. Se comprueba que la
+política está disponible antes del límite y caduca al alcanzar exactamente los
+15 minutos, sin esperar tiempo real. Publicar de nuevo una política válida e
+idéntica renueva el plazo; leerla o rechazar una actualización inválida o de otra
+sesión conserva la vigencia anterior.
+
+Tres casos provocan cambios en el mismo hilo durante la lectura del reloj para
+comprobar el contexto final y la correspondencia entre disponibilidad y estado.
+Dos casos adicionales utilizan hilos reales: uno realiza 64 rondas de publicación
+y lectura con referencias conservadas; otro crea 32 contextos desde cada uno de
+cuatro hilos y comprueba la unicidad de las generaciones y el rechazo de cierres
+anteriores. Los hilos se unen antes de las comprobaciones finales. No se ha probado
+por ejecución el agotamiento del contador de generaciones de 64 bits.
+
+La conservación de una referencia no acredita por sí sola que la política pueda
+seguir autorizando operaciones. La adquisición HTTP y el tratamiento de sus errores
+asociados al contexto corresponden a las tareas #122 y #123.
+
+También se comprobaron la compilación de la aplicación en Debug y Release,
+los comprobadores `check-runtime.ps1` y `check-startup.ps1` en ambas
+configuraciones y el rechazo esperado de Qt ausente mediante
+`check-configuration-rejection.ps1 -TimeoutSeconds 120`.
+El inventario comprobado incluye las DLL y los avisos de ICU.
+
+Durante el enlace apareció el aviso `LNK4199`: se omite la carga diferida de
+`icuuc76.dll` porque la aplicación todavía no importa funciones de esa DLL.
+El aviso no impide compilar; la opción queda preparada para cuando el motor
+utilice la API de ICU. La ejecución de CI y una nueva pasada de la matriz
+visual completa siguen pendientes con esta incorporación.
+
+La aplicación conserva `SBP_BUILD_DESKTOP_APP=ON` y `BUILD_TESTING=OFF` por
+defecto. Las fuentes de GoogleTest, el SDK ICU y sus salidas permanecen en `.deps/` y `build/`;
+no se incorporan al control de versiones.
+
+## Comprobaciones automáticas de Desktop Foundation
 
 Preparar las salidas `desktop/build/Debug` y `desktop/build/Release`. Cerrar
 las instancias de SecureBrowser antes de iniciar la batería: ambas
@@ -99,7 +303,7 @@ batería normal. Un mensaje de limpieza incompleta deja pendiente esa validació
 
 ## Resultados registrados para #93
 
-El usuario ha ejecutado y confirmado los siguientes casos:
+Se han ejecutado y comprobado los siguientes casos:
 
 | Caso | Resultado confirmado |
 | --- | --- |
@@ -111,7 +315,7 @@ El usuario ha ejecutado y confirmado los siguientes casos:
 
 ## Matriz visual manual
 
-El usuario ha confirmado todas las filas en Debug y Release para #93.
+Se han comprobado todas las filas en Debug y Release para #93.
 Los resultados de esta tabla corresponden a esa comprobación manual.
 
 Completar la misma secuencia en Debug y Release, con una instancia cada vez.
@@ -150,6 +354,7 @@ foco, tamaño, diálogos de abandono o ausencia de auxiliares tras una salida
 normal. Esas comprobaciones corresponden a la matriz manual. El timeout
 forzado registrado corresponde a CMake; no simula un bloqueo del hilo UI de CEF.
 
-Las comprobaciones de esta entrega utilizan PowerShell y CMake; no se ha
-añadido GoogleTest. La validación queda centrada en la integración de
-herramientas, archivos y procesos, manteniendo las clases de producción existentes.
+Las comprobaciones de Desktop Foundation de #93 utilizan PowerShell y CMake.
+Su validación se centra en la integración de herramientas, archivos y procesos.
+Las pruebas unitarias con GoogleTest del Security Engine se describen al inicio
+de esta guía y tienen un alcance independiente.

@@ -1,0 +1,8 @@
+{
+  "version": "1.18.0",
+  "revision": "063de7e9578f82b369302001269680b4b1553359",
+  "archive": "googletest-1.18.0.tar.gz",
+  "url": "https://github.com/google/googletest/releases/download/v1.18.0/googletest-1.18.0.tar.gz",
+  "sizeBytes": 894741,
+  "sha256": "6e3191c1455468b3fc35a417fb565c1c5071aee1b7e7f85e30cf48a98d37d8b5"
+}

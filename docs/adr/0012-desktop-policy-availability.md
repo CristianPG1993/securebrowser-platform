@@ -52,7 +52,7 @@ inicial del MVP entre continuidad de uso y antigüedad de la política aplicada.
 
 ## Decisión
 
-Las siguientes decisiones han sido aprobadas por el autor en la tarea #114:
+En la tarea #114 se adoptaron las siguientes decisiones:
 
 ### Disponibilidad y plazo local
 
