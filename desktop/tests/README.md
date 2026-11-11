@@ -99,27 +99,27 @@ casos parametrizados. Actualmente se esperan 158 casos:
   de contextos. Una generación, un dispositivo o una compañía distintos hacen
   que la comparación devuelva `false`; se comprueban ambos órdenes de comparación.
 
-El 9 de noviembre de 2026, el usuario confirmó las 14 pruebas superadas
+El 9 de noviembre de 2026 se superaron las 14 pruebas
 en Debug y en Release. En Debug, CTest informó de 0 fallos y 4,68 segundos.
-Después de incorporar `UrlFilteringConfig`, confirmó las 17 pruebas superadas
-en ambas configuraciones. Al añadir `DownloadControlConfig`, confirmó las
-20 pruebas superadas en Debug y en Release. Estas comprobaciones acreditan
-`SecurityDecision` y la conservación de datos de ambas configuraciones;
-no acreditan la evaluación de dominios o archivos ni su aplicación en CEF.
+Después de incorporar `UrlFilteringConfig`, se superaron las 17 pruebas
+en ambas configuraciones. Al añadir `DownloadControlConfig`, se superaron las
+20 pruebas en Debug y en Release. Estas comprobaciones acreditan
+`SecurityDecision` y la conservación de datos de ambas configuraciones.
+No acreditan la evaluación de dominios o archivos ni su aplicación en CEF.
 
-El 10 de noviembre de 2026, tras incorporar `PolicySnapshot`, el usuario
-confirmó las 23 pruebas superadas en Debug y en Release. Esto acredita la
+El 10 de noviembre de 2026, tras incorporar `PolicySnapshot`, se superaron
+las 23 pruebas en Debug y en Release. Este resultado acredita la
 conservación de los datos de la política mediante el constructor y los métodos
 de lectura. En ese punto seguían pendientes la validación semántica y el estado
 de `PolicyManager` de la tarea #115.
 
 Ese mismo día, tras preparar ICU e integrar su enlace y copia de archivos en
-CMake, el usuario confirmó de nuevo la compilación y las 23 pruebas superadas
+CMake, se comprobó de nuevo la compilación y se superaron las 23 pruebas
 en Debug y Release. Aquella batería de 23 casos todavía no ejercitaba la
 conversión Unicode de ICU ni la validación de `PolicyManager`.
 
 Después de incorporar la validación y sus pruebas, el 10 de noviembre de 2026
-el usuario confirmó las 132 pruebas superadas en Debug y Release. Los casos
+se superaron las 132 pruebas en Debug y Release. Los casos
 Unicode ejercitan ICU para detectar duplicados como `Ñ`/`ñ`, la expansión de
 `İ` a `i` seguida de punto combinado y la sigma griega final. Comprueban que el
 límite de 20 puntos de código se aplica después de convertir a minúsculas y
@@ -135,27 +135,26 @@ La presencia y conversión de los campos REST, incluidas las fechas, corresponde
 al adaptador de adquisición todavía pendiente. Tampoco se acredita con estas
 pruebas la evaluación de una navegación o descarga ni su aplicación en CEF.
 
-El 11 de noviembre de 2026, después de incorporar `SecurityContext`, el usuario
-confirmó las 137 pruebas superadas en Debug y Release. Estos cinco casos nuevos
+El 11 de noviembre de 2026, después de incorporar `SecurityContext`, se superaron
+las 137 pruebas en Debug y Release. Estos cinco casos nuevos
 acreditan el objeto de contexto y su comparación.
 
-Ese mismo día, tras incorporar `BeginContext` e `IsCurrentContext`, confirmó las
-151 pruebas superadas en Debug y Release. Los 14 casos nuevos comprueban la
+Ese mismo día, tras incorporar `BeginContext` e `IsCurrentContext`, se superaron las
+151 pruebas en Debug y Release. Los 14 casos nuevos comprueban la
 creación de generaciones y la sustitución y consulta del contexto publicado.
 Una identidad anterior deja de coincidir aunque se repitan dispositivo y compañía;
 una creación con IDs inválidos no reemplaza el contexto ni consume generaciones.
-Tras incorporar `EndContext`, el usuario confirmó también las 158 pruebas
-superadas en Debug y Release el 11 de noviembre de 2026. Los siete casos nuevos
+Tras incorporar `EndContext`, se superaron también las 158 pruebas
+en Debug y Release el 11 de noviembre de 2026. Los siete casos nuevos
 comprueban que cerrar el contexto deja de reconocerlo como actual, que un cierre
 repetido devuelve `false`, que volver a iniciar no reutiliza la generación y que
 un cierre tardío o de otra instalación no termina el contexto actual.
 
-Estos casos son secuenciales: la concurrencia y el agotamiento del contador no
-se han acreditado mediante ejecución de pruebas. Siguen pendientes la publicación
-de políticas, su caducidad y el descarte efectivo de respuestas y errores tardíos
-durante su aplicación.
+Estos casos se han ejecutado de forma secuencial; todavía no se han probado la concurrencia
+ni el agotamiento del contador. Siguen pendientes la publicación de políticas,
+su caducidad y el descarte efectivo de respuestas y errores tardíos durante su aplicación.
 
-El autor confirmó también la compilación de la aplicación en Debug y Release,
+También se comprobaron la compilación de la aplicación en Debug y Release,
 los comprobadores `check-runtime.ps1` y `check-startup.ps1` en ambas
 configuraciones y el rechazo esperado de Qt ausente mediante
 `check-configuration-rejection.ps1 -TimeoutSeconds 120`.
@@ -265,7 +264,7 @@ batería normal. Un mensaje de limpieza incompleta deja pendiente esa validació
 
 ## Resultados registrados para #93
 
-El usuario ha ejecutado y confirmado los siguientes casos:
+Se han ejecutado y comprobado los siguientes casos:
 
 | Caso | Resultado confirmado |
 | --- | --- |
@@ -277,7 +276,7 @@ El usuario ha ejecutado y confirmado los siguientes casos:
 
 ## Matriz visual manual
 
-El usuario ha confirmado todas las filas en Debug y Release para #93.
+Se han comprobado todas las filas en Debug y Release para #93.
 Los resultados de esta tabla corresponden a esa comprobación manual.
 
 Completar la misma secuencia en Debug y Release, con una instancia cada vez.

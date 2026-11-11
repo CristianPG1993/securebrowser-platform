@@ -26,7 +26,7 @@ complementando la disponibilidad y vigencia del ADR-0012.
 
 ## Decisión
 
-Las siguientes decisiones han sido aprobadas por el autor en la tarea #114.
+En la tarea #114 se adoptaron las siguientes decisiones.
 
 ### Selección y comprobación del destino
 

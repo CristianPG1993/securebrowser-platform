@@ -24,7 +24,7 @@ CEF procesa sus eventos en su propio hilo de interfaz. Al cerrar la última
 ventana, se espera a `OnBeforeClose` del navegador, termina el bucle Qt,
 se destruye la ventana y se apaga CEF antes de
 destruir `QApplication`.
-El target `SecureBrowser` construye nuestra DLL (Dynamic-Link Library,
+El target `SecureBrowser` construye la DLL de SecureBrowser (Dynamic-Link Library,
 biblioteca de enlace dinámico), enlazada con Qt y CEF. Junto a ella copia el
 bootstrap oficial como `SecureBrowser.exe`.
 La construcción prepara también los binarios y recursos CEF, las dependencias
@@ -297,13 +297,13 @@ salida anticipada.
 En CMake, `NOMINMAX` impide que las macros de Windows interfieran con
 `std::min` y `std::max` de las cabeceras CEF. Las opciones de enlace
 `/DELAYLOAD:shell32.dll` y `/DELAYLOAD:ole32.dll` retrasan la carga solicitada
-por nuestra DLL hasta usar las funciones para localizar la carpeta y liberar
+por la DLL de SecureBrowser hasta usar las funciones para localizar la carpeta y liberar
 su memoria, después de distinguir el tipo de proceso.
 
 También se difiere la carga de las DLL Qt Core y Qt Widgets mediante
 `$<TARGET_FILE_NAME:Qt6::Core>` y `$<TARGET_FILE_NAME:Qt6::Widgets>`, que
 seleccionan el nombre Debug o Release del kit. Así no se solicitan esas DLL
-desde las importaciones normales de nuestra entrada antes del despacho CEF.
+desde las importaciones normales del punto de entrada antes del despacho CEF.
 `QT_NO_VERSION_TAGGING` evita la importación de datos de la etiqueta de versión
 Qt, incompatible con esta carga diferida en MSVC. La versión exacta del kit
 continúa fijada por `find_package(Qt6 6.12.0 EXACT ...)` y las dependencias se
@@ -363,7 +363,7 @@ La propiedad y liberación de referencias es la siguiente:
 | Referencia | Quién la conserva | Cuándo se libera |
 | --- | --- | --- |
 | `cef_app` | Variable local `CefRefPtr<BrowserApp>` en `RunWinMain`. | Al salir de `RunWinMain`, después de `CefShutdown` y antes de destruir `QApplication`. |
-| Referencias de CEF al objeto de aplicación y a su handler | CEF durante la vida del contexto. | Durante su limpieza; la referencia local mantiene vivo nuestro objeto mientras dura el arranque y apagado. |
+| Referencias de CEF al objeto de aplicación y a su handler | CEF durante la vida del contexto. | Durante su limpieza; la referencia local mantiene vivo el objeto de aplicación mientras dura el arranque y apagado. |
 | `browser_client` | Variable local `CefRefPtr<BrowserClient>` dentro del ámbito de la ventana. | Al salir de ese ámbito; su referencia local se libera antes de destruir la ventana principal y antes de `CefShutdown`. |
 | Copia de `browser_client` en la solicitud de cierre Qt | Callback guardado por `BrowserWindow`. | Al destruir la ventana y su callback. La referencia local puede haberse liberado antes sin destruir todavía el cliente. |
 | Referencia al cliente ligada a la tarea CEF | `base::BindOnce` conserva un `CefRefPtr<BrowserClient>` mientras la tarea está pendiente o ejecutándose. | Al terminar o destruirse la tarea, sin dejar un puntero al cliente sin propietario. |
@@ -376,7 +376,7 @@ La propiedad y liberación de referencias es la siguiente:
 utiliza `CefRefPtr`. Los destructores privados impiden un `delete` externo;
 la última referencia destruye el objeto. Las operaciones de copia del objeto
 están prohibidas, pero se pueden copiar sus referencias administradas.
-`.get()` entrega el puntero conservando nuestra referencia; al recibirlo como
+`.get()` entrega el puntero conservando la referencia local; al recibirlo como
 `CefRefPtr`, la API de CEF gestiona las referencias que necesite mantener.
 
 Ninguna de las clases conserva una referencia administrada a sí misma, a la
@@ -389,7 +389,7 @@ desde el hilo CEF. `BrowserApp` conserva una función proporcionada al construir
 tras el diagnóstico de contexto preparado, la ejecuta en el hilo CEF. Esa función
 utiliza `QMetaObject::invokeMethod` con `Qt::QueuedConnection` para enviar el aviso
 al hilo de `QApplication`, sin bloquear el hilo CEF. Las variables capturadas
-permanecen vivas hasta después de `CefShutdown` y de liberar nuestra referencia
+permanecen vivas hasta después de `CefShutdown` y de liberar la referencia local
 a `BrowserApp`.
 
 El receptor escribe `CEF context notification received; Qt main
@@ -434,7 +434,7 @@ destruir el anfitrión; cada tarea conserva otra copia solo hasta ejecutarse.
 
 Este bloque compila en Debug y Release. Se ha comprobado el ajuste inicial
 con un viewport de 1024×768 unidades lógicas, la carga HTTPS y el cierre con
-salida `0`. El usuario ha confirmado también la prueba manual de reducir,
+salida `0`. También se ha comprobado la prueba manual de reducir,
 ampliar, maximizar y restaurar la ventana, seguida del cierre con la X.
 
 El anfitrión utiliza `Qt::StrongFocus`. `focusInEvent` solicita entregar el
@@ -461,7 +461,7 @@ una pérdida de foco al pasar del anfitrión a su hija CEF, porque desharía
 la entrega del teclado al contenido.
 
 El bloque de foco y el refactor de callbacks compilan en Debug y Release.
-El usuario ha confirmado la prueba manual propuesta con Debug: navegación
+Se ha comprobado la prueba manual propuesta con Debug: navegación
 mediante Tab y Enter sin clic previo, cambio de aplicación y regreso,
 y cierre normal con la X.
 
@@ -556,7 +556,7 @@ reales, cancelación de popup, anfitrión válido hasta confirmar, salida `0` y
 ausencia de procesos restantes. Se usó el protocolo local de depuración CEF
 solo en esas ejecuciones para inspeccionar el documento y solicitar `Page.close`.
 No se habilita un puerto de depuración en la configuración de la aplicación.
-El usuario confirmó después la prueba manual de apertura y cierre de la
+Después se comprobaron manualmente la apertura y el cierre de la
 primera instancia. La herramienta de inspección de escritorio no pudo iniciarse.
 La carrera exacta de cierre mientras la creación está pendiente sigue sin
 reproducirse de forma controlada. La confirmación JavaScript, su cancelación
@@ -600,7 +600,7 @@ Abrir en SecureBrowser `http://127.0.0.1:8767/before-unload.html` o
 `http://127.0.0.1:8766/slow.html` y pulsar la X durante la espera del recurso.
 Ctrl+C detiene cada servidor. Estos archivos no forman parte del despliegue.
 
-El usuario ha comprobado manualmente en Debug:
+Se han comprobado manualmente en Debug:
 
 - Cierre normal y segundo intento tras elegir **Quedarme**.
 - Cancelar y permitir una recarga y una navegación por enlace, conservando
@@ -639,14 +639,14 @@ CEF arrancó y la ejecución terminó con `0`. La ruta normal está restaurada.
 Si `CefInitialize` devuelve `false`, el código conserva `CefGetExitCode` y
 regresa sin llamar a `CefShutdown`, como exige el contrato de CEF.
 
-### Errores anteriores a nuestra entrada y archivos ausentes
+### Errores anteriores al punto de entrada y archivos ausentes
 
 El bootstrap oficial carga `SecureBrowser.dll`, resuelve su exportación
 `RunWinMain` y después la invoca. Si no consigue cargar la DLL o alguna de sus
-dependencias inmediatas, nuestra entrada no llega a ejecutarse y
+dependencias inmediatas, el punto de entrada no llega a ejecutarse y
 `DiagnosticsLog` no puede crear el log propio. El aviso y el código proceden
 entonces de Windows o del bootstrap; no tienen por qué ser el `1` que devuelve
-nuestra aplicación. En el SDK fijado hay rutas de bootstrap que terminan mediante
+la aplicación SecureBrowser. En el SDK fijado hay rutas de bootstrap que terminan mediante
 `LOG(FATAL)`, con un aviso adicional según la configuración y el depurador.
 El orden y esas salidas se pueden contrastar en el
 [código oficial del bootstrap](https://github.com/chromiumembedded/cef/blob/4fa4ab516dacf6c49fc7e6e70d2b7ebce29fa35f/libcef_dll/bootstrap/bootstrap_win.cc#L1044-L1257).
@@ -682,7 +682,7 @@ y sus auxiliares y marca la comprobación como fallida por timeout. Anotar el
 aviso visible y el resultado real, sin sustituirlo por un `1` supuesto ni
 considerar acreditada la rama `CefInitialize == false` si no aparece su mensaje.
 
-El usuario ha comprobado `ClientDll` en Debug: salida `-2147483645`
+Se ha comprobado `ClientDll` en Debug: salida `-2147483645`
 (`0x80000003`), diagnóstico `FATAL` del bootstrap al intentar leer
 `SecureBrowser.dll` y ausencia de log propio para ese PID. Es una terminación
 nativa anterior a `RunWinMain`, no el retorno `1` de la aplicación.

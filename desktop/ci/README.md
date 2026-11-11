@@ -10,7 +10,7 @@ manual. El job se llama `Desktop build and tests` y utiliza `windows-2022`.
 [toolchain.json](toolchain.json) fija las herramientas y el kit Qt; CEF conserva
 su [manifiesto propio](../cef-sdk.json) e ICU utiliza
 [icu-sdk.json](../icu-sdk.json). Los scripts utilizan sus rutas
-predeterminadas dentro de `desktop/.deps`, sin rutas del equipo del autor ni
+predeterminadas dentro de `desktop/.deps`, sin rutas específicas de un equipo ni
 credenciales de descarga.
 
 aqtinstall se fija por commit completo en `qt.aqtRevision`. La versión 3.3.0
@@ -89,7 +89,7 @@ La primera ejecución en `main` puede necesitar preparar su propia caché:
 GitHub no permite restaurar desde `main` una caché creada exclusivamente para
 una PR. La preparación se repite cuando cambia la clave o la caché deja de
 estar disponible. El motor CEF ya está precompilado en el SDK; cada ejecución
-compila nuestra aplicación y el adaptador `libcef_dll_wrapper`, además de
+compila la aplicación SecureBrowser y el adaptador `libcef_dll_wrapper`, además de
 realizar las comprobaciones Debug y Release.
 
 El workflow utiliza el runner estándar y no amplía los límites de caché del

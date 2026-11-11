@@ -49,7 +49,7 @@ tabla. Las versiones de herramientas están recogidas en
 El proyecto CMake admite versiones desde 3.29; los scripts de configuración
 de CI exigen `3.29.2` para reproducir la referencia fijada. El generador de
 Visual Studio permite construir Debug y Release desde la misma configuración.
-El SDK CEF ya contiene el motor precompilado; se compilan nuestro código y
+El SDK CEF ya contiene el motor precompilado; se compilan el código de SecureBrowser y
 el adaptador oficial `libcef_dll_wrapper`.
 
 Para obtener el repositorio y preparar las dependencias se necesitan Git,
@@ -348,7 +348,7 @@ foreach ($configuration in @('Debug', 'Release')) {
 ```
 
 `--parallel 4` permite hasta cuatro trabajos de compilación simultáneos.
-CMake construye nuestra DLL, el adaptador `libcef_dll_wrapper` y la ventana
+CMake construye la DLL de SecureBrowser, el adaptador `libcef_dll_wrapper` y la ventana
 independiente `sbp_toolchain_check`. El post-build prepara el runtime completo
 de cada configuración:
 
@@ -356,8 +356,8 @@ de cada configuración:
 2. Ejecuta `windeployqt` del kit seleccionado para copiar las dependencias Qt.
 3. Conserva avisos CEF y Qt y aplica los permisos de lectura y ejecución LPAC.
 
-Además, copia `icuuc76.dll`, `icudt76.dll` y `icu-notices/` junto a nuestra
-DLL. El inventario de runtime exige también esos archivos.
+Además, copia `icuuc76.dll`, `icudt76.dll` y `icu-notices/` junto a la
+DLL de SecureBrowser. El inventario de runtime exige también esos archivos.
 
 Cada configuración termina en `desktop/build/Debug/` o `desktop/build/Release/`.
 Ejemplo abreviado de Release:
@@ -409,7 +409,7 @@ ejecutable; `locales/` se copia completo.
 | `SecureBrowser.exe` | Bootstrap oficial de CEF renombrado, correspondiente a Debug o Release. |
 | `SecureBrowser.dll` | Código propio compilado; exporta `RunWinMain`, que invoca el bootstrap. |
 | `libcef.dll` y otros binarios CEF | Motor y auxiliares precompilados del SDK fijado. |
-| `libcef_dll_wrapper` | Adaptador oficial compilado y enlazado con nuestra DLL. |
+| `libcef_dll_wrapper` | Adaptador oficial compilado y enlazado con la DLL de SecureBrowser. |
 | DLL, plugins y traducciones Qt | Copiados desde el kit seleccionado mediante `windeployqt`. |
 | `icuuc76.dll` e `icudt76.dll` | Bibliotecas precompiladas de ICU y sus datos, copiadas desde el SDK fijado para ambas configuraciones. |
 | `icu-notices/` | Licencia de la distribución ICU y copia de su manifiesto. |
@@ -598,7 +598,7 @@ El log interno CEF puede incluir más detalles: revisar antes de compartirlo.
 Los datos internos del perfil están en `%LOCALAPPDATA%\SecureBrowser\CEF`;
 no son la persistencia SQLite de SBP y se comparten entre clones y configuraciones.
 
-### Errores anteriores a nuestra entrada y archivos ausentes
+### Errores anteriores al punto de entrada y archivos ausentes
 
 Si el bootstrap no consigue cargar la DLL propia o sus dependencias inmediatas,
 `RunWinMain` no se ejecuta y puede no existir un log propio. Los recursos CEF
@@ -701,7 +701,7 @@ El [registro de validación](docs/clean-clone-validation.md) diferencia:
 - Las verificaciones y pruebas visuales ya registradas para #93.
 - El CI limpio, con caché y posterior al merge de #94.
 - La preparación, compilación y prueba visual Debug/Release desde un clon
-  limpio para #95, confirmadas por el autor, con el ajuste de 7-Zip documentado.
+  limpio para #95, verificadas con el ajuste de 7-Zip documentado.
 
 El último registro identifica revisión, entorno, resultados y límites de la
 prueba local. Las comprobaciones automáticas previas se aprovechan como
