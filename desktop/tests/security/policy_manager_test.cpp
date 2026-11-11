@@ -4,6 +4,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -767,5 +770,298 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<PolicyManagerForeignEndContextCase>& info) {
         return std::string(info.param.label);
     });
+
+// Una función vacía no permite consultar el tiempo y debe rechazarse al construir el gestor.
+TEST(PolicyManagerTest, RejectsEmptyClockFunction) {
+    EXPECT_THROW(PolicyManager{PolicyManager::NowFunction{}}, std::invalid_argument);
+}
+
+// Una política completa de la compañía actual puede publicarse sin cambiar el contexto.
+TEST(PolicyManagerTest, PublishesValidPolicyForCurrentContext) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager manager;
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    EXPECT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*current, policy));
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+// Tener una política válida no permite publicarla antes de establecer un contexto actual.
+TEST(PolicyManagerTest, RejectsPublicationWithoutCurrentContext) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager manager;
+    const SecurityContext received(1, 10, 20);
+
+    EXPECT_EQ(PolicyPublicationResult::InvalidContext, manager.PublishPolicy(received, policy));
+    EXPECT_FALSE(manager.IsCurrentContext(received));
+}
+
+// La respuesta de una consulta iniciada antes del cierre no recupera el contexto terminado.
+TEST(PolicyManagerTest, RejectsPublicationForEndedContext) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager manager;
+    const auto ended = manager.BeginContext(10, 20);
+    ASSERT_TRUE(ended.has_value());
+    ASSERT_TRUE(manager.EndContext(*ended));
+
+    EXPECT_EQ(PolicyPublicationResult::InvalidContext, manager.PublishPolicy(*ended, policy));
+    EXPECT_FALSE(manager.IsCurrentContext(*ended));
+}
+
+// Una respuesta anterior no sustituye el contexto nuevo aunque coincidan dispositivo y compañía.
+TEST(PolicyManagerTest, RejectsPublicationForPreviousContext) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager manager;
+    const auto previous = manager.BeginContext(10, 20);
+    ASSERT_TRUE(previous.has_value());
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    EXPECT_EQ(PolicyPublicationResult::InvalidContext, manager.PublishPolicy(*previous, policy));
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+// La correspondencia del contexto no permite publicar una política con datos inválidos.
+TEST(PolicyManagerTest, RejectsPublicationOfInvalidPolicy) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        0, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager manager;
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    EXPECT_EQ(PolicyPublicationResult::InvalidPolicy, manager.PublishPolicy(*current, policy));
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+// La compañía esperada procede del contexto, no de la política recibida.
+TEST(PolicyManagerTest, RejectsPublicationOfPolicyFromForeignCompany) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 21, "Foreign company policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager manager;
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    EXPECT_EQ(PolicyPublicationResult::InvalidPolicy, manager.PublishPolicy(*current, policy));
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+// Simula un cierre entre la validación inicial y la sustitución final del estado.
+TEST(PolicyManagerTest, RejectsPublicationIfContextEndsDuringPreparation) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    std::function<void()> onClockRead;
+
+    // La consulta del reloj ejecuta la acción de prueba en el mismo hilo, fuera del mutex del gestor.
+    PolicyManager manager([&onClockRead] {
+        if (onClockRead) {
+            onClockRead();
+        }
+        return PolicyManager::Clock::time_point{};
+    });
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+    bool ended = false;
+
+    // Las referencias siguen vivas durante PublishPolicy; el contexto se cierra al consultar el reloj.
+    onClockRead = [&manager, &current, &ended] {
+        ended = manager.EndContext(*current);
+    };
+
+    EXPECT_EQ(PolicyPublicationResult::InvalidContext, manager.PublishPolicy(*current, policy));
+    EXPECT_TRUE(ended);
+    EXPECT_FALSE(manager.IsCurrentContext(*current));
+}
+
+// La comprobación final debe conservar la sesión nueva y rechazar la respuesta de la anterior.
+TEST(PolicyManagerTest, RejectsPublicationIfContextChangesDuringPreparation) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    std::function<void()> onClockRead;
+
+    // El reloj permite fijar el cambio de contexto antes del intercambio, sin esperas ni hilos adicionales.
+    PolicyManager manager([&onClockRead] {
+        if (onClockRead) {
+            onClockRead();
+        }
+        return PolicyManager::Clock::time_point{};
+    });
+    const auto previous = manager.BeginContext(10, 20);
+    ASSERT_TRUE(previous.has_value());
+    std::optional<SecurityContext> current;
+
+    // Las referencias locales siguen vivas durante la consulta del reloj y la comprobación posterior.
+    onClockRead = [&manager, &current] {
+        current = manager.BeginContext(10, 20);
+    };
+
+    EXPECT_EQ(PolicyPublicationResult::InvalidContext, manager.PublishPolicy(*previous, policy));
+    ASSERT_TRUE(current.has_value());
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+    EXPECT_FALSE(manager.IsCurrentContext(*previous));
+}
+
+// Sin contexto no existe un estado que pueda conservar un lector.
+TEST(PolicyManagerTest, ReadsEmptyStateBeforeBeginningContext) {
+    const PolicyManager manager;
+
+    EXPECT_FALSE(manager.ReadState());
+}
+
+// Iniciar el contexto no inventa una política ni un instante de validación.
+TEST(PolicyManagerTest, ReadsContextWithoutPolicyBeforeFirstPublication) {
+    PolicyManager manager;
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+
+    const auto state = manager.ReadState();
+
+    ASSERT_TRUE(state);
+    EXPECT_EQ(*context, state->context);
+    EXPECT_FALSE(state->policy);
+    EXPECT_FALSE(state->validatedAt.has_value());
+}
+
+// La lectura reúne los datos de la política, su contexto y el instante del reloj inyectado.
+TEST(PolicyManagerTest, ReadsCompletePublishedPolicyAndValidationInstant) {
+    const PolicySnapshot::Timestamp createdAt{std::chrono::microseconds{1'700'000'000'123'456}};
+    const auto updatedAt = createdAt + std::chrono::seconds{1};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(false, FilterMode::Allowlist, {"allowed.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        createdAt, updatedAt);
+    const PolicyManager::Clock::time_point validatedAt{std::chrono::seconds{42}};
+
+    // El reloj conserva por valor un instante fijo, independiente de las fechas del backend.
+    PolicyManager manager([validatedAt] { return validatedAt; });
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, policy));
+
+    const auto state = manager.ReadState();
+
+    ASSERT_TRUE(state);
+    ASSERT_TRUE(state->policy);
+    ASSERT_TRUE(state->validatedAt.has_value());
+    EXPECT_EQ(*context, state->context);
+    EXPECT_EQ(validatedAt, *state->validatedAt);
+    EXPECT_EQ(policy.Id(), state->policy->Id());
+    EXPECT_EQ(policy.CompanyId(), state->policy->CompanyId());
+    EXPECT_EQ(policy.Name(), state->policy->Name());
+    EXPECT_EQ(createdAt, state->policy->CreatedAt());
+    EXPECT_EQ(updatedAt, state->policy->UpdatedAt());
+    EXPECT_FALSE(state->policy->UrlFiltering().Enabled());
+    EXPECT_EQ(FilterMode::Allowlist, state->policy->UrlFiltering().Mode());
+    EXPECT_EQ(policy.UrlFiltering().Rules(), state->policy->UrlFiltering().Rules());
+    EXPECT_TRUE(state->policy->DownloadControl().Enabled());
+    EXPECT_EQ(FilterMode::Denylist, state->policy->DownloadControl().Mode());
+    EXPECT_EQ(policy.DownloadControl().Rules(), state->policy->DownloadControl().Rules());
+}
+
+// Publicar otra política no modifica el estado ni el instante que ya conserva un lector.
+TEST(PolicyManagerTest, RetainedStateKeepsPreviousPolicyAndValidationInstantAfterReplacement) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot firstPolicy(
+        1, 20, "First policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+        timestamp, timestamp);
+    const PolicySnapshot secondPolicy(
+        2, 20, "Second policy",
+        UrlFilteringConfig(true, FilterMode::Allowlist, {"allowed.example"}),
+        DownloadControlConfig(false, FilterMode::Allowlist, {"pdf"}),
+        timestamp, timestamp);
+    PolicyManager::Clock::time_point now{std::chrono::seconds{10}};
+    const auto firstValidatedAt = now;
+
+    // La variable de tiempo sigue viva durante las dos publicaciones secuenciales.
+    PolicyManager manager([&now] { return now; });
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, firstPolicy));
+    const auto firstState = manager.ReadState();
+
+    now += std::chrono::minutes{1};
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, secondPolicy));
+    const auto secondState = manager.ReadState();
+
+    ASSERT_TRUE(firstState);
+    ASSERT_TRUE(secondState);
+    ASSERT_TRUE(firstState->policy);
+    ASSERT_TRUE(secondState->policy);
+    ASSERT_TRUE(firstState->validatedAt.has_value());
+    ASSERT_TRUE(secondState->validatedAt.has_value());
+    EXPECT_NE(firstState.get(), secondState.get());
+    EXPECT_EQ(*context, firstState->context);
+    EXPECT_EQ(*context, secondState->context);
+    EXPECT_EQ(firstPolicy.Id(), firstState->policy->Id());
+    EXPECT_EQ(firstPolicy.Name(), firstState->policy->Name());
+    EXPECT_EQ(secondPolicy.Id(), secondState->policy->Id());
+    EXPECT_EQ(secondPolicy.Name(), secondState->policy->Name());
+    EXPECT_EQ(firstValidatedAt, *firstState->validatedAt);
+    EXPECT_EQ(now, *secondState->validatedAt);
+}
+
+// Conservar los datos anteriores no mantiene activo un contexto que ya se ha cerrado.
+TEST(PolicyManagerTest, RetainedStateRemainsReadableAfterContextEnds) {
+    const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};
+    const PolicySnapshot policy(
+        1, 20, "Office policy",
+        UrlFilteringConfig(true, FilterMode::Denylist, {"blocked.example"}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "zip"}),
+        timestamp, timestamp);
+    PolicyManager manager;
+    const auto context = manager.BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, manager.PublishPolicy(*context, policy));
+    const auto retained = manager.ReadState();
+
+    ASSERT_TRUE(manager.EndContext(*context));
+
+    EXPECT_FALSE(manager.ReadState());
+    EXPECT_FALSE(manager.IsCurrentContext(*context));
+    ASSERT_TRUE(retained);
+    ASSERT_TRUE(retained->policy);
+    EXPECT_EQ(*context, retained->context);
+    EXPECT_EQ(policy.Id(), retained->policy->Id());
+    EXPECT_EQ(policy.Name(), retained->policy->Name());
+}
 
 }  // namespace sbp
