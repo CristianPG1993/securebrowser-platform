@@ -5,12 +5,64 @@
 
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <regex>
 #include <string>
 #include <unordered_set>
 #include <utility>
 
 namespace sbp {
+
+// Publica un contexto nuevo sin reutilizar el estado de la sesión o instalación anterior.
+std::optional<SecurityContext> PolicyManager::BeginContext(
+    std::int64_t deviceId, std::int64_t companyId) {
+    if (deviceId <= 0 || companyId <= 0) {
+        return std::nullopt;
+    }
+
+    // Reserva el nuevo estado fuera del mutex. La generación cero es provisional y no se publica.
+    auto candidate = std::make_shared<State>(State{SecurityContext(0, deviceId, companyId)});
+    std::shared_ptr<const State> replacement = candidate;
+
+    {
+        const std::lock_guard<std::mutex> lock(stateMutex_);
+        if (lastGeneration_ == (std::numeric_limits<std::uint64_t>::max)()) {
+            return std::nullopt;
+        }
+
+        // Asigna la generación y sustituye el estado como una sola operación protegida.
+        candidate->context = SecurityContext(lastGeneration_ + 1, deviceId, companyId);
+        ++lastGeneration_;
+        state_.swap(replacement);
+    }
+
+    // replacement retiene el estado anterior y lo libera fuera del mutex si ya no hay lectores.
+    // candidate conserva este contexto aunque otro hilo publique uno posterior antes del retorno.
+    return candidate->context;
+}
+
+// Comprueba si el contexto recibido coincide con el actual.
+// Devuelve true si existe un estado actual y su contexto es igual al recibido; false en caso contrario.
+bool PolicyManager::IsCurrentContext(const SecurityContext& context) const {
+    const std::lock_guard<std::mutex> lock(stateMutex_);
+    return state_ && state_->context == context;
+}
+
+// Retira solo el contexto solicitado y libera su estado fuera del mutex.
+bool PolicyManager::EndContext(const SecurityContext& context) {
+    std::shared_ptr<const State> previous;
+    {
+        const std::lock_guard<std::mutex> lock(stateMutex_);
+        if (!state_ || !(state_->context == context)) {
+            return false;
+        }
+
+        // previous estaba vacío: el intercambio deja state_ vacío y conserva el estado retirado.
+        state_.swap(previous);
+    }
+
+    return true;
+}
 
 // Detiene la validación en el primer error, sin publicar ni modificar la política recibida.
 PolicyValidationError PolicyManager::Validate(
