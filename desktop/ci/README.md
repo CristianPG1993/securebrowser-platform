@@ -1,15 +1,18 @@
 # CI de Desktop
 
-El workflow [Desktop CI](../../.github/workflows/desktop.yml) corresponde a la
-[tarea #94](https://github.com/CristianPG1993/securebrowser-platform/issues/94).
+El workflow [Desktop CI](../../.github/workflows/desktop.yml) cubre Desktop Foundation de la
+[tarea #94](https://github.com/CristianPG1993/securebrowser-platform/issues/94)
+y las pruebas del Security Engine de la
+[tarea #115](https://github.com/CristianPG1993/securebrowser-platform/issues/115).
 Se ejecuta en PR hacia `main`, con los pushes a `main` y mediante ejecución
 manual. El job se llama `Desktop build and tests` y utiliza `windows-2022`.
 
 ## Preparación y comprobaciones
 
 [toolchain.json](toolchain.json) fija las herramientas y el kit Qt; CEF conserva
-su [manifiesto propio](../cef-sdk.json) e ICU utiliza
-[icu-sdk.json](../icu-sdk.json). Los scripts utilizan sus rutas
+su [manifiesto propio](../cef-sdk.json), ICU utiliza
+[icu-sdk.json](../icu-sdk.json) y GoogleTest se fija en
+[googletest.json](../googletest.json). Los scripts utilizan sus rutas
 predeterminadas dentro de `desktop/.deps`, sin rutas específicas de un equipo ni
 credenciales de descarga.
 
@@ -30,6 +33,9 @@ ejemplo, las rutas de los `tar.exe` de Windows y de Git en una sola llamada.
 | Preparar Qt | [setup-qt.ps1](setup-qt.ps1); usa aqtinstall en un entorno Python aislado, mantiene sus comprobaciones de hashes y revisa los archivos del kit. |
 | Preparar CEF | [setup-cef.ps1](setup-cef.ps1); selecciona el 7-Zip fijado para el runner y llama al [módulo compartido](../../scripts/setup-cef.ps1), que verifica o prepara el SDK. |
 | Preparar ICU | [setup-icu.ps1](../../scripts/setup-icu.ps1); verifica tamaño y SHA-256 del paquete y comprueba archivos y versiones de ICU y Unicode antes de configurar Desktop. |
+| Preparar GoogleTest | [setup-googletest.ps1](../../scripts/setup-googletest.ps1); verifica tamaño y SHA-256 del archivo y comprueba las fuentes y la versión fijadas en el manifiesto. |
+| Configurar el núcleo y sus pruebas | Paso `Configure security core tests`; utiliza el generador, toolset y SDK del manifiesto en `desktop/build/tests`, con `SBP_BUILD_DESKTOP_APP=OFF` y `BUILD_TESTING=ON`. |
+| Compilar y ejecutar las pruebas del núcleo | Paso `Build and run security core tests`; construye `sbp_security_tests` y ejecuta CTest en Debug y Release, con `--no-tests=error` y un timeout de 60 segundos por caso. |
 | Configurar CMake | [configure.ps1](configure.ps1); selecciona los SDK, las configuraciones y los avisos de Qt conservados en el repositorio. |
 | Comprobar rechazo de Qt ausente | [check-configuration-rejection.ps1](../tests/check-configuration-rejection.ps1). |
 | Compilar | `cmake --build desktop/build --config <configuración> --parallel 4`, primero Debug y después Release. |
@@ -50,9 +56,17 @@ un límite de cinco minutos. El SDK fijado es ICU4C `76.1`, Unicode `16.0`,
 Windows x64 para MSVC 2022. CMake copia sus DLL y avisos junto a la aplicación;
 el inventario de runtime exige también esos archivos.
 
+GoogleTest se prepara con el script compartido y un límite de cinco minutos.
+Las fuentes se reutilizan para ambas configuraciones y se compilan como parte del
+ejecutable de pruebas. La configuración del núcleo tiene un límite de cinco minutos
+y el paso conjunto de compilación y ejecución, de quince minutos.
+La configuración aislada termina antes de buscar Qt o CEF. Las DLL y los avisos
+de ICU se copian junto a `sbp_security_tests.exe` en cada configuración.
+
 ## Construcción limpia y caché
 
-La caché incluye los SDK preparados de CEF, Qt e ICU y la copia portátil de CMake.
+La caché incluye los SDK preparados de CEF, Qt e ICU, las fuentes preparadas de
+GoogleTest y la copia portátil de CMake.
 Las dependencias se comparten entre ambas compilaciones; CEF y Qt incluyen
 sus variantes Debug/Release y el paquete ICU utiliza las mismas DLL mediante su API C.
 No se cachean `desktop/build`, los perfiles CEF ni los diagnósticos de ejecución.
@@ -62,7 +76,8 @@ La clave incluye runner, arquitectura, las dos configuraciones y un hash de los
 manifiestos y scripts de preparación. No se utilizan claves de restauración
 alternativas. La caché se guarda después de superar la preparación de las
 dependencias, antes de compilar el proyecto.
-La clave incluye también `desktop/icu-sdk.json` y `scripts/setup-icu.ps1`;
+La clave incluye también `desktop/icu-sdk.json`, `scripts/setup-icu.ps1`,
+`desktop/googletest.json` y `scripts/setup-googletest.ps1`;
 un cambio en cualquiera de ellos evita reutilizar una caché anterior incompatible.
 
 Para acreditar la preparación inicial y la reutilización:
@@ -96,6 +111,13 @@ El workflow utiliza el runner estándar y no amplía los límites de caché del
 repositorio ni publica artefactos de distribución.
 
 ## Alcance de las pruebas
+
+Las pruebas del núcleo comprueban validación, contexto, publicación y lectura de
+estados inmutables, vigencia con reloj controlado y recorridos concurrentes.
+No crean una aplicación Qt ni inicializan CEF; su cobertura y los resultados
+locales registrados se detallan en la [guía de pruebas](../tests/README.md).
+La ejecución de este bloque en GitHub Actions queda pendiente hasta publicar
+la revisión del workflow y comprobar sus resultados.
 
 La prueba de arranque acredita la aparición de la ventana hija nativa de CEF,
 el cierre normal, la salida 0 y las marcas de creación y apagado del mismo
