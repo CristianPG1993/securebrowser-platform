@@ -98,6 +98,8 @@ add_library(sbp_security_core STATIC
     src/security/policy_snapshot.cpp
     src/security/policy_validation_error.h
     src/security/security_action.h
+    src/security/security_context.h
+    src/security/security_context.cpp
     src/security/security_reason.h
     src/security/security_decision.h
     src/security/security_decision.cpp
