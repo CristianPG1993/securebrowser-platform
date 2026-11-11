@@ -7,11 +7,19 @@
 #include <memory>
 #include <mutex>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
 
 namespace sbp {
+
+// Conserva el reloj proporcionado y rechaza una dependencia que no se pueda invocar.
+PolicyManager::PolicyManager(NowFunction now) : now_(std::move(now)) {
+    if (!now_) {
+        throw std::invalid_argument("PolicyManager requires a clock function.");
+    }
+}
 
 // Publica un contexto nuevo sin reutilizar el estado de la sesión o instalación anterior.
 std::optional<SecurityContext> PolicyManager::BeginContext(
@@ -62,6 +70,44 @@ bool PolicyManager::EndContext(const SecurityContext& context) {
     }
 
     return true;
+}
+
+// Valida el conjunto y publica política, contexto y vigencia en un único estado inmutable.
+PolicyPublicationResult PolicyManager::PublishPolicy(
+    const SecurityContext& context, PolicySnapshot policy) {
+    if (!IsCurrentContext(context)) {
+        return PolicyPublicationResult::InvalidContext;
+    }
+
+    const PolicyValidationError error = Validate(policy, context.CompanyId());
+    if (error != PolicyValidationError::None) {
+        return PolicyPublicationResult::InvalidPolicy;
+    }
+
+    // Prepara la política y consulta el reloj fuera del mutex.
+    auto snapshot = std::make_shared<const PolicySnapshot>(std::move(policy));
+    const Clock::time_point validatedAt = now_();
+    std::shared_ptr<const State> replacement = std::make_shared<const State>(
+        State{context, std::move(snapshot), validatedAt});
+
+    {
+        const std::lock_guard<std::mutex> lock(stateMutex_);
+        // El contexto puede haber cambiado mientras se validaba o preparaba el estado.
+        if (!state_ || !(state_->context == context)) {
+            return PolicyPublicationResult::InvalidContext;
+        }
+
+        state_.swap(replacement);
+    }
+
+    // El estado anterior se libera fuera del mutex cuando desaparezca su último propietario.
+    return PolicyPublicationResult::Published;
+}
+
+// Copia la propiedad compartida bajo el mutex; los datos se consultarán fuera del bloqueo.
+std::shared_ptr<const PolicyManager::State> PolicyManager::ReadState() const {
+    const std::lock_guard<std::mutex> lock(stateMutex_);
+    return state_;
 }
 
 // Detiene la validación en el primer error, sin publicar ni modificar la política recibida.

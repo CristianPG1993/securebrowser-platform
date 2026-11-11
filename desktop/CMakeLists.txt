@@ -94,6 +94,7 @@ add_library(sbp_security_core STATIC
     src/security/filter_mode.h
     src/security/policy_manager.h
     src/security/policy_manager.cpp
+    src/security/policy_publication_result.h
     src/security/policy_snapshot.h
     src/security/policy_snapshot.cpp
     src/security/policy_validation_error.h

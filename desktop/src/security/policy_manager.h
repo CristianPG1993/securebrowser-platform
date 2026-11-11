@@ -1,11 +1,14 @@
 #pragma once
 
+#include "security/policy_publication_result.h"
 #include "security/policy_snapshot.h"
 #include "security/policy_validation_error.h"
 #include "security/security_context.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -13,9 +16,32 @@
 
 namespace sbp {
 
-// Gestionará la política local; esta primera parte declara su validación semántica.
+// Valida políticas y gestiona el contexto y su estado local de seguridad.
 class PolicyManager final {
 public:
+    // Mide tiempo transcurrido sin depender de los cambios de hora del sistema.
+    using Clock = std::chrono::steady_clock;
+
+    // Función sin argumentos que proporciona el instante monotónico actual.
+    using NowFunction = std::function<Clock::time_point()>;
+
+    // Contexto, política y vigencia se comparten juntos mediante una referencia de solo lectura.
+    struct State {
+        SecurityContext context;
+
+        // Vacío hasta recibir una política completa y válida para este contexto.
+        std::shared_ptr<const PolicySnapshot> policy{};
+
+        // Instante local de validación correcta; no procede de createdAt ni updatedAt.
+        std::optional<Clock::time_point> validatedAt{};
+    };
+
+    // Utiliza el reloj monotónico real cuando no se proporciona uno de pruebas.
+    PolicyManager() = default;
+
+    // Permite proporcionar un reloj controlado; la función no puede estar vacía.
+    explicit PolicyManager(NowFunction now);
+
     // REST/Auth lo llamará tras confirmar una sesión y una instalación autorizadas.
     // Inicia un contexto con generación nueva, sin reutilizar la política del anterior.
     // Devuelve nullopt si los IDs no son positivos o se agotan las generaciones disponibles.
@@ -29,6 +55,16 @@ public:
     // Retira el estado solo si pertenece al contexto recibido; devuelve true si lo cerró.
     // Un cierre tardío de otro contexto no modifica el actual ni reinicia las generaciones.
     [[nodiscard]] bool EndContext(const SecurityContext& context);
+
+    // Recibe una política propia y el contexto que originó su consulta.
+    // Valida fuera del mutex y comprueba de nuevo el contexto antes de publicar el estado completo.
+    // Un rechazo conserva el estado anterior y no renueva su vigencia.
+    [[nodiscard]] PolicyPublicationResult PublishPolicy(
+        const SecurityContext& context, PolicySnapshot policy);
+
+    // Obtiene el estado completo de solo lectura; devuelve un puntero vacío si no existe contexto.
+    // Conservarlo no renueva su vigencia ni sustituye las comprobaciones actuales de autorización.
+    [[nodiscard]] std::shared_ptr<const State> ReadState() const;
 
     // Comprueba el conjunto y devuelve el primer error, o None si todos los datos son válidos.
     // La compañía esperada debe proceder del contexto de instalación, no de la política.
@@ -63,10 +99,8 @@ private:
     [[nodiscard]] static bool ReadUtf8CodePoint(
         const std::string& value, std::size_t& offset, char32_t& codePoint) noexcept;
 
-    // Unidad que se compartirá como inmutable; se ampliará con política y vigencia.
-    struct State {
-        SecurityContext context;
-    };
+    // Se invocará fuera del mutex; el reloj inyectado debe admitir llamadas concurrentes.
+    NowFunction now_ = &Clock::now;
 
     // Protege la obtención y sustitución del estado y la asignación de generaciones.
     mutable std::mutex stateMutex_;
