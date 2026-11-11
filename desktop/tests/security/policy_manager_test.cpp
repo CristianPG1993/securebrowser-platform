@@ -537,4 +537,235 @@ TEST(PolicyManagerTest, InvalidUrlRuleTakesPriorityOverInvalidDownloadRule) {
     EXPECT_EQ(PolicyValidationError::InvalidUrlRule, manager.Validate(policy, 2));
 }
 
+// El primer contexto recibe generación positiva y conserva IDs de instalación de 64 bits.
+TEST(PolicyManagerTest, BeginsContextWithNewGenerationAndInstallationIdentity) {
+    constexpr std::int64_t deviceId = 5'000'000'001;
+    constexpr std::int64_t companyId = 6'000'000'002;
+    PolicyManager manager;
+
+    const auto context = manager.BeginContext(deviceId, companyId);
+
+    ASSERT_TRUE(context.has_value());
+    EXPECT_EQ(std::uint64_t{1}, context->Generation());
+    EXPECT_EQ(deviceId, context->DeviceId());
+    EXPECT_EQ(companyId, context->CompanyId());
+}
+
+// Repetir dispositivo y compañía crea otra identidad local, como al volver a iniciar sesión.
+TEST(PolicyManagerTest, BeginsDistinctContextForSameInstallation) {
+    PolicyManager manager;
+    const auto first = manager.BeginContext(10, 20);
+    const auto second = manager.BeginContext(10, 20);
+
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(first->Generation() + 1, second->Generation());
+    EXPECT_EQ(first->DeviceId(), second->DeviceId());
+    EXPECT_EQ(first->CompanyId(), second->CompanyId());
+    EXPECT_FALSE(*first == *second);
+}
+
+struct PolicyManagerInvalidContextCase {
+    const char* label;
+    std::int64_t deviceId;
+    std::int64_t companyId;
+};
+
+class PolicyManagerInvalidContextTest
+    : public ::testing::TestWithParam<PolicyManagerInvalidContextCase> {};
+
+// Un identificador no positivo impide obtener un contexto.
+TEST_P(PolicyManagerInvalidContextTest, RejectsNonPositiveInstallationIdentifiers) {
+    const PolicyManagerInvalidContextCase& testCase = GetParam();
+    PolicyManager manager;
+
+    const auto context = manager.BeginContext(testCase.deviceId, testCase.companyId);
+
+    EXPECT_FALSE(context.has_value());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    InvalidContextIdentifiers,
+    PolicyManagerInvalidContextTest,
+    ::testing::Values(
+        PolicyManagerInvalidContextCase{"ZeroDeviceId", 0, 20},
+        PolicyManagerInvalidContextCase{"NegativeDeviceId", -1, 20},
+        PolicyManagerInvalidContextCase{"ZeroCompanyId", 10, 0},
+        PolicyManagerInvalidContextCase{"NegativeCompanyId", 10, -1}),
+    // Identifica el campo y el límite inválidos de cada ejecución.
+    [](const ::testing::TestParamInfo<PolicyManagerInvalidContextCase>& info) {
+        return std::string(info.param.label);
+    });
+
+// Los intentos rechazados no avanzan el contador entre dos contextos válidos.
+TEST(PolicyManagerTest, RejectedContextDoesNotConsumeGeneration) {
+    PolicyManager manager;
+    const auto first = manager.BeginContext(10, 20);
+    ASSERT_TRUE(first.has_value());
+
+    EXPECT_FALSE(manager.BeginContext(0, 20).has_value());
+    EXPECT_FALSE(manager.BeginContext(10, -1).has_value());
+
+    const auto second = manager.BeginContext(10, 20);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(first->Generation() + 1, second->Generation());
+}
+
+// Antes de iniciar una sesión e instalación, ningún contexto es el actual.
+TEST(PolicyManagerTest, HasNoCurrentContextBeforeBeginningOne) {
+    const PolicyManager manager;
+
+    EXPECT_FALSE(manager.IsCurrentContext(SecurityContext(1, 10, 20)));
+}
+
+struct PolicyManagerContextMatchCase {
+    const char* label;
+    std::uint64_t generation;
+    std::int64_t deviceId;
+    std::int64_t companyId;
+    bool expectedCurrent;
+};
+
+class PolicyManagerContextMatchTest
+    : public ::testing::TestWithParam<PolicyManagerContextMatchCase> {};
+
+// Comprueba la identidad contra el estado realmente publicado por BeginContext.
+TEST_P(PolicyManagerContextMatchTest, MatchesOnlyTheCompleteCurrentContext) {
+    const PolicyManagerContextMatchCase& testCase = GetParam();
+    PolicyManager manager;
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    const SecurityContext received(testCase.generation, testCase.deviceId, testCase.companyId);
+
+    EXPECT_EQ(testCase.expectedCurrent, manager.IsCurrentContext(received));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    CurrentContextIdentity,
+    PolicyManagerContextMatchTest,
+    ::testing::Values(
+        PolicyManagerContextMatchCase{"SameContext", 1, 10, 20, true},
+        PolicyManagerContextMatchCase{"DifferentGeneration", 2, 10, 20, false},
+        PolicyManagerContextMatchCase{"DifferentDevice", 1, 11, 20, false},
+        PolicyManagerContextMatchCase{"DifferentCompany", 1, 10, 21, false}),
+    // Identifica qué parte del contexto recibido cambia respecto al publicado.
+    [](const ::testing::TestParamInfo<PolicyManagerContextMatchCase>& info) {
+        return std::string(info.param.label);
+    });
+
+// Una referencia a la sesión anterior deja de coincidir aunque conserve dispositivo y compañía.
+TEST(PolicyManagerTest, PreviousContextStopsMatchingAfterBeginningAnother) {
+    PolicyManager manager;
+    const auto previous = manager.BeginContext(10, 20);
+    ASSERT_TRUE(previous.has_value());
+    ASSERT_TRUE(manager.IsCurrentContext(*previous));
+
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    EXPECT_FALSE(manager.IsCurrentContext(*previous));
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+// Los guards de una creación rechazada conservan el contexto que ya estaba publicado.
+TEST(PolicyManagerTest, RejectedContextDoesNotReplaceCurrentContext) {
+    PolicyManager manager;
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    EXPECT_FALSE(manager.BeginContext(0, 20).has_value());
+    EXPECT_FALSE(manager.BeginContext(10, -1).has_value());
+
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+// Sin contexto publicado no hay nada que cerrar.
+TEST(PolicyManagerTest, CannotEndContextBeforeBeginningOne) {
+    PolicyManager manager;
+
+    EXPECT_FALSE(manager.EndContext(SecurityContext(1, 10, 20)));
+}
+
+// Tras cerrar el contexto actual, una consulta posterior ya no lo reconoce como vigente.
+TEST(PolicyManagerTest, EndingCurrentContextRemovesItFromCurrentState) {
+    PolicyManager manager;
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+    ASSERT_TRUE(manager.IsCurrentContext(*current));
+
+    EXPECT_TRUE(manager.EndContext(*current));
+    EXPECT_FALSE(manager.IsCurrentContext(*current));
+}
+
+// Repetir el cierre no vuelve a retirar un estado ni comunica un segundo cierre efectivo.
+TEST(PolicyManagerTest, EndingAlreadyClosedContextReturnsFalse) {
+    PolicyManager manager;
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+    ASSERT_TRUE(manager.EndContext(*current));
+
+    EXPECT_FALSE(manager.EndContext(*current));
+    EXPECT_FALSE(manager.IsCurrentContext(*current));
+}
+
+// Un resultado tardío de la sesión anterior no termina la nueva de la misma instalación.
+TEST(PolicyManagerTest, EndingPreviousContextDoesNotCloseNewContext) {
+    PolicyManager manager;
+    const auto previous = manager.BeginContext(10, 20);
+    ASSERT_TRUE(previous.has_value());
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    EXPECT_FALSE(manager.EndContext(*previous));
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+// Cerrar y volver a iniciar no reutiliza la identidad que conservan las peticiones anteriores.
+TEST(PolicyManagerTest, BeginningAfterEndDoesNotReuseGeneration) {
+    PolicyManager manager;
+    const auto previous = manager.BeginContext(10, 20);
+    ASSERT_TRUE(previous.has_value());
+    ASSERT_TRUE(manager.EndContext(*previous));
+
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+
+    EXPECT_EQ(previous->Generation() + 1, current->Generation());
+    EXPECT_FALSE(manager.IsCurrentContext(*previous));
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+struct PolicyManagerForeignEndContextCase {
+    const char* label;
+    std::int64_t deviceId;
+    std::int64_t companyId;
+};
+
+class PolicyManagerForeignEndContextTest
+    : public ::testing::TestWithParam<PolicyManagerForeignEndContextCase> {};
+
+// Incluso con la generación correcta, dispositivo y compañía deben corresponder al contexto actual.
+TEST_P(PolicyManagerForeignEndContextTest, DoesNotCloseContextForForeignInstallationIdentity) {
+    const PolicyManagerForeignEndContextCase& testCase = GetParam();
+    PolicyManager manager;
+    const auto current = manager.BeginContext(10, 20);
+    ASSERT_TRUE(current.has_value());
+    const SecurityContext foreign(current->Generation(), testCase.deviceId, testCase.companyId);
+
+    EXPECT_FALSE(manager.EndContext(foreign));
+    EXPECT_TRUE(manager.IsCurrentContext(*current));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ForeignEndContextIdentity,
+    PolicyManagerForeignEndContextTest,
+    ::testing::Values(
+        PolicyManagerForeignEndContextCase{"DifferentDevice", 11, 20},
+        PolicyManagerForeignEndContextCase{"DifferentCompany", 10, 21}),
+    // Nombra cada intento de cierre por la parte ajena de la identidad de instalación.
+    [](const ::testing::TestParamInfo<PolicyManagerForeignEndContextCase>& info) {
+        return std::string(info.param.label);
+    });
+
 }  // namespace sbp

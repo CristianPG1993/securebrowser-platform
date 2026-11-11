@@ -159,6 +159,7 @@ if(BUILD_TESTING)
         tests/security/download_control_config_test.cpp
         tests/security/policy_manager_test.cpp
         tests/security/policy_snapshot_test.cpp
+        tests/security/security_context_test.cpp
         tests/security/security_decision_test.cpp
         tests/security/url_filtering_config_test.cpp
     )
