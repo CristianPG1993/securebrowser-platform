@@ -65,7 +65,7 @@ la licencia y una copia del manifiesto ICU. No es necesario añadir el SDK
 al `PATH` para ejecutar las pruebas.
 
 CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
-casos parametrizados. Actualmente se esperan 132 casos:
+casos parametrizados. Actualmente se esperan 158 casos:
 
 - [security_decision_test.cpp](security/security_decision_test.cpp): 14 casos,
   uno para `Allowed` y trece para los motivos de bloqueo. Comprueban la acción
@@ -80,14 +80,24 @@ casos parametrizados. Actualmente se esperan 132 casos:
   comprueban identificadores de 64 bits, nombre, fechas con microsegundos,
   conservación separada de ambas configuraciones e independencia respecto
   a cambios posteriores en los objetos de entrada.
-- [policy_manager_test.cpp](security/policy_manager_test.cpp): 109 casos de
-  validación mediante `PolicyManager::Validate`: una política válida, cinco
-  identidades inválidas o ajenas, 23 nombres, ocho combinaciones de modos,
+- [policy_manager_test.cpp](security/policy_manager_test.cpp): 130 casos.
+  Los 109 casos de validación mediante `PolicyManager::Validate` incluyen una
+  política válida, cinco identidades inválidas o ajenas, 23 nombres, ocho combinaciones de modos,
   24 configuraciones de dominios, 25 configuraciones básicas de extensiones,
   20 configuraciones de extensiones Unicode y tres prioridades entre errores.
   Se comprueban listas vacías, límites de longitud, formato y duplicados
   normalizados, también con las protecciones desactivadas. Las pruebas de
   reglas comprueban además que validar conserva los datos originales del snapshot.
+  Los otros 21 casos cubren `BeginContext`, `IsCurrentContext` y `EndContext`: creación y
+  sustitución de contextos, IDs inválidos, conservación de generaciones y del
+  contexto actual ante intentos rechazados, ausencia de estado y correspondencia
+  de generación, dispositivo y compañía. Incluyen cierre correcto, cierre
+  repetido, reapertura sin reutilizar generación y rechazo de cierres tardíos
+  o con identidad de instalación distinta.
+- [security_context_test.cpp](security/security_context_test.cpp): cinco casos
+  que comprueban la conservación de identificadores de 64 bits y la igualdad
+  de contextos. Una generación, un dispositivo o una compañía distintos hacen
+  que la comparación devuelva `false`; se comprueban ambos órdenes de comparación.
 
 El 9 de noviembre de 2026, el usuario confirmó las 14 pruebas superadas
 en Debug y en Release. En Debug, CTest informó de 0 fallos y 4,68 segundos.
@@ -117,12 +127,33 @@ que se conservan las diferencias entre acentos, secuencias combinadas y otras
 cadenas distintas. Las conversiones especiales se contrastaron con
 [SpecialCasing de Unicode 16.0](https://www.unicode.org/Public/16.0.0/ucd/SpecialCasing.txt).
 
-Este resultado acredita la validación de datos; siguen pendientes el contexto
-de sesión e instalación, la publicación de un estado inmutable y la vigencia
-mediante reloj monotónico. `Validate` no publica ni modifica el snapshot.
+Este resultado acredita la validación de datos. En ese momento seguían pendientes
+la gestión del contexto de sesión e instalación, la publicación de políticas en
+un estado inmutable y la vigencia mediante reloj monotónico.
+`Validate` no publica ni modifica el snapshot.
 La presencia y conversión de los campos REST, incluidas las fechas, corresponden
 al adaptador de adquisición todavía pendiente. Tampoco se acredita con estas
 pruebas la evaluación de una navegación o descarga ni su aplicación en CEF.
+
+El 11 de noviembre de 2026, después de incorporar `SecurityContext`, el usuario
+confirmó las 137 pruebas superadas en Debug y Release. Estos cinco casos nuevos
+acreditan el objeto de contexto y su comparación.
+
+Ese mismo día, tras incorporar `BeginContext` e `IsCurrentContext`, confirmó las
+151 pruebas superadas en Debug y Release. Los 14 casos nuevos comprueban la
+creación de generaciones y la sustitución y consulta del contexto publicado.
+Una identidad anterior deja de coincidir aunque se repitan dispositivo y compañía;
+una creación con IDs inválidos no reemplaza el contexto ni consume generaciones.
+Tras incorporar `EndContext`, el usuario confirmó también las 158 pruebas
+superadas en Debug y Release el 11 de noviembre de 2026. Los siete casos nuevos
+comprueban que cerrar el contexto deja de reconocerlo como actual, que un cierre
+repetido devuelve `false`, que volver a iniciar no reutiliza la generación y que
+un cierre tardío o de otra instalación no termina el contexto actual.
+
+Estos casos son secuenciales: la concurrencia y el agotamiento del contador no
+se han acreditado mediante ejecución de pruebas. Siguen pendientes la publicación
+de políticas, su caducidad y el descarte efectivo de respuestas y errores tardíos
+durante su aplicación.
 
 El autor confirmó también la compilación de la aplicación en Debug y Release,
 los comprobadores `check-runtime.ps1` y `check-startup.ps1` en ambas
