@@ -65,7 +65,7 @@ la licencia y una copia del manifiesto ICU. No es necesario añadir el SDK
 al `PATH` para ejecutar las pruebas.
 
 CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
-casos parametrizados. Actualmente se esperan 188 casos:
+casos parametrizados. Actualmente se esperan 275 casos:
 
 - [security_decision_test.cpp](security/security_decision_test.cpp): 14 casos,
   uno para `Allowed` y trece para los motivos de bloqueo. Comprueban la acción
@@ -107,6 +107,16 @@ casos parametrizados. Actualmente se esperan 188 casos:
   que comprueban la conservación de identificadores de 64 bits y la igualdad
   de contextos. Una generación, un dispositivo o una compañía distintos hacen
   que la comparación devuelva `false`; se comprueban ambos órdenes de comparación.
+- [url_target_test.cpp](security/url_target_test.cpp): tres casos que comprueban
+  la conservación de los datos del destino, la interpretación fallida y la
+  independencia de las cadenas respecto a modificaciones en las de origen.
+- [url_filter_test.cpp](security/url_filter_test.cpp): 84 casos. Incluyen 12
+  pruebas directas, 12 destinos inválidos o con esquemas no admitidos, 32
+  combinaciones de dominios y reglas, siete destinos clasificados como IP,
+  11 prioridades entre bloqueos, siete lecturas incompletas o no utilizables
+  y tres límites de caducidad. Las tablas de dominios e IP comprueban ambos
+  modos, activación/desactivación y HTTP/HTTPS dentro de cada caso registrado.
+  Estas combinaciones internas no aumentan el número de casos que muestra CTest.
 
 El 9 de noviembre de 2026 se superaron las 14 pruebas
 en Debug y en Release. En Debug, CTest informó de 0 fallos y 4,68 segundos.
@@ -202,8 +212,49 @@ El inventario comprobado incluye las DLL y los avisos de ICU.
 Durante el enlace apareció el aviso `LNK4199`: se omite la carga diferida de
 `icuuc76.dll` porque la aplicación todavía no importa funciones de esa DLL.
 El aviso no impide compilar; la opción queda preparada para cuando el motor
-utilice la API de ICU. La ejecución de CI y una nueva pasada de la matriz
-visual completa siguen pendientes con esta incorporación.
+utilice la API de ICU. En ese punto quedaban pendientes la ejecución de CI
+y una nueva pasada de la matriz visual completa.
+
+La tarea #115 se integró mediante la
+[PR #128](https://github.com/CristianPG1993/securebrowser-platform/pull/128).
+Después del merge, finalizaron correctamente
+[Desktop CI](https://github.com/CristianPG1993/securebrowser-platform/actions/runs/43075151756)
+y [Backend CI](https://github.com/CristianPG1993/securebrowser-platform/actions/runs/43075151799)
+para el commit `9a9fe1f`. Este resultado corresponde a la entrega de #115,
+no a los cambios posteriores de `UrlFilter`.
+
+El 12 de noviembre de 2026, durante la
+[tarea #116](https://github.com/CristianPG1993/securebrowser-platform/issues/116),
+se confirmó la compilación y se superaron las 275 pruebas en Debug y Release.
+La incorporación de `UrlTarget` y `UrlHostKind` añade tres casos a los 188
+anteriores; los 84 casos de `UrlFilter` completan la batería actual.
+
+Se comprueban coincidencias exactas y de subdominio con límite de etiqueta,
+nombres engañosos, listas vacías, varias reglas y coincidencias en distintas
+posiciones. La normalización de copias de reglas admite mayúsculas ASCII y un
+punto final sin modificar el snapshot. Los dominios internacionales se comparan
+mediante los valores ASCII proporcionados, sin introducir alias IDN.
+Los literales IPv4/IPv6 se bloquean con filtrado activo en ambos modos y no se
+comparan por sufijos DNS; desactivar el filtrado omite esas reglas, conservando
+los controles generales de política y destino.
+
+También se comprueban el primer motivo de bloqueo, la ausencia y caducidad de
+política, las lecturas incoherentes y los modos desconocidos, sin resultados
+permisivos. Las actualizaciones rechazadas conservan las reglas y el plazo
+anteriores; las evaluaciones repetidas no consultan el reloj ni renuevan la vigencia
+ni modifican el estado. El límite de 15 minutos se prueba antes, en el instante
+exacto y después mediante el reloj inyectado, sin esperas reales.
+
+Estas pruebas reciben hosts ya interpretados, clasificados y preparados en ASCII.
+No acreditan que el evaluador analice o normalice el host de una URL completa.
+El parser real de CEF, la clasificación de sus variantes IP, las excepciones
+internas, la compatibilidad IDN y la cancelación efectiva de navegación se
+comprobarán en #117 y en la integración. `Evaluate` recibe una lectura reciente
+de `ReadPolicy`; conservar su resultado no prolonga su vigencia ni sustituye la
+comprobación de contexto y autorización al aplicar la decisión.
+La aplicación, la adquisición REST y los eventos todavía no utilizan este
+evaluador. La ejecución remota de CI y las comprobaciones de integración para
+la revisión de #116 quedan pendientes de publicar la rama y abrir su PR.
 
 La aplicación conserva `SBP_BUILD_DESKTOP_APP=ON` y `BUILD_TESTING=OFF` por
 defecto. Las fuentes de GoogleTest, el SDK ICU y sus salidas permanecen en `.deps/` y `build/`;
