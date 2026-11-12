@@ -293,6 +293,8 @@ add_library(SecureBrowser SHARED
     src/browser/browser_history_visitor.h
     src/browser/cef_url_adapter.cpp
     src/browser/cef_url_adapter.h
+    src/browser/security_request_handler.cpp
+    src/browser/security_request_handler.h
     src/diagnostics/diagnostics_log.cpp
     src/diagnostics/diagnostics_log.h
     src/ui/browser_host.cpp
