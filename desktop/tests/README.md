@@ -253,12 +253,84 @@ comprobarán en #117 y en la integración. `Evaluate` recibe una lectura recient
 de `ReadPolicy`; conservar su resultado no prolonga su vigencia ni sustituye la
 comprobación de contexto y autorización al aplicar la decisión.
 La aplicación, la adquisición REST y los eventos todavía no utilizan este
-evaluador. La ejecución remota de CI y las comprobaciones de integración para
-la revisión de #116 quedan pendientes de publicar la rama y abrir su PR.
+evaluador. La tarea #116 se integró en `main` mediante la
+[PR #129](https://github.com/CristianPG1993/securebrowser-platform/pull/129),
+commit `92c8106`, tras finalizar correctamente
+[Desktop CI](https://github.com/CristianPG1993/securebrowser-platform/actions/runs/43209501763)
+y [Backend CI](https://github.com/CristianPG1993/securebrowser-platform/actions/runs/43209501790).
+Estos resultados no acreditan todavía la aplicación del filtrado en CEF.
 
 La aplicación conserva `SBP_BUILD_DESKTOP_APP=ON` y `BUILD_TESTING=OFF` por
 defecto. Las fuentes de GoogleTest, el SDK ICU y sus salidas permanecen en `.deps/` y `build/`;
 no se incorporan al control de versiones.
+
+## Pruebas del adaptador de URL con CEF
+
+La [tarea #117](https://github.com/CristianPG1993/securebrowser-platform/issues/117)
+incorpora una batería independiente con el parser real del SDK fijado.
+Requiere las mismas dependencias preparadas del núcleo y el SDK CEF, incluidos
+`Debug/bootstrapc.exe` y `Release/bootstrapc.exe`. No requiere Qt.
+`SBP_BUILD_CEF_TESTS` está desactivada por defecto y exige `BUILD_TESTING=ON`.
+
+Configurar una carpeta independiente:
+
+```powershell
+$cef = Get-Content desktop/cef-sdk.json -Raw -Encoding UTF8 | ConvertFrom-Json
+$cefRoot = (Resolve-Path "desktop/.deps/cef/cef_binary_$($cef.version)_windows64").Path
+cmake -S desktop -B desktop/build/cef-tests -G "Visual Studio 17 2022" -A "x64,version=10.0.28000.0" -T v143 -DSBP_BUILD_DESKTOP_APP=OFF -DBUILD_TESTING=ON -DSBP_BUILD_CEF_TESTS=ON "-DCEF_ROOT=$cefRoot"
+```
+
+Compilar y ejecutar en Debug y Release:
+
+```powershell
+cmake --build desktop/build/cef-tests --config Debug --target sbp_cef_adapter_tests --parallel 4
+ctest --test-dir desktop/build/cef-tests -C Debug -R "^sbp_cef_adapter_tests$" -V --no-tests=error
+
+cmake --build desktop/build/cef-tests --config Release --target sbp_cef_adapter_tests --parallel 4
+ctest --test-dir desktop/build/cef-tests -C Release -R "^sbp_cef_adapter_tests$" -V --no-tests=error
+```
+
+CTest registra una batería llamada `sbp_cef_adapter_tests`, que ejecuta los
+24 casos parametrizados de [cef_url_adapter_test.cpp](browser/cef_url_adapter_test.cpp)
+y dos casos de [security_request_handler_test.cpp](browser/security_request_handler_test.cpp)
+en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
+informa de los 26 casos. El XML se conserva en
+`desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
+Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
+
+El bootstrap de consola carga la DLL de pruebas y llama a
+[cef_adapter_test_entry_win.cpp](browser/cef_adapter_test_entry_win.cpp).
+Se inicializa CEF con sandbox, sin crear QApplication ni una ventana de navegador.
+El lanzador [run_cef_adapter_tests.cmake](browser/run_cef_adapter_tests.cmake)
+crea un perfil exclusivo bajo `cef-adapter/<configuración>/test-profiles/` y lo
+entrega mediante la variable de entorno `SBP_CEF_ADAPTER_TEST_PROFILE`.
+Espera a la salida completa del proceso antes de limpiar, comprueba el destino
+y reintenta brevemente si Windows mantiene algún archivo bloqueado.
+Los fallos conservan el perfil y sus diagnósticos; una batería sin casos también
+se considera un error. El lanzador limita la ejecución a 90 segundos y CTest
+aplica un límite exterior de 120 segundos.
+
+El 12 de noviembre de 2026 se superaron los 24 casos en Debug y Release.
+Se comprueban esquema y host, mayúsculas, punto final, puerto, userinfo,
+host codificado, dominio internacional, variantes IPv4 abreviadas, decimal,
+hexadecimal y octal, IPv6, esquemas no web y entradas inválidas.
+Se comprueba la interpretación de `about:blank`, `data:` y `file:` sin
+atribuir a la interpretación correcta una autorización de navegación.
+
+En la primera ejecución Debug pasaron los 24 casos, pero falló la limpieza
+intentada dentro del proceso de CEF. Tras trasladarla al lanzador exterior,
+se confirmó la salida correcta de CTest y la retirada del perfil; la ejecución
+Debug registrada completó la batería en 2,18 segundos.
+
+Después de incorporar el constructor de `SecurityRequestHandler` y sus pruebas,
+se superaron los 26 casos en Debug y Release el 12 de noviembre de 2026.
+Se comprueba el rechazo de un gestor nulo y que el último `CefRefPtr` libera
+el handler y su propiedad compartida del gestor, sin duplicar el objeto.
+
+Esta evidencia acredita `CefUrlAdapter::Parse`, su clasificación mediante el
+parser fijado y la construcción y vida del handler. No acredita `OnBeforeBrowse`, redirecciones, subframes,
+historial, caché, service workers ni cancelación efectiva de páginas.
+La conexión de los handlers y sus pruebas de navegación siguen pendientes en #117.
 
 ## Comprobaciones automáticas de Desktop Foundation
 
