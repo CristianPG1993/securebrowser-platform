@@ -105,8 +105,13 @@ add_library(sbp_security_core STATIC
     src/security/security_reason.h
     src/security/security_decision.h
     src/security/security_decision.cpp
+    src/security/url_filter.h
+    src/security/url_filter.cpp
     src/security/url_filtering_config.h
     src/security/url_filtering_config.cpp
+    src/security/url_host_kind.h
+    src/security/url_target.h
+    src/security/url_target.cpp
 )
 target_include_directories(sbp_security_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
