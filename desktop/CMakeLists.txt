@@ -17,6 +17,10 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 # La aplicación conserva el flujo habitual; las pruebas se activan explícitamente.
 option(SBP_BUILD_DESKTOP_APP "Build the Qt and CEF desktop application" ON)
 option(BUILD_TESTING "Build the security core tests" OFF)
+option(SBP_BUILD_CEF_TESTS "Build the isolated CEF adapter tests" OFF)
+if(SBP_BUILD_CEF_TESTS AND NOT BUILD_TESTING)
+    message(FATAL_ERROR "CEF adapter tests require -DBUILD_TESTING=ON.")
+endif()
 include(CTest)
 
 # ICU se prepara explícitamente; la configuración utiliza únicamente el SDK local fijado.
@@ -181,21 +185,23 @@ if(BUILD_TESTING)
 endif()
 
 # Termina la configuración antes de buscar los SDK cuando solo se construye el núcleo.
-if(NOT SBP_BUILD_DESKTOP_APP)
+if(NOT SBP_BUILD_DESKTOP_APP AND NOT SBP_BUILD_CEF_TESTS)
     return()
 endif()
 
-set(Qt6_DIR "" CACHE PATH "Directory containing Qt6Config.cmake for the approved Qt kit")
+if(SBP_BUILD_DESKTOP_APP)
+    set(Qt6_DIR "" CACHE PATH "Directory containing Qt6Config.cmake for the approved Qt kit")
 
-if(NOT Qt6_DIR OR NOT EXISTS "${Qt6_DIR}/Qt6Config.cmake")
-    message(FATAL_ERROR
-        "Qt 6.12.0 MSVC 2022 x64 is required. "
-        "Configure with -DQt6_DIR=<Qt-kit>/lib/cmake/Qt6, "
-        "pointing to the directory containing Qt6Config.cmake."
-    )
+    if(NOT Qt6_DIR OR NOT EXISTS "${Qt6_DIR}/Qt6Config.cmake")
+        message(FATAL_ERROR
+            "Qt 6.12.0 MSVC 2022 x64 is required. "
+            "Configure with -DQt6_DIR=<Qt-kit>/lib/cmake/Qt6, "
+            "pointing to the directory containing Qt6Config.cmake."
+        )
+    endif()
+
+    find_package(Qt6 6.12.0 EXACT REQUIRED CONFIG COMPONENTS Widgets NO_DEFAULT_PATH)
 endif()
-
-find_package(Qt6 6.12.0 EXACT REQUIRED CONFIG COMPONENTS Widgets NO_DEFAULT_PATH)
 
 # El SDK se prepara con setup-cef.ps1 y se selecciona mediante una ruta local.
 set(CEF_ROOT "" CACHE PATH "Root directory of the approved CEF binary distribution")
@@ -273,6 +279,73 @@ add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}"
 
 # Selecciona la biblioteca de enlace del motor precompilado según la configuración.
 ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+
+if(SBP_BUILD_CEF_TESTS)
+    foreach(SBP_CEF_CONFIGURATION IN ITEMS Debug Release)
+        set(SBP_CEF_TEST_BOOTSTRAP "${CEF_ROOT}/${SBP_CEF_CONFIGURATION}/bootstrapc.exe")
+        if(NOT EXISTS "${SBP_CEF_TEST_BOOTSTRAP}")
+            message(FATAL_ERROR "CEF console bootstrap not found: ${SBP_CEF_TEST_BOOTSTRAP}")
+        endif()
+        sbp_require_x64_binary("${SBP_CEF_TEST_BOOTSTRAP}")
+    endforeach()
+
+    # El bootstrap carga una DLL con RunConsoleMain; GoogleTest no aporta main en este target.
+    add_library(sbp_cef_adapter_tests SHARED
+        tests/browser/cef_adapter_test_entry_win.cpp
+        tests/browser/cef_url_adapter_test.cpp
+        tests/browser/security_request_handler_test.cpp
+        src/browser/cef_url_adapter.h
+        src/browser/cef_url_adapter.cpp
+        src/browser/security_request_handler.h
+        src/browser/security_request_handler.cpp
+    )
+    target_include_directories(sbp_cef_adapter_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CEF_INCLUDE_PATH}"
+    )
+    target_compile_definitions(sbp_cef_adapter_tests PRIVATE NOMINMAX)
+    target_link_libraries(sbp_cef_adapter_tests PRIVATE
+        sbp_security_core GTest::gtest libcef_dll_wrapper libcef_lib ${CEF_STANDARD_LIBS}
+    )
+    set_target_properties(sbp_cef_adapter_tests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/cef-adapter/$<CONFIG>"
+    )
+
+    # Despliega el runtime en una carpeta propia, sin Qt ni el perfil de la aplicación.
+    COPY_SINGLE_FILE(sbp_cef_adapter_tests
+        "${CEF_BINARY_DIR}/bootstrapc.exe"
+        "$<TARGET_FILE_DIR:sbp_cef_adapter_tests>/sbp_cef_adapter_tests.exe"
+    )
+    COPY_FILES(sbp_cef_adapter_tests "${CEF_BINARY_FILES}"
+        "${CEF_BINARY_DIR}" "$<TARGET_FILE_DIR:sbp_cef_adapter_tests>"
+    )
+    COPY_FILES(sbp_cef_adapter_tests "${CEF_RESOURCE_FILES}"
+        "${CEF_RESOURCE_DIR}" "$<TARGET_FILE_DIR:sbp_cef_adapter_tests>"
+    )
+    COPY_FILES(sbp_cef_adapter_tests "README.txt;LICENSE.txt;CREDITS.html"
+        "${CEF_ROOT}" "$<TARGET_FILE_DIR:sbp_cef_adapter_tests>"
+    )
+    sbp_deploy_icu(sbp_cef_adapter_tests)
+    set(CEF_TARGET_OUT_DIR "$<TARGET_FILE_DIR:sbp_cef_adapter_tests>")
+    SET_LPAC_ACLS(sbp_cef_adapter_tests)
+
+    # Un registro CTest ejecuta todos los casos GoogleTest con una sola inicialización del motor.
+    add_test(NAME sbp_cef_adapter_tests
+        COMMAND "${CMAKE_COMMAND}"
+            "-DSBP_CEF_TEST_EXECUTABLE=$<TARGET_FILE_DIR:sbp_cef_adapter_tests>/sbp_cef_adapter_tests.exe"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/browser/run_cef_adapter_tests.cmake"
+    )
+    set_tests_properties(sbp_cef_adapter_tests PROPERTIES
+        LABELS "cef;adapter"
+        TIMEOUT 120
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:sbp_cef_adapter_tests>"
+    )
+endif()
+
+# Las pruebas del adaptador tampoco necesitan configurar la aplicación Qt.
+if(NOT SBP_BUILD_DESKTOP_APP)
+    return()
+endif()
 
 # Nuestra DLL implementa la entrada que invoca el bootstrap.
 add_library(SecureBrowser SHARED
