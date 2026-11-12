@@ -168,7 +168,9 @@ if(BUILD_TESTING)
         tests/security/policy_snapshot_test.cpp
         tests/security/security_context_test.cpp
         tests/security/security_decision_test.cpp
+        tests/security/url_filter_test.cpp
         tests/security/url_filtering_config_test.cpp
+        tests/security/url_target_test.cpp
     )
     target_link_libraries(sbp_security_tests PRIVATE sbp_security_core GTest::gtest_main)
     sbp_deploy_icu(sbp_security_tests)
