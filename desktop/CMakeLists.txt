@@ -105,8 +105,13 @@ add_library(sbp_security_core STATIC
     src/security/security_reason.h
     src/security/security_decision.h
     src/security/security_decision.cpp
+    src/security/url_filter.h
+    src/security/url_filter.cpp
     src/security/url_filtering_config.h
     src/security/url_filtering_config.cpp
+    src/security/url_host_kind.h
+    src/security/url_target.h
+    src/security/url_target.cpp
 )
 target_include_directories(sbp_security_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -163,7 +168,9 @@ if(BUILD_TESTING)
         tests/security/policy_snapshot_test.cpp
         tests/security/security_context_test.cpp
         tests/security/security_decision_test.cpp
+        tests/security/url_filter_test.cpp
         tests/security/url_filtering_config_test.cpp
+        tests/security/url_target_test.cpp
     )
     target_link_libraries(sbp_security_tests PRIVATE sbp_security_core GTest::gtest_main)
     sbp_deploy_icu(sbp_security_tests)
