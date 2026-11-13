@@ -295,9 +295,9 @@ CTest registra una batería llamada `sbp_cef_adapter_tests`, que ejecuta los
 dos casos de [security_request_handler_test.cpp](browser/security_request_handler_test.cpp)
 y tres casos de [browser_client_test.cpp](browser/browser_client_test.cpp),
 además de diez casos de [security_navigation_test.cpp](browser/security_navigation_test.cpp)
-y un caso de [local_http_test_server_test.cpp](browser/local_http_test_server_test.cpp)
+y quince casos de [local_http_test_server_test.cpp](browser/local_http_test_server_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
-informa de los 40 casos previstos. El XML se conserva en
+informa de los 54 casos. El XML se conserva en
 `desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
 
@@ -403,8 +403,33 @@ con un ciclo de vida sin confirmar.
 El 13 de noviembre de 2026 se superaron los 40 casos en Debug y Release.
 Los XML de ambas configuraciones registran cero fallos y cero errores e incluyen
 la carga HTTP local con estado 200 y una petición recibida.
-Las reglas con dominios, la ausencia de peticiones a destinos bloqueados y
-las redirecciones se comprobarán en el siguiente bloque.
+La cobertura de dominios y destinos bloqueados se amplía en el bloque siguiente;
+las redirecciones siguen pendientes.
+
+### Dominios y peticiones recibidas
+
+La batería incorpora 14 casos parametrizados adicionales para el servidor local.
+[CefAdapterTestApp](browser/cef_adapter_test_app.h) configura únicamente el
+ejecutable de pruebas: `host-resolver-rules` dirige `*.sbp.test` a `127.0.0.1`
+y `no-proxy-server` evita enviar esos dominios al proxy del equipo. Esta
+[resolución controlada de Chromium](https://github.com/chromium/chromium/blob/156.0.8078.48/net/dns/mapped_host_resolver.h)
+conserva el dominio de la URL que evalúa `SecurityRequestHandler`; el puerto
+es el asignado al servidor de cada caso.
+
+La tabla cubre permisos y bloqueos con ambos modos, listas vacías, subdominios,
+sufijos parecidos sin el punto separador, filtrado desactivado y reglas con
+mayúsculas y punto final. Los casos permitidos exigen HTTP 200, carga completada
+y una petición recibida en `/page`; los bloqueados exigen decisión de bloqueo,
+ausencia de carga y cero peticiones en `/blocked`. El servidor se detiene antes
+de consultar el recuento final. El cliente de pruebas comunica además los errores
+de carga mediante `OnLoadError`, para evitar diagnosticarlos como timeouts de cierre.
+
+El 13 de noviembre de 2026 se superaron los 54 casos en Debug y Release.
+Los XML de ambas configuraciones registran cero fallos y cero errores e incluyen
+los 14 casos de dominios, con carga HTTP 200 y una petición para los permisos,
+y cero peticiones en la ruta del destino para los bloqueos. Este bloque no
+acredita todavía redirecciones, subframes ni los escenarios de historial, caché
+y service workers.
 
 ## Comprobaciones automáticas de Desktop Foundation
 
