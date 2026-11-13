@@ -304,6 +304,9 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/local_http_test_server.h
         tests/browser/local_http_test_server.cpp
         tests/browser/local_http_test_server_test.cpp
+        tests/browser/history_policy_test_client.h
+        tests/browser/history_policy_test_client.cpp
+        tests/browser/history_policy_change_test.cpp
         src/browser/browser_security_config.h
         src/browser/browser_security_config.cpp
         src/browser/browser_client.h

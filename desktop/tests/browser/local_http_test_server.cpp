@@ -98,8 +98,25 @@ void LocalHttpTestServer::OnHttpRequest(CefRefPtr<CefServer> server, int connect
         const std::lock_guard<std::mutex> lock(mutex_);
         ++requestCounts_[path];
     }
-    if (request->GetMethod().ToString() != "GET" || (path != "/page" && path != "/blocked")) {
+    const bool historyPage = path == "/history-first" || path == "/history-second";
+    if (request->GetMethod().ToString() != "GET"
+        || (path != "/page" && path != "/blocked" && !historyPage)) {
         server->SendHttp404Response(connectionId);
+        return;
+    }
+    if (historyPage) {
+        // pageshow.persisted distingue la restauración del documento de una nueva carga HTTP.
+        // El marcador se consulta desde el navegador después de terminar el recorrido de vuelta.
+        const char html[] = "<!doctype html><title>SBP history fixture</title>"
+            "<link rel='icon' href='data:,'><p>Cacheable history document.</p>"
+            "<script>window.sbpHistoryRestored=false;"
+            "window.addEventListener('pageshow',function(event){"
+            "window.sbpHistoryRestored=event.persisted;});</script>";
+        const CefServer::HeaderMap headers{{"Cache-Control", "public, max-age=600"}};
+        server->SendHttpResponse(connectionId, 200, "text/html; charset=utf-8",
+                                 sizeof(html) - 1, headers);
+        server->SendRawData(connectionId, html, sizeof(html) - 1);
+        server->CloseConnection(connectionId);
         return;
     }
     // El contenido no carga recursos externos; /blocked también respondería si una petición escapara.
