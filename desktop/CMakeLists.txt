@@ -295,6 +295,9 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/cef_adapter_test_entry_win.cpp
         tests/browser/cef_url_adapter_test.cpp
         tests/browser/security_request_handler_test.cpp
+        tests/browser/navigation_test_client.h
+        tests/browser/navigation_test_client.cpp
+        tests/browser/security_navigation_test.cpp
         src/browser/browser_client.h
         src/browser/browser_client.cpp
         src/browser/browser_history_visitor.h

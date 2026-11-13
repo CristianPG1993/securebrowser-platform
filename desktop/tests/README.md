@@ -293,15 +293,18 @@ ctest --test-dir desktop/build/cef-tests -C Release -R "^sbp_cef_adapter_tests$"
 CTest registra una batería llamada `sbp_cef_adapter_tests`, que ejecuta los
 24 casos parametrizados de [cef_url_adapter_test.cpp](browser/cef_url_adapter_test.cpp),
 dos casos de [security_request_handler_test.cpp](browser/security_request_handler_test.cpp)
-y tres casos de [browser_client_test.cpp](browser/browser_client_test.cpp)
+y tres casos de [browser_client_test.cpp](browser/browser_client_test.cpp),
+además de diez casos de [security_navigation_test.cpp](browser/security_navigation_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
-informa de los 29 casos. El XML se conserva en
+informa de los 39 casos. El XML se conserva en
 `desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
 
 El bootstrap de consola carga la DLL de pruebas y llama a
 [cef_adapter_test_entry_win.cpp](browser/cef_adapter_test_entry_win.cpp).
-Se inicializa CEF con sandbox, sin crear QApplication ni una ventana de navegador.
+Se inicializa CEF con sandbox, sin crear QApplication. Los casos del adaptador
+y de propiedad de referencias no crean un navegador. Los casos de navegación
+crean un navegador nativo oculto por caso y esperan su cierre antes de continuar.
 El lanzador [run_cef_adapter_tests.cmake](browser/run_cef_adapter_tests.cmake)
 crea un perfil exclusivo bajo `cef-adapter/<configuración>/test-profiles/` y lo
 entrega mediante la variable de entorno `SBP_CEF_ADAPTER_TEST_PROFILE`.
@@ -334,11 +337,49 @@ vacío, la devolución del mismo objeto inyectado mediante `GetRequestHandler`
 y su conservación mientras lo retengan el cliente o una referencia de CEF.
 Los XML de ambas configuraciones registran 29 casos sin fallos ni errores.
 
-Esta evidencia acredita `CefUrlAdapter::Parse`, su clasificación mediante el
+La evidencia de los 29 casos acredita `CefUrlAdapter::Parse`, su clasificación mediante el
 parser fijado, la construcción y vida del handler y su entrega desde `BrowserClient`.
-No acredita `OnBeforeBrowse`, redirecciones, subframes, historial, caché,
-service workers ni cancelación efectiva de páginas. La conexión está preparada;
-las pruebas de navegación siguen pendientes en #117.
+En ese punto no se había acreditado `OnBeforeBrowse`, redirecciones, subframes,
+historial, caché, service workers ni cancelación efectiva de páginas.
+
+La batería incorpora diez casos de navegación principal con un cliente de prueba.
+Los ocho casos web exigen recibir el callback real de CEF y delegan en
+`SecurityRequestHandler`. Para los dos de `about:blank`, la carga real y el
+permiso del handler se comprueban por separado: tras cargar el documento,
+se llama directamente al handler en el hilo UI, con navegador y frame reales.
+`callbackObserved` conserva el valor `false`; `handlerCheckedDirectly` permite
+distinguir esta comprobación de un callback emitido por CEF.
+
+El [interceptor de CEF fijado](https://github.com/chromiumembedded/cef/blob/4fa4ab516dacf6c49fc7e6e70d2b7ebce29fa35f/libcef/browser/net/throttle_handler.cc)
+utiliza las fases de petición y redirección de Chromium. La
+[API de navegación de Chromium 156](https://github.com/chromium/chromium/blob/156.0.8078.48/content/public/browser/navigation_throttle.h)
+documenta que navegaciones como `about:blank` pueden omitir esos interceptores.
+No se atribuye a los dos casos internos una intervención previa del handler
+en la carga real ni se modifica la política de la aplicación.
+Comprueban `about:blank` sin contexto y con política caducada, HTTP y HTTPS
+sin contexto, contexto sin política, política caducada, contexto cerrado,
+dominio denegado, allowlist vacía e IP literal. Los casos internos permitidos
+deben completar la carga; los bloqueados se cierran tras observar la decisión.
+Si el handler concede inesperadamente una URL web, el cliente de prueba
+registra ese resultado para que falle la aserción y cancela la petición antes
+de salir a la red. No se acredita con esta batería una carga HTTP permitida
+ni la recepción de peticiones en un servidor de destino.
+
+En las dos primeras ejecuciones de los 39 casos en Debug, el 13 de noviembre
+de 2026, se superaron 37 y fallaron los dos de `about:blank`: el documento se
+cargaba y el navegador se cerraba, pero no se observaba `OnBeforeBrowse`.
+La segunda ejecución partía de un documento local previo; esa preparación
+tampoco hacía que CEF emitiera el callback para `about:blank` y se ha retirado.
+Tras contrastar el comportamiento con las fuentes fijadas, se han corregido
+las expectativas y añadido la comprobación directa del permiso interno.
+Después de esta corrección, el 13 de noviembre de 2026 se superaron los 39 casos
+en Debug y Release. Los XML de ambas configuraciones registran cero fallos y
+cero errores; CTest confirmó la eliminación del perfil aislado tras la salida
+del proceso. La ejecución Release registrada completó CTest en 3,69 segundos.
+Este resultado acredita los ocho callbacks web y las dos comprobaciones internas
+con el alcance descrito. Siguen pendientes las cargas HTTP permitidas con
+servidor controlado, las redirecciones, los subframes y los escenarios de
+historial, caché y service workers de #117.
 
 ## Comprobaciones automáticas de Desktop Foundation
 
