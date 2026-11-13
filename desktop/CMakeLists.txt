@@ -291,9 +291,14 @@ if(SBP_BUILD_CEF_TESTS)
 
     # El bootstrap carga una DLL con RunConsoleMain; GoogleTest no aporta main en este target.
     add_library(sbp_cef_adapter_tests SHARED
+        tests/browser/browser_client_test.cpp
         tests/browser/cef_adapter_test_entry_win.cpp
         tests/browser/cef_url_adapter_test.cpp
         tests/browser/security_request_handler_test.cpp
+        src/browser/browser_client.h
+        src/browser/browser_client.cpp
+        src/browser/browser_history_visitor.h
+        src/browser/browser_history_visitor.cpp
         src/browser/cef_url_adapter.h
         src/browser/cef_url_adapter.cpp
         src/browser/security_request_handler.h

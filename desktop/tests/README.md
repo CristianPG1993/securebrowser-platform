@@ -291,10 +291,11 @@ ctest --test-dir desktop/build/cef-tests -C Release -R "^sbp_cef_adapter_tests$"
 ```
 
 CTest registra una batería llamada `sbp_cef_adapter_tests`, que ejecuta los
-24 casos parametrizados de [cef_url_adapter_test.cpp](browser/cef_url_adapter_test.cpp)
-y dos casos de [security_request_handler_test.cpp](browser/security_request_handler_test.cpp)
+24 casos parametrizados de [cef_url_adapter_test.cpp](browser/cef_url_adapter_test.cpp),
+dos casos de [security_request_handler_test.cpp](browser/security_request_handler_test.cpp)
+y tres casos de [browser_client_test.cpp](browser/browser_client_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
-informa de los 26 casos. El XML se conserva en
+informa de los 29 casos. El XML se conserva en
 `desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
 
@@ -327,10 +328,17 @@ se superaron los 26 casos en Debug y Release el 12 de noviembre de 2026.
 Se comprueba el rechazo de un gestor nulo y que el último `CefRefPtr` libera
 el handler y su propiedad compartida del gestor, sin duplicar el objeto.
 
+El 13 de noviembre de 2026 se completó la validación de los 29 casos en Debug
+y Release. Los tres casos de `BrowserClient` comprueban el rechazo de un handler
+vacío, la devolución del mismo objeto inyectado mediante `GetRequestHandler`
+y su conservación mientras lo retengan el cliente o una referencia de CEF.
+Los XML de ambas configuraciones registran 29 casos sin fallos ni errores.
+
 Esta evidencia acredita `CefUrlAdapter::Parse`, su clasificación mediante el
-parser fijado y la construcción y vida del handler. No acredita `OnBeforeBrowse`, redirecciones, subframes,
-historial, caché, service workers ni cancelación efectiva de páginas.
-La conexión de los handlers y sus pruebas de navegación siguen pendientes en #117.
+parser fijado, la construcción y vida del handler y su entrega desde `BrowserClient`.
+No acredita `OnBeforeBrowse`, redirecciones, subframes, historial, caché,
+service workers ni cancelación efectiva de páginas. La conexión está preparada;
+las pruebas de navegación siguen pendientes en #117.
 
 ## Comprobaciones automáticas de Desktop Foundation
 
