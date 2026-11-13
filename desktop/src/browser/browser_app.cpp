@@ -1,4 +1,5 @@
 #include "browser/browser_app.h"
+#include "browser/browser_security_config.h"
 
 #include "include/cef_task.h"
 #include "include/wrapper/cef_helpers.h"
@@ -12,6 +13,13 @@ BrowserApp::BrowserApp(std::function<void()> on_context_initialized)
     : on_context_initialized_(std::move(on_context_initialized)) {}
 
 BrowserApp::~BrowserApp() = default;
+
+void BrowserApp::OnBeforeCommandLineProcessing(
+    const CefString& processType, CefRefPtr<CefCommandLine> commandLine) {
+    if (processType.empty()) {
+        BrowserSecurityConfig::Apply(commandLine);
+    }
+}
 
 CefRefPtr<CefBrowserProcessHandler> BrowserApp::GetBrowserProcessHandler() {
     return this;
