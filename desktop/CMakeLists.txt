@@ -310,6 +310,9 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/service_worker_policy_test_client.h
         tests/browser/service_worker_policy_test_client.cpp
         tests/browser/service_worker_policy_change_test.cpp
+        tests/browser/redirect_navigation_test_client.h
+        tests/browser/redirect_navigation_test_client.cpp
+        tests/browser/redirect_navigation_test.cpp
         src/browser/browser_security_config.h
         src/browser/browser_security_config.cpp
         src/browser/browser_client.h

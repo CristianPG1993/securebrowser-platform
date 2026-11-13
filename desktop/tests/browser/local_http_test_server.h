@@ -50,6 +50,10 @@ private:
     [[nodiscard]] static bool SendServiceWorkerFixture(
         CefRefPtr<CefServer> server, int connectionId, const std::string& path);
 
+    // Cadenas locales de dos redirecciones con códigos HTTP fijados por la prueba.
+    [[nodiscard]] static bool SendRedirectFixture(
+        CefRefPtr<CefServer> server, int connectionId, const std::string& path);
+
     bool startRequested_ = false;
     std::promise<bool> created_;
     std::promise<void> destroyed_;

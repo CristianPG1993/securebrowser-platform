@@ -102,6 +102,10 @@ void LocalHttpTestServer::OnHttpRequest(CefRefPtr<CefServer> server, int connect
     }
     const bool historyPage = path == "/history-first" || path == "/history-second";
     if (request->GetMethod().ToString() == "GET"
+        && SendRedirectFixture(server, connectionId, path)) {
+        return;
+    }
+    if (request->GetMethod().ToString() == "GET"
         && SendServiceWorkerFixture(server, connectionId, path)) {
         return;
     }
@@ -129,6 +133,42 @@ void LocalHttpTestServer::OnHttpRequest(CefRefPtr<CefServer> server, int connect
     const char html[] = "<!doctype html><title>SBP local HTTP test</title>"
                         "<link rel='icon' href='data:,'><p>Local navigation completed.</p>";
     server->SendHttp200Response(connectionId, "text/html; charset=utf-8", html, sizeof(html) - 1);
+}
+
+bool LocalHttpTestServer::SendRedirectFixture(
+    CefRefPtr<CefServer> server, int connectionId, const std::string& path) {
+    if (path == "/redirect-target") {
+        const char html[] = "<!doctype html><title>SBP redirect target</title>"
+                            "<link rel='icon' href='data:,'><p>Redirect chain completed.</p>";
+        const CefServer::HeaderMap headers{{"Cache-Control", "no-store"}};
+        server->SendHttpResponse(connectionId, 200, "text/html; charset=utf-8",
+                                 sizeof(html) - 1, headers);
+        server->SendRawData(connectionId, html, sizeof(html) - 1);
+        server->CloseConnection(connectionId);
+        return true;
+    }
+    for (const int status : {301, 302, 303, 307, 308}) {
+        const std::string prefix = "/redirect/" + std::to_string(status);
+        const bool first = path == prefix + "/first";
+        if (!first && path != prefix + "/second") {
+            continue;
+        }
+        CefURLParts endpoint;
+        if (!CefParseURL("http://" + server->GetAddress().ToString(), endpoint)) {
+            server->SendHttp500Response(connectionId, "Invalid redirect fixture endpoint.");
+            return true;
+        }
+        const std::string port = CefString(&endpoint.port).ToString();
+        const std::string location = first
+            ? "http://middle.sbp.test:" + port + prefix + "/second"
+            : "http://target.sbp.test:" + port + "/redirect-target";
+        const CefServer::HeaderMap headers{
+            {"Location", location}, {"Cache-Control", "no-store"}};
+        // Una respuesta sin cuerpo se cierra automáticamente en CEF; no repetir CloseConnection.
+        server->SendHttpResponse(connectionId, status, "text/plain", 0, headers);
+        return true;
+    }
+    return false;
 }
 
 bool LocalHttpTestServer::SendServiceWorkerFixture(

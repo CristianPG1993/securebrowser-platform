@@ -299,9 +299,10 @@ además de diez casos de [security_navigation_test.cpp](browser/security_navigat
 y quince casos de [local_http_test_server_test.cpp](browser/local_http_test_server_test.cpp)
 y cuatro de [history_policy_change_test.cpp](browser/history_policy_change_test.cpp)
 y dos de [service_worker_policy_change_test.cpp](browser/service_worker_policy_change_test.cpp)
+y quince de [redirect_navigation_test.cpp](browser/redirect_navigation_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
-informa de los 62 casos, validados en Debug y Release tras incorporar el bloque
-de service worker y acortar la ruta del perfil aislado.
+informa de los 77 casos, validados en Debug y Release tras incorporar las cadenas
+HTTP. La batería incluye el bloque de service worker y la ruta corta del perfil aislado.
 El XML se conserva en
 `desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
@@ -558,6 +559,67 @@ del destino tras publicar la nueva política. Ambos casos confirman una única
 petición HTTP al destino, la preparación inicial, y la retirada del registro
 y la caché antes del cierre. El cambio de ruta permite completar la instalación
 sin modificar los permisos de navegación ni las comprobaciones de la caché.
+
+### Cadenas de redirección HTTP
+
+Se han preparado 15 casos en
+[redirect_navigation_test.cpp](browser/redirect_navigation_test.cpp): los códigos
+`301`, `302`, `303`, `307` y `308`, combinados con permiso completo, bloqueo del
+dominio intermedio y bloqueo del destino final. Todos utilizan navegación GET
+del frame principal y el servidor de loopback, sin contenido externo.
+
+Cada recorrido comienza en `start.sbp.test`, recibe una redirección hacia
+`middle.sbp.test` y después otra hacia `target.sbp.test`. Las respuestas de este
+escenario incluyen `Cache-Control: no-store`. El servidor contabiliza por separado
+las dos rutas de redirección y la del documento final:
+
+| Política | Peticiones iniciales | Peticiones al intermedio | Peticiones al destino final |
+| --- | --- | --- | --- |
+| Permitir la cadena completa | 1 | 1 | 1, con carga HTTP 200 |
+| Denegar el intermedio | 1 | 0 | 0 |
+| Denegar el destino final | 1 | 1 | 0 |
+
+[RedirectNavigationTestClient](browser/redirect_navigation_test_client.h)
+delega `OnBeforeBrowse` en el handler de producción y devuelve su decisión real.
+El resultado esperado no cancela por sí mismo las peticiones. El cliente observa
+también `GetResourceRequestHandler`, `OnBeforeResourceLoad`, `OnResourceRedirect`
+y `OnResourceLoadComplete`, limitando esa observación a navegaciones y reenviando
+las llamadas al delegado de producción cuando existe. No añade un filtro general
+de subrecursos ni un nuevo control de recursos en la aplicación.
+
+La traza compartida entre UI e IO se protege con un mutex y registra etapa,
+host interpretado, código HTTP en las redirecciones e identificador de petición
+en los callbacks de recursos. No registra URLs completas. El XML conserva esa
+traza, los contadores de callbacks, el punto de bloqueo, la carga y los recuentos
+HTTP del servidor. Las aserciones exigen cero peticiones al destino denegado,
+además de la decisión y la ausencia de carga.
+
+Las [pruebas del SDK fijado](https://github.com/chromiumembedded/cef/blob/4fa4ab516dacf6c49fc7e6e70d2b7ebce29fa35f/tests/ceftests/resource_request_handler_unittest.cc)
+comprueban callbacks UI e IO tras una redirección. Este contraste orienta las
+aserciones y se complementa con las peticiones recibidas por el servidor local.
+
+El 13 de noviembre de 2026, la primera ejecución Debug superó los 77 casos.
+Los cinco controles permitidos registran tres callbacks UI, dos redirecciones
+IO y una petición por cada destino. Los bloqueos intermedios registran una
+petición inicial y cero al intermedio y al destino final; los bloqueos finales
+registran una petición inicial, una al intermedio y cero al destino final.
+Las trazas muestran `UI:block` antes de un nuevo `IO:load` al dominio denegado.
+En estas cadenas, `OnBeforeBrowse` aplica la cancelación; el observador IO no
+añade una decisión de seguridad.
+
+La ejecución emitió avisos `Invalid connection_id` porque las respuestas de
+redirección con longitud cero se cerraban de nuevo mediante `CloseConnection`,
+después del cierre automático de CEF. Se ha retirado ese cierre duplicado.
+Tras retirar el cierre duplicado, el 13 de noviembre de 2026 se superaron los
+77 casos en Debug y Release, con cero fallos y cero errores en ambos XML. Los
+15 casos de cada configuración mantienen los recuentos HTTP previstos y la
+cancelación antes de contactar con el dominio bloqueado. El último log CTest,
+correspondiente a Release, ya no contiene avisos `Invalid connection_id` y
+confirma la retirada del perfil tras terminar el proceso.
+
+Estos casos tampoco acreditan redirecciones de subframes, HTTPS, formularios POST
+ni cambios de política durante una cadena. La aceptación del alcance restante
+de redirecciones permanece pendiente.
 
 ## Comprobaciones automáticas de Desktop Foundation
 
