@@ -84,7 +84,7 @@ bool NavigationTestClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
         browser, frame, request, userGesture, isRedirect);
 
     // Un permiso inesperado hace fallar la aserción; la prueba lo cancela para no salir a Internet.
-    // Solo los casos internos permitidos continúan hasta OnLoadEnd.
+    // Los destinos permitidos continúan hasta OnLoadEnd.
     if (result_.cancelledBySecurity || expectCancellation_) {
         RequestClose(browser);
         return true;
@@ -113,6 +113,20 @@ void NavigationTestClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
         }
         RequestClose(browser);
     }
+}
+
+void NavigationTestClient::OnLoadError(CefRefPtr<CefBrowser> browser,
+                                      CefRefPtr<CefFrame> frame, ErrorCode errorCode,
+                                      const CefString& /*errorText*/,
+                                      const CefString& failedUrl) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!frame || !frame->IsMain() || failedUrl.ToString() != url_
+        || (errorCode == ERR_ABORTED && closing_)) {
+        return;
+    }
+    result_.error = "Navigation failed with CEF error "
+        + std::to_string(static_cast<int>(errorCode)) + ".";
+    RequestClose(browser);
 }
 
 void NavigationTestClient::RequestClose(CefRefPtr<CefBrowser> browser) {

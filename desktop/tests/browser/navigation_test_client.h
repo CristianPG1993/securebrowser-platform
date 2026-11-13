@@ -48,6 +48,10 @@ public:
                         bool isRedirect) override;
     void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                    int httpStatusCode) override;
+    // Comunica fallos de red para que no se confundan con una espera de cierre agotada.
+    void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                     ErrorCode errorCode, const CefString& errorText,
+                     const CefString& failedUrl) override;
 
 private:
     ~NavigationTestClient() override = default;
