@@ -4,9 +4,11 @@
 #include "include/cef_task.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <string_view>
 
 namespace sbp {
 
@@ -99,6 +101,10 @@ void LocalHttpTestServer::OnHttpRequest(CefRefPtr<CefServer> server, int connect
         ++requestCounts_[path];
     }
     const bool historyPage = path == "/history-first" || path == "/history-second";
+    if (request->GetMethod().ToString() == "GET"
+        && SendServiceWorkerFixture(server, connectionId, path)) {
+        return;
+    }
     if (request->GetMethod().ToString() != "GET"
         || (path != "/page" && path != "/blocked" && !historyPage)) {
         server->SendHttp404Response(connectionId);
@@ -123,6 +129,87 @@ void LocalHttpTestServer::OnHttpRequest(CefRefPtr<CefServer> server, int connect
     const char html[] = "<!doctype html><title>SBP local HTTP test</title>"
                         "<link rel='icon' href='data:,'><p>Local navigation completed.</p>";
     server->SendHttp200Response(connectionId, "text/html; charset=utf-8", html, sizeof(html) - 1);
+}
+
+bool LocalHttpTestServer::SendServiceWorkerFixture(
+    CefRefPtr<CefServer> server, int connectionId, const std::string& path) {
+    std::string_view body;
+    std::string contentType = "text/html; charset=utf-8";
+    CefServer::HeaderMap headers{{"Cache-Control", "no-store"}};
+    if (path == "/sw-start") {
+        // El aviso de disponibilidad exige registro activo y control del documento inicial.
+        body = R"SWSTART(<!doctype html><title>SBP SW start</title>
+<link rel="icon" href="data:,"><p>Service worker setup.</p><script>
+(async function() {
+    const timer = setTimeout(function() {
+        document.title = 'SBP SW startup error/TimeoutError';
+    }, 10000);
+    try {
+        await navigator.serviceWorker.register('/sw-worker.js', {scope: '/', updateViaCache: 'none'});
+        await navigator.serviceWorker.ready;
+        if (!navigator.serviceWorker.controller) {
+            await new Promise(function(resolve) {
+                function controlled() {
+                    if (navigator.serviceWorker.controller) {
+                        navigator.serviceWorker.removeEventListener('controllerchange', controlled);
+                        resolve();
+                    }
+                }
+                navigator.serviceWorker.addEventListener('controllerchange', controlled);
+                controlled();
+            });
+        }
+        clearTimeout(timer);
+        document.title = 'SBP SW ready';
+    } catch (error) {
+        clearTimeout(timer);
+        document.title = 'SBP SW startup error/' + error.name;
+    }
+})();
+</script>)SWSTART";
+    } else if (path == "/sw-worker.js") {
+        contentType = "text/javascript; charset=utf-8";
+        headers.emplace("Service-Worker-Allowed", "/");
+        // Se prepara una entrada de Cache Storage; solo las navegaciones a /sw-target
+        // reciben la respuesta marcada, construida a partir del contenido guardado.
+        body = R"SWWORKER(const cacheName = 'sbp-navigation-policy-v1';
+self.addEventListener('install', function(event) {
+    event.waitUntil(caches.open(cacheName).then(function(cache) {
+        return cache.add('/sw-target');
+    }).then(function() {
+        return self.skipWaiting();
+    }));
+});
+self.addEventListener('activate', function(event) {
+    event.waitUntil(self.clients.claim());
+});
+self.addEventListener('fetch', function(event) {
+    if (event.request.mode !== 'navigate' || new URL(event.request.url).pathname !== '/sw-target') {
+        return;
+    }
+    event.respondWith(caches.open(cacheName).then(function(cache) {
+        return cache.match('/sw-target');
+    }).then(function(response) {
+        if (!response) throw new Error('Missing navigation fixture in Cache Storage');
+        return response.text();
+    }).then(function(html) {
+        return new Response(html.replace('SBP SW network target', 'SBP SW cached target'), {
+            status: 200,
+            headers: {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'}
+        });
+    }));
+});)SWWORKER";
+    } else if (path == "/sw-target") {
+        body = R"SWTARGET(<!doctype html><title>SBP SW network target</title>
+<link rel="icon" href="data:,"><p>Content seeded into Cache Storage.</p>)SWTARGET";
+    } else {
+        return false;
+    }
+    server->SendHttpResponse(connectionId, 200, contentType,
+                             static_cast<std::int64_t>(body.size()), headers);
+    server->SendRawData(connectionId, body.data(), body.size());
+    server->CloseConnection(connectionId);
+    return true;
 }
 
 void LocalHttpTestServer::OnWebSocketRequest(CefRefPtr<CefServer> /*server*/,

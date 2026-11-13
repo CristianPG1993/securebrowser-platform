@@ -307,6 +307,9 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/history_policy_test_client.h
         tests/browser/history_policy_test_client.cpp
         tests/browser/history_policy_change_test.cpp
+        tests/browser/service_worker_policy_test_client.h
+        tests/browser/service_worker_policy_test_client.cpp
+        tests/browser/service_worker_policy_change_test.cpp
         src/browser/browser_security_config.h
         src/browser/browser_security_config.cpp
         src/browser/browser_client.h
@@ -352,6 +355,7 @@ if(SBP_BUILD_CEF_TESTS)
     add_test(NAME sbp_cef_adapter_tests
         COMMAND "${CMAKE_COMMAND}"
             "-DSBP_CEF_TEST_EXECUTABLE=$<TARGET_FILE_DIR:sbp_cef_adapter_tests>/sbp_cef_adapter_tests.exe"
+            "-DSBP_CEF_TEST_PROFILE_ROOT=${CMAKE_BINARY_DIR}/p"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/browser/run_cef_adapter_tests.cmake"
     )
     set_tests_properties(sbp_cef_adapter_tests PROPERTIES

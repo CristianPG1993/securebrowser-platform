@@ -298,8 +298,11 @@ y tres casos de [browser_client_test.cpp](browser/browser_client_test.cpp),
 además de diez casos de [security_navigation_test.cpp](browser/security_navigation_test.cpp)
 y quince casos de [local_http_test_server_test.cpp](browser/local_http_test_server_test.cpp)
 y cuatro de [history_policy_change_test.cpp](browser/history_policy_change_test.cpp)
+y dos de [service_worker_policy_change_test.cpp](browser/service_worker_policy_change_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
-informa de los 60 casos. El XML se conserva en
+informa de los 62 casos, validados en Debug y Release tras incorporar el bloque
+de service worker y acortar la ruta del perfil aislado.
+El XML se conserva en
 `desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
 
@@ -309,8 +312,11 @@ Se inicializa CEF con sandbox, sin crear QApplication. Los casos del adaptador
 y de propiedad de referencias no crean un navegador. Los casos de navegación
 crean un navegador nativo oculto por caso y esperan su cierre antes de continuar.
 El lanzador [run_cef_adapter_tests.cmake](browser/run_cef_adapter_tests.cmake)
-crea un perfil exclusivo bajo `cef-adapter/<configuración>/test-profiles/` y lo
+crea un perfil exclusivo bajo `<carpeta de compilación>/p/run-<identificador>` y lo
 entrega mediante la variable de entorno `SBP_CEF_ADAPTER_TEST_PROFILE`.
+La ruta corta deja espacio para los subdirectorios internos de Cache Storage
+en Windows. Cada ejecución conserva un identificador aleatorio independiente
+de la configuración; el perfil de la aplicación no se utiliza.
 Espera a la salida completa del proceso antes de limpiar, comprueba el destino
 y reintenta brevemente si Windows mantiene algún archivo bloqueado.
 Los fallos conservan el perfil y sus diagnósticos; una batería sin casos también
@@ -497,7 +503,61 @@ los 242 archivos de cada inventario, se detectó la ventana hija CEF, se solicit
 el cierre normal y ambos procesos terminaron con código 0. Esta regresión acredita
 el runtime y el ciclo de vida de la aplicación; la aplicación de las reglas al
 historial corresponde a los cuatro casos CEF descritos anteriormente.
-Las redirecciones, subframes, Adelante/Recargar y service workers siguen pendientes.
+Las redirecciones, subframes y Adelante/Recargar siguen pendientes. La validación
+del bloque de service workers se describe a continuación.
+
+### Navegación servida por un service worker tras actualizar la política
+
+Se han preparado dos casos en
+[service_worker_policy_change_test.cpp](browser/service_worker_policy_change_test.cpp).
+Cada caso utiliza el servidor local con un puerto asignado por el sistema y
+`http://localhost`, admitido como origen potencialmente confiable por la
+[especificación de contextos seguros](https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy).
+La resolución de `localhost` se fija en `127.0.0.1` únicamente en el ejecutable
+de pruebas; no se añaden excepciones de certificados ni opciones para considerar
+seguros otros orígenes HTTP.
+
+La página `/sw-start` registra `/sw-worker.js` y espera a que controle el
+documento. Durante la instalación, el worker guarda `/sw-target` en Cache Storage.
+Los tres recursos responden con `Cache-Control: no-store` para separar este
+escenario de la caché HTTP. Al atender una navegación al destino, el worker
+recupera esa entrada y transforma su título con una marca que el servidor
+no entrega directamente.
+
+[ServiceWorkerPolicyTestClient](browser/service_worker_policy_test_client.h)
+publica después otra política en el mismo contexto y solicita la navegación.
+El control mantiene permitido `localhost` y exige callback real, HTTP 200,
+documento controlado por el worker y la marca de la respuesta de Cache Storage.
+El segundo caso añade `localhost` a la denylist y exige callback de bloqueo y
+ausencia del documento de destino. El cliente devuelve la decisión real del
+handler, sin imponer el resultado esperado.
+
+Ambos casos esperan una sola petición HTTP a `/sw-target`: la que prepara la
+caché durante la instalación. Ese recuento se combina con las comprobaciones
+del documento y del callback; por sí solo no distingue un permiso desde caché
+de un bloqueo correcto. Antes del cierre normal se retiran el registro del
+worker y la caché creada para el caso, y se comprueba que la limpieza termine.
+Los errores conservan el perfil mediante el lanzador habitual.
+
+El XML añade propiedades de preparación del worker, publicación de política,
+callback, bloqueo, carga, procedencia de Cache Storage, limpieza y recuento HTTP.
+La primera ejecución Debug superó los 60 casos anteriores y falló en los dos
+nuevos durante la preparación del worker. El log de CEF registra el error de
+Windows `0xCE` al crear `Service Worker/CacheStorage/.../index-dir`: la ruta
+tenía 251 caracteres. La instalación no terminó y ambos casos agotaron el
+plazo de preparación, antes de publicar la segunda política.
+
+El lanzador utiliza ahora la raíz corta `<carpeta de compilación>/p`, recibida
+desde CTest. Conserva la exclusividad por ejecución, los diagnósticos tras un
+fallo y la comprobación de propiedad antes de limpiar tras una salida correcta.
+El 13 de noviembre de 2026 se superaron los 62 casos en Debug y Release,
+con cero fallos y cero errores en ambos XML. En las dos configuraciones, el
+control permitido registra callback real y documento servido desde Cache
+Storage; el caso bloqueado registra callback de bloqueo y ausencia de carga
+del destino tras publicar la nueva política. Ambos casos confirman una única
+petición HTTP al destino, la preparación inicial, y la retirada del registro
+y la caché antes del cierre. El cambio de ruta permite completar la instalación
+sin modificar los permisos de navegación ni las comprobaciones de la caché.
 
 ## Comprobaciones automáticas de Desktop Foundation
 

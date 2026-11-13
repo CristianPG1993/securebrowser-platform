@@ -11,8 +11,12 @@ if(NOT SBP_CEF_TEST_FILENAME STREQUAL "sbp_cef_adapter_tests.exe")
 endif()
 cmake_path(GET SBP_CEF_TEST_EXECUTABLE PARENT_PATH SBP_CEF_TEST_RUNTIME)
 
-# Conserva los perfiles dentro de la salida de pruebas, separados de la aplicación.
-set(SBP_CEF_TEST_ROOT "${SBP_CEF_TEST_RUNTIME}/test-profiles")
+# CMake entrega una raíz corta dentro de la compilación: Cache Storage añade varios
+# niveles y puede superar los límites de las rutas de Windows bajo el runtime.
+if(NOT DEFINED SBP_CEF_TEST_PROFILE_ROOT OR NOT IS_ABSOLUTE "${SBP_CEF_TEST_PROFILE_ROOT}")
+    message(FATAL_ERROR "CEF adapter tests require an absolute isolated profile root from CTest.")
+endif()
+set(SBP_CEF_TEST_ROOT "${SBP_CEF_TEST_PROFILE_ROOT}")
 file(MAKE_DIRECTORY "${SBP_CEF_TEST_ROOT}")
 file(REAL_PATH "${SBP_CEF_TEST_ROOT}" SBP_CEF_TEST_ROOT)
 string(RANDOM LENGTH 32 ALPHABET 0123456789abcdef SBP_CEF_TEST_ID)

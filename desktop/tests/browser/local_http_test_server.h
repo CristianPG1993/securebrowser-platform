@@ -46,6 +46,10 @@ private:
     // Un timeout impide continuar con el apagado de CEF mientras queden recursos sin confirmar.
     [[noreturn]] static void AbortLifecycle(const char* message);
 
+    // Sirve únicamente las páginas y el script del escenario de service worker, sin caché HTTP.
+    [[nodiscard]] static bool SendServiceWorkerFixture(
+        CefRefPtr<CefServer> server, int connectionId, const std::string& path);
+
     bool startRequested_ = false;
     std::promise<bool> created_;
     std::promise<void> destroyed_;

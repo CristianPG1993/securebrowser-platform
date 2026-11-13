@@ -14,7 +14,8 @@ void CefAdapterTestApp::OnBeforeCommandLineProcessing(
     // La cobertura del historial debe utilizar la misma protección que la aplicación.
     BrowserSecurityConfig::Apply(commandLine);
     // El navegador conserva el dominio en la URL; solo su conexión se dirige al loopback.
-    commandLine->AppendSwitchWithValue("host-resolver-rules", "MAP *.sbp.test 127.0.0.1");
+    commandLine->AppendSwitchWithValue(
+        "host-resolver-rules", "MAP *.sbp.test 127.0.0.1, MAP localhost 127.0.0.1");
     // El proxy del equipo no debe recibir ni resolver los dominios de este ejecutable de pruebas.
     commandLine->AppendSwitch("no-proxy-server");
 }
