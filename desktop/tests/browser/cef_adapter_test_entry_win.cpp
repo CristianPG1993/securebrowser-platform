@@ -1,4 +1,4 @@
-#include "include/cef_app.h"
+#include "cef_adapter_test_app.h"
 #include "include/cef_sandbox_win.h"
 
 #include <gtest/gtest.h>
@@ -18,7 +18,8 @@ CEF_BOOTSTRAP_EXPORT int RunConsoleMain(int argc,
                                       void* sandbox_info,
                                       cef_version_info_t* /*version_info*/) {
     const CefMainArgs main_args(reinterpret_cast<HINSTANCE>(&__ImageBase));
-    const int subprocess_exit_code = CefExecuteProcess(main_args, nullptr, sandbox_info);
+    CefRefPtr<sbp::CefAdapterTestApp> app = new sbp::CefAdapterTestApp();
+    const int subprocess_exit_code = CefExecuteProcess(main_args, app, sandbox_info);
     if (subprocess_exit_code >= 0) {
         return subprocess_exit_code;
     }
@@ -61,7 +62,7 @@ CEF_BOOTSTRAP_EXPORT int RunConsoleMain(int argc,
     settings.multi_threaded_message_loop = true;
     CefString(&settings.root_cache_path) = profile.wstring();
     CefString(&settings.log_file) = (profile / "cef.log").wstring();
-    if (!CefInitialize(main_args, settings, nullptr, sandbox_info)) {
+    if (!CefInitialize(main_args, settings, app, sandbox_info)) {
         const int initialization_exit_code = CefGetExitCode();
         std::fputs("CEF adapter test initialization failed; temporary diagnostics retained.\n", stderr);
         // Una salida anticipada sin ejecutar las pruebas tampoco acredita un resultado correcto.
