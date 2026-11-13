@@ -300,9 +300,10 @@ y quince casos de [local_http_test_server_test.cpp](browser/local_http_test_serv
 y cuatro de [history_policy_change_test.cpp](browser/history_policy_change_test.cpp)
 y dos de [service_worker_policy_change_test.cpp](browser/service_worker_policy_change_test.cpp)
 y quince de [redirect_navigation_test.cpp](browser/redirect_navigation_test.cpp)
+y dieciocho de [subframe_navigation_test.cpp](browser/subframe_navigation_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
-informa de los 77 casos, validados en Debug y Release tras incorporar las cadenas
-HTTP. La batería incluye el bloque de service worker y la ruta corta del perfil aislado.
+informa de los 95 casos, validados en Debug y Release, incluidos los subframes,
+las cadenas HTTP, el service worker y la ruta corta del perfil aislado.
 El XML se conserva en
 `desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
@@ -620,6 +621,57 @@ confirma la retirada del perfil tras terminar el proceso.
 Estos casos tampoco acreditan redirecciones de subframes, HTTPS, formularios POST
 ni cambios de política durante una cadena. La aceptación del alcance restante
 de redirecciones permanece pendiente.
+
+### Navegación de subframes
+
+Se han preparado 18 casos en
+[subframe_navigation_test.cpp](browser/subframe_navigation_test.cpp): cuatro
+navegaciones HTTP directas con permisos y bloqueos en denylist y allowlist,
+diez cadenas de dos redirecciones para `301`, `302`, `303`, `307` y `308`, y
+cuatro controles de `about:blank` y `about:srcdoc` con ambos modos.
+
+El servidor entrega `/frame-parent` en `parent.sbp.test`. Tras completar esa
+carga con HTTP 200, el cliente crea un iframe llamado `security-child` mediante
+JavaScript. Su URL se somete al handler de producción utilizando el frame real
+recibido de CEF; no se fuerza el resultado esperado desde la prueba. Los casos
+web exigen un callback real para el destino del hijo. El documento principal
+debe seguir cargado y conservar su dirección al cerrar el caso.
+
+Las navegaciones directas usan `/frame-child` en `child.sbp.test`. Las cadenas
+utilizan las mismas rutas controladas del bloque anterior, dentro del iframe.
+Los permisos deben cargar el contenido esperado del documento hijo; este
+comunica el resultado mediante `postMessage`, y el padre solo acepta mensajes
+procedentes de la ventana del iframe creado. Los bloqueos exigen ausencia de
+carga y cero peticiones al documento denegado. En las cadenas se exige además
+una petición a cada uno de los dos pasos previos y dos callbacks de redirección.
+
+Los controles internos comprueban el evento DOM de carga, la dirección y el
+contenido del iframe. Si Chromium omite `OnBeforeBrowse`, se consulta la excepción
+interna mediante una llamada directa al handler en el hilo UI, con el navegador
+y el frame reales. El XML distingue `child_callback_observed`,
+`internal_handler_checked_directly` y `child_load_end_observed`; una llamada
+directa no se presenta como callback de CEF ni como prueba de cancelación.
+Los documentos internos no deben producir peticiones HTTP de contenido hijo.
+
+El XML conserva también la traza UI de hosts, el estado del padre, el bloqueo,
+la verificación del documento hijo y los recuentos de peticiones. Las respuestas
+locales de este bloque usan `Cache-Control: no-store`.
+
+El 13 de noviembre de 2026 se superaron los 95 casos en Debug y Release, con
+cero fallos y cero errores en ambos XML. Los 18 casos nuevos conservan la
+dirección del padre. Los permisos HTTP verifican el contenido hijo y una petición
+al destino; los bloqueos directos y tras cada código de redirección registran
+callback real, ausencia de carga y cero peticiones al documento denegado.
+
+Los cuatro casos internos de cada configuración cargan y verifican el documento
+sin peticiones HTTP de contenido hijo. En estas ejecuciones CEF no emitió
+`OnBeforeBrowse` para esos documentos: el XML registra
+`child_callback_observed=0` e `internal_handler_checked_directly=1`. La evidencia
+acredita la carga y el permiso de la excepción mediante la llamada directa,
+no un callback de navegación emitido por CEF. No se han ampliado las excepciones
+de protocolos ni modificado el handler de producción. Permanecen pendientes,
+entre otros recorridos, HTTPS, formularios POST y cambios de política durante
+una cadena de redirecciones.
 
 ## Comprobaciones automáticas de Desktop Foundation
 

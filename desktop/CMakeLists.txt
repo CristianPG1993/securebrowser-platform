@@ -313,6 +313,9 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/redirect_navigation_test_client.h
         tests/browser/redirect_navigation_test_client.cpp
         tests/browser/redirect_navigation_test.cpp
+        tests/browser/subframe_navigation_test_client.h
+        tests/browser/subframe_navigation_test_client.cpp
+        tests/browser/subframe_navigation_test.cpp
         src/browser/browser_security_config.h
         src/browser/browser_security_config.cpp
         src/browser/browser_client.h

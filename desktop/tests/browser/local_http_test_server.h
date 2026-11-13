@@ -54,6 +54,10 @@ private:
     [[nodiscard]] static bool SendRedirectFixture(
         CefRefPtr<CefServer> server, int connectionId, const std::string& path);
 
+    // Documentos independientes para la página principal y su iframe.
+    [[nodiscard]] static bool SendSubframeFixture(
+        CefRefPtr<CefServer> server, int connectionId, const std::string& path);
+
     bool startRequested_ = false;
     std::promise<bool> created_;
     std::promise<void> destroyed_;
