@@ -293,11 +293,13 @@ ctest --test-dir desktop/build/cef-tests -C Release -R "^sbp_cef_adapter_tests$"
 CTest registra una batería llamada `sbp_cef_adapter_tests`, que ejecuta los
 24 casos parametrizados de [cef_url_adapter_test.cpp](browser/cef_url_adapter_test.cpp),
 dos casos de [security_request_handler_test.cpp](browser/security_request_handler_test.cpp)
+y dos de [browser_security_config_test.cpp](browser/browser_security_config_test.cpp)
 y tres casos de [browser_client_test.cpp](browser/browser_client_test.cpp),
 además de diez casos de [security_navigation_test.cpp](browser/security_navigation_test.cpp)
 y quince casos de [local_http_test_server_test.cpp](browser/local_http_test_server_test.cpp)
+y cuatro de [history_policy_change_test.cpp](browser/history_policy_change_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
-informa de los 54 casos. El XML se conserva en
+informa de los 60 casos. El XML se conserva en
 `desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
 
@@ -430,6 +432,72 @@ los 14 casos de dominios, con carga HTTP 200 y una petición para los permisos,
 y cero peticiones en la ruta del destino para los bloqueos. Este bloque no
 acredita todavía redirecciones, subframes ni los escenarios de historial, caché
 y service workers.
+
+### Historial tras un cambio de política
+
+Se han preparado cuatro casos para mantener el mismo navegador al cargar
+`first.sbp.test/history-first`, cargar `second.sbp.test/history-second`, publicar
+otra política e intentar volver a la primera página. Dos controles mantienen
+el permiso y dos añaden el primer dominio a la denylist. Cada pareja utiliza
+`CefBrowser::GoBack` o `history.back()` desde el documento de la segunda página.
+
+Las páginas de este escenario responden con `Cache-Control: public, max-age=600`.
+El cliente observa por separado el callback previo al retorno, el cambio real
+de dirección, el documento activo y el marcador `pageshow.persisted` de la página.
+El XML registra `back_callback_observed`, `restored_from_bfcache`,
+`first_page_returned`, `first_page_requests`, los estados de las cargas iniciales,
+`return_load_status`, `updated_policy_published` y `back_requested`. El marcador distingue una
+restauración BFCache de una nueva carga que pueda usar la caché HTTP.
+
+Los controles deben volver a la primera página sin otra petición al servidor;
+los casos bloqueados deben observar la decisión de bloqueo y no restaurar ese
+documento. El cliente devuelve la decisión del handler sin imponer el resultado
+esperado. Una restauración que omita el control debe hacer fallar la prueba,
+aunque el contador HTTP siga en una única petición.
+
+En la primera ejecución Debug de los 58 casos se superaron los 54 anteriores
+y fallaron los cuatro de historial en la comprobación de HTTP 200. El cliente
+aplicaba esa exigencia también al retorno desde caché. En la revisión fijada,
+[CEF emite OnLoadEnd con estado cero al restaurar desde BFCache](https://github.com/chromiumembedded/cef/blob/4fa4ab516dacf6c49fc7e6e70d2b7ebce29fa35f/libcef/browser/browser_contents_delegate.cc#L520).
+Se ha limitado la exigencia de HTTP 200 a las dos cargas iniciales y se registra
+por separado el estado del retorno, manteniendo las comprobaciones de bloqueo.
+
+En la segunda ejecución Debug se superaron 56 de los 58 casos. Los dos controles
+permitidos volvieron desde BFCache, con una petición inicial por página. Los dos
+casos bloqueados también restauraron A: el XML registra política nueva publicada,
+retorno solicitado, `back_callback_observed=0`, `restored_from_bfcache=1` y
+`first_page_returned=1`. Esta ejecución reproduce una navegación que eludía
+la política actual sin contactar de nuevo con el servidor.
+
+La corrección preparada utiliza [BrowserSecurityConfig](../src/browser/browser_security_config.h)
+para desactivar `BackForwardCache` antes de inicializar Chromium. `BrowserApp`
+y `CefAdapterTestApp` llaman a la misma implementación, conservando las otras
+entradas de `disable-features`. Chromium da prioridad a las desactivaciones
+cuando una función figura también en
+[enable-features](https://github.com/chromium/chromium/blob/156.0.8078.48/base/feature_list.h#L227).
+La caché HTTP permanece habilitada; se renuncia a la restauración instantánea
+del documento completo para que la vuelta vuelva a consultar la política.
+
+Los cuatro casos exigen ahora callback al volver y ausencia de restauración
+BFCache; los controles permitidos siguen exigiendo una sola petición a A para
+comprobar el uso de la caché HTTP. Dos casos adicionales comprueban la conservación
+de opciones y la aplicación repetida de la configuración de seguridad.
+
+El 13 de noviembre de 2026 se superaron los 60 casos en Debug y Release.
+En ambas configuraciones, los cuatro recorridos registran
+`back_callback_observed=1`, `restored_from_bfcache=0` y una sola petición a A.
+Los controles permitidos vuelven a mostrar A y los bloqueados registran
+`first_page_returned=0`. Esta evidencia verifica la corrección en el ejecutable
+CEF de pruebas, con la configuración compartida y la caché HTTP activa.
+
+También se completó la compilación de `SecureBrowser` en Debug y Release con
+esta configuración de arranque. El 13 de noviembre de 2026 se superaron además
+`check-runtime.ps1` y `check-startup.ps1` en ambas configuraciones: se encontraron
+los 242 archivos de cada inventario, se detectó la ventana hija CEF, se solicitó
+el cierre normal y ambos procesos terminaron con código 0. Esta regresión acredita
+el runtime y el ciclo de vida de la aplicación; la aplicación de las reglas al
+historial corresponde a los cuatro casos CEF descritos anteriormente.
+Las redirecciones, subframes, Adelante/Recargar y service workers siguen pendientes.
 
 ## Comprobaciones automáticas de Desktop Foundation
 

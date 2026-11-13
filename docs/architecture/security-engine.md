@@ -410,6 +410,27 @@ destino de navegación no garantiza impedir todas las solicitudes de red hacia
 él: una página permitida podría solicitar recursos a ese dominio mediante
 los mecanismos excluidos.
 
+### Historial y BFCache en CEF 156
+
+La integración de #117 ha reproducido una restauración del documento completo
+desde BFCache después de publicar una política que bloqueaba su dominio, sin
+recibir `OnBeforeBrowse`. El contador HTTP permanecía en una única petición,
+por lo que ese contador no acreditaba por sí solo la aplicación de la política.
+
+El arranque utilizará `BrowserSecurityConfig` para añadir `BackForwardCache` a
+`disable-features`, conservando las demás opciones de Chromium. Esta configuración
+se comparte entre `BrowserApp` y el ejecutable de pruebas. La decisión evita
+depender de avisos posteriores a la restauración para aplicar una cancelación
+que debe ocurrir antes de mostrar el destino bloqueado.
+
+Se conserva el historial y permanece habilitada la caché HTTP. El coste de esta
+medida es renunciar a la restauración instantánea del documento y su estado de
+ejecución mediante BFCache. Los retornos permitidos deberán completar una
+navegación normal, que pueda aprovechar la caché HTTP y consulte la política
+actual antes de continuar. Los bloqueados no deberán restaurar el documento.
+La evidencia y el estado de validación se recogen en el
+[registro de pruebas](../../desktop/tests/README.md#historial-tras-un-cambio-de-política).
+
 ## Esquemas admitidos en el MVP
 
 El MVP se limitará a navegación web HTTP/HTTPS y a las excepciones internas
