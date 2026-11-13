@@ -19,6 +19,7 @@ struct NavigationTestResult {
     bool handlerCheckedDirectly = false;
     bool cancelledBySecurity = false;
     bool documentLoaded = false;
+    int documentStatusCode = 0;
     bool browserClosed = false;
     std::string error;
 };

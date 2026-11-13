@@ -93,13 +93,14 @@ bool NavigationTestClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
 }
 
 void NavigationTestClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
-                                    CefRefPtr<CefFrame> frame, int /*httpStatusCode*/) {
+                                    CefRefPtr<CefFrame> frame, int httpStatusCode) {
     CEF_REQUIRE_UI_THREAD();
     if (!frame || !frame->IsMain()) {
         return;
     }
     if (frame->GetURL().ToString() == url_) {
         result_.documentLoaded = true;
+        result_.documentStatusCode = httpStatusCode;
         // Chromium puede cargar about:blank sin ejecutar el interceptor de OnBeforeBrowse.
         // Se comprueba el permiso mediante una llamada directa, con navegador y frame reales
         // en el hilo UI. No se registra como un callback emitido por CEF ni como bloqueo efectivo.

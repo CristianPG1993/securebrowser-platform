@@ -295,8 +295,9 @@ CTest registra una batería llamada `sbp_cef_adapter_tests`, que ejecuta los
 dos casos de [security_request_handler_test.cpp](browser/security_request_handler_test.cpp)
 y tres casos de [browser_client_test.cpp](browser/browser_client_test.cpp),
 además de diez casos de [security_navigation_test.cpp](browser/security_navigation_test.cpp)
+y un caso de [local_http_test_server_test.cpp](browser/local_http_test_server_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
-informa de los 39 casos. El XML se conserva en
+informa de los 40 casos previstos. El XML se conserva en
 `desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
 
@@ -380,6 +381,30 @@ Este resultado acredita los ocho callbacks web y las dos comprobaciones internas
 con el alcance descrito. Siguen pendientes las cargas HTTP permitidas con
 servidor controlado, las redirecciones, los subframes y los escenarios de
 historial, caché y service workers de #117.
+
+### Primera prueba con servidor HTTP local
+
+Se ha preparado [LocalHttpTestServer](browser/local_http_test_server.h), basado
+en `CefServer`, para escuchar únicamente en `127.0.0.1`. La
+[implementación fijada de CEF](https://github.com/chromiumembedded/cef/blob/4fa4ab516dacf6c49fc7e6e70d2b7ebce29fa35f/libcef/browser/server_impl.cc)
+permite solicitar el puerto cero y consultar después el puerto asignado mediante
+`GetAddress`. Cada instancia tiene su propio contador de peticiones por ruta,
+protegido para su consulta desde el hilo de GoogleTest. `/page` y `/blocked`
+responden con HTML local; las rutas desconocidas responden con 404.
+
+La primera prueba publica una política con URL Filtering desactivado para
+permitir la IP literal, navega a `/page` mediante CEF y exige el callback real,
+carga completada, estado HTTP 200 y una petición registrada en el servidor.
+`TearDown` solicita su cierre y espera `OnServerDestroyed` también cuando una
+aserción detiene el caso. Los plazos de arranque y cierre son de diez segundos;
+un timeout termina el proceso para conservar el diagnóstico y evitar seguir
+con un ciclo de vida sin confirmar.
+
+El 13 de noviembre de 2026 se superaron los 40 casos en Debug y Release.
+Los XML de ambas configuraciones registran cero fallos y cero errores e incluyen
+la carga HTTP local con estado 200 y una petición recibida.
+Las reglas con dominios, la ausencia de peticiones a destinos bloqueados y
+las redirecciones se comprobarán en el siguiente bloque.
 
 ## Comprobaciones automáticas de Desktop Foundation
 

@@ -298,6 +298,9 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/navigation_test_client.h
         tests/browser/navigation_test_client.cpp
         tests/browser/security_navigation_test.cpp
+        tests/browser/local_http_test_server.h
+        tests/browser/local_http_test_server.cpp
+        tests/browser/local_http_test_server_test.cpp
         src/browser/browser_client.h
         src/browser/browser_client.cpp
         src/browser/browser_history_visitor.h
