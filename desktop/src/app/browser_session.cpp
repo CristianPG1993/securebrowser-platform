@@ -2,12 +2,14 @@
 
 #include "app/browser_navigation.h"
 #include "app/browser_window_bridge.h"
+#include "browser/security_request_handler.h"
 #include "ui/browser_window.h"
 #include "ui/browser_window_ui.h"
 
 #include <QApplication>
 
 #include <cstdio>
+#include <memory>
 
 namespace sbp {
 
@@ -25,11 +27,17 @@ int BrowserSession::Run(QApplication& qt_app) {
         BrowserWindow window;
         // Paso 4.1: Creamos el coordinador de navegación que prepara y conecta sus callbacks.
         BrowserNavigation navigation;
+        // Paso 4.2: Compone el gestor local y su handler. REST/Auth publicará el contexto y la política.
+        // No se inventa una política de producción para suplir la adquisición todavía pendiente.
+        const auto policy_manager = std::make_shared<PolicyManager>();
+        CefRefPtr<SecurityRequestHandler> security_handler = new SecurityRequestHandler(policy_manager);
         // Paso 5: Preparamos los callbacks, creamos BrowserClient y conservamos una referencia administrada.
         // MakeCallbacks agrupa los avisos de navegación; MakeClientCallbacks añade creación y cierre.
         // El constructor guarda esas funciones: sus avisos se ejecutarán después; aún no creamos el navegador CEF.
-        CefRefPtr<BrowserClient> browser_client(new BrowserClient(lifecycle_.MakeClientCallbacks(
-            window, navigation.MakeCallbacks(window, window_ui_, lifecycle_.CloseRequested()))));
+        CefRefPtr<BrowserClient> browser_client(new BrowserClient(
+            lifecycle_.MakeClientCallbacks(
+                window, navigation.MakeCallbacks(window, window_ui_, lifecycle_.CloseRequested())),
+            security_handler));
 
         std::fputs("CEF browser client prepared.\n", stderr);
 
