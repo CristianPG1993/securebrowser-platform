@@ -5,6 +5,7 @@
 #include "include/cef_jsdialog_handler.h"
 #include "include/cef_life_span_handler.h"
 #include "include/cef_load_handler.h"
+#include "include/cef_request_handler.h"
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -41,8 +42,8 @@ class BrowserClient final : public CefClient,
                             public CefLoadHandler,
                             public CefJSDialogHandler {
 public:
-    // Conservamos los avisos juntos, sin añadir un argumento por cada nuevo evento.
-    explicit BrowserClient(BrowserClientCallbacks callbacks);
+    // Conserva los avisos y el handler de seguridad como dependencias separadas.
+    BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<CefRequestHandler> requestHandler);
 
     // Compartimos referencias al cliente, sin copiar el objeto ni su contador.
     BrowserClient(const BrowserClient&) = delete;
@@ -59,6 +60,9 @@ public:
 
     // CEF obtiene este mismo cliente como receptor de los avisos de diálogos JavaScript.
     CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override;
+
+    // CEF obtiene el handler de seguridad recibido al construir el cliente.
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override;
 
     // Recibe una copia de los parámetros preparados por Qt y solicita la creación asíncrona.
     // Este método y el estado del cliente pertenecen al hilo UI de CEF.
@@ -146,6 +150,9 @@ private:
 
     // Se fijan al construir el cliente; quien las proporciona controla la vida de sus capturas.
     const BrowserClientCallbacks callbacks_;
+
+    // Mantiene vivo el handler recibido; CEF obtendrá referencias al mismo objeto.
+    const CefRefPtr<CefRequestHandler> request_handler_;
 
     // Solo se lee o modifica en el hilo UI de CEF. -1 significa que no hay navegador registrado.
     // Guardamos un identificador, sin mantener una referencia circular navegador -> cliente -> navegador.

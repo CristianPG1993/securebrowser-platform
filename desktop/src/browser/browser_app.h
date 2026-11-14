@@ -18,6 +18,10 @@ public:
     BrowserApp(const BrowserApp&) = delete;
     BrowserApp& operator=(const BrowserApp&) = delete;
 
+    // Aplica las opciones de seguridad antes de inicializar Chromium en el proceso principal.
+    void OnBeforeCommandLineProcessing(const CefString& processType,
+                                       CefRefPtr<CefCommandLine> commandLine) override;
+
     // CEF solicita el receptor de avisos del proceso principal; este mismo objeto lo implementa.
     // La devolución crea una referencia administrada al objeto existente, sin construir otro.
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override;

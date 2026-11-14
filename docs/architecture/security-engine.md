@@ -410,6 +410,27 @@ destino de navegación no garantiza impedir todas las solicitudes de red hacia
 él: una página permitida podría solicitar recursos a ese dominio mediante
 los mecanismos excluidos.
 
+### Historial y BFCache en CEF 156
+
+La integración de #117 ha reproducido una restauración del documento completo
+desde BFCache después de publicar una política que bloqueaba su dominio, sin
+recibir `OnBeforeBrowse`. El contador HTTP permanecía en una única petición,
+por lo que ese contador no acreditaba por sí solo la aplicación de la política.
+
+El arranque utilizará `BrowserSecurityConfig` para añadir `BackForwardCache` a
+`disable-features`, conservando las demás opciones de Chromium. Esta configuración
+se comparte entre `BrowserApp` y el ejecutable de pruebas. La decisión evita
+depender de avisos posteriores a la restauración para aplicar una cancelación
+que debe ocurrir antes de mostrar el destino bloqueado.
+
+Se conserva el historial y permanece habilitada la caché HTTP. El coste de esta
+medida es renunciar a la restauración instantánea del documento y su estado de
+ejecución mediante BFCache. Los retornos permitidos deberán completar una
+navegación normal, que pueda aprovechar la caché HTTP y consulte la política
+actual antes de continuar. Los bloqueados no deberán restaurar el documento.
+La evidencia y el estado de validación se recogen en el
+[registro de pruebas](../../desktop/tests/README.md#historial-tras-un-cambio-de-política).
+
 ## Esquemas admitidos en el MVP
 
 El MVP se limitará a navegación web HTTP/HTTPS y a las excepciones internas
@@ -545,6 +566,28 @@ persistido o sincronizado.
 En GoogleTest se utilizará un receptor de prueba que capture los eventos para
 comprobar su contenido sin arrancar Qt, Chromium, SQLite ni el backend.
 Esta captura de prueba no acredita almacenamiento durable ni envío real.
+
+### Aviso de navegación aplicado en #117
+
+`SecurityRequestHandler` ofrece un receptor inyectado de `NavigationDecisionNotice`
+para el bloqueo que devuelve a CEF. El aviso conserva datos propios: correlación
+única durante el proceso, instante UTC, navegador y frame, contexto de origen,
+identidad de la política disponible, host interpretado y motivo controlado.
+No conserva URL completa, parámetros ni credenciales. Los callbacks IO de
+observación y los errores posteriores de carga no emiten otro aviso del mismo
+bloqueo. Los intentos distintos reciben correlaciones distintas, aunque compartan
+dirección, y el receptor no modifica el permiso ni la cancelación.
+
+La entrega ocurre en el hilo UI CEF; un consumidor asíncrono debe copiar los datos
+antes de encolarlos y el receptor no debe bloquear ese hilo. El rechazo o excepción
+se diagnostica y mantiene el bloqueo. La composición actual instala un receptor
+de diagnóstico; los consumidores visuales y la producción de `SecurityEvent`
+se conectarán en #120 y #121. El identificador local no sustituye el `eventUuid`
+durable ni acredita persistencia o sincronización. El 13 de noviembre de 2026 se
+superaron los 116 casos CEF de #117 en Debug y Release, incluidos el aviso y su
+correlación. Ese mismo día se recompiló la aplicación y se superaron los controles
+de runtime, arranque y cierre en ambas configuraciones, con código 0. La primera
+ejecución CI de esta ampliación permanece pendiente.
 
 ### Datos de `SecurityEvent` y contexto de origen
 

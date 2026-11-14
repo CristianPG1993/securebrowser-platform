@@ -10,12 +10,18 @@
 #include <windows.h>
 
 #include <cstdio>
+#include <stdexcept>
 #include <utility>
 
 namespace sbp {
 
-BrowserClient::BrowserClient(BrowserClientCallbacks callbacks)
-    : callbacks_(std::move(callbacks)) {}
+// Conserva las dependencias y rechaza un cliente que carezca de handler de seguridad.
+BrowserClient::BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<CefRequestHandler> requestHandler)
+    : callbacks_(std::move(callbacks)), request_handler_(std::move(requestHandler)) {
+    if (!request_handler_) {
+        throw std::invalid_argument("BrowserClient requires a request handler.");
+    }
+}
 
 BrowserClient::~BrowserClient() = default;
 
@@ -36,6 +42,11 @@ CefRefPtr<CefLoadHandler> BrowserClient::GetLoadHandler() {
 CefRefPtr<CefJSDialogHandler> BrowserClient::GetJSDialogHandler() {
     // Devolvemos una referencia al cliente existente, visto como manejador de diálogos.
     return this;
+}
+
+// Comparte con CEF el mismo handler, manteniéndolo vivo mediante su contador de referencias.
+CefRefPtr<CefRequestHandler> BrowserClient::GetRequestHandler() {
+    return request_handler_;
 }
 
 void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
