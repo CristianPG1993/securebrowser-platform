@@ -316,6 +316,9 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/subframe_navigation_test_client.h
         tests/browser/subframe_navigation_test_client.cpp
         tests/browser/subframe_navigation_test.cpp
+        tests/browser/navigation_action_test_client.h
+        tests/browser/navigation_action_test_client.cpp
+        tests/browser/navigation_action_test.cpp
         src/browser/browser_security_config.h
         src/browser/browser_security_config.cpp
         src/browser/browser_client.h

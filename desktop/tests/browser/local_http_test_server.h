@@ -7,6 +7,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <utility>
 
 namespace sbp {
 
@@ -25,6 +26,7 @@ public:
     // Copias protegidas para consultar desde GoogleTest lo publicado por el hilo servidor.
     [[nodiscard]] std::string Origin() const;
     [[nodiscard]] std::size_t RequestCount(const std::string& path) const;
+    [[nodiscard]] std::size_t RequestMethodCount(const std::string& path, const std::string& method) const;
 
     // CEF ejecuta todos estos callbacks en el hilo dedicado al servidor.
     void OnServerCreated(CefRefPtr<CefServer> server) override;
@@ -57,6 +59,8 @@ private:
     // Documentos independientes para la página principal y su iframe.
     [[nodiscard]] static bool SendSubframeFixture(
         CefRefPtr<CefServer> server, int connectionId, const std::string& path);
+    [[nodiscard]] static bool SendActionFixture(
+        CefRefPtr<CefServer> server, int connectionId, const std::string& path, const std::string& method);
 
     bool startRequested_ = false;
     std::promise<bool> created_;
@@ -67,6 +71,7 @@ private:
     CefRefPtr<CefServer> server_;
     std::string address_;
     std::map<std::string, std::size_t> requestCounts_;
+    std::map<std::pair<std::string, std::string>, std::size_t> requestMethodCounts_;
 
     IMPLEMENT_REFCOUNTING(LocalHttpTestServer);
 };

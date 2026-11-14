@@ -18,6 +18,7 @@ struct SubframeNavigationCase {
     bool blockChild;
     int redirectStatus;
     const char* internalUrl;
+    bool https = false;
 };
 
 class SubframeNavigationTest : public ::testing::TestWithParam<SubframeNavigationCase> {
@@ -57,7 +58,8 @@ TEST_P(SubframeNavigationTest, AppliesPolicyToChildWithoutReplacingParentDocumen
     const std::string parentUrl = "http://parent.sbp.test:" + port + "/frame-parent";
     const std::string prefix = "/redirect/" + std::to_string(testCase.redirectStatus);
     const std::string finalHost = redirect ? "target.sbp.test" : "child.sbp.test";
-    std::string childUrl = "http://child.sbp.test:" + port + "/frame-child";
+    std::string childUrl = std::string(testCase.https ? "https://" : "http://")
+        + "child.sbp.test:" + port + "/frame-child";
     std::string expectedChildUrl = childUrl;
     std::string marker = "SBP child fixture";
     if (redirect) {
@@ -175,6 +177,7 @@ INSTANTIATE_TEST_SUITE_P(
         SubframeNavigationCase{"DenylistBlocksChild", FilterMode::Denylist, true, 0, nullptr},
         SubframeNavigationCase{"AllowlistAllowsChild", FilterMode::Allowlist, false, 0, nullptr},
         SubframeNavigationCase{"AllowlistBlocksChild", FilterMode::Allowlist, true, 0, nullptr},
+        SubframeNavigationCase{"HttpsChildBlockedBeforeHttpRequest", FilterMode::Denylist, true, 0, nullptr, true},
         SubframeNavigationCase{"Redirect301Allowed", FilterMode::Denylist, false, 301, nullptr},
         SubframeNavigationCase{"Redirect301Blocked", FilterMode::Denylist, true, 301, nullptr},
         SubframeNavigationCase{"Redirect302Allowed", FilterMode::Denylist, false, 302, nullptr},

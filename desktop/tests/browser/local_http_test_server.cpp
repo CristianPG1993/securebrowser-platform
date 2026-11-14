@@ -62,6 +62,12 @@ std::size_t LocalHttpTestServer::RequestCount(const std::string& path) const {
     return found == requestCounts_.end() ? 0 : found->second;
 }
 
+std::size_t LocalHttpTestServer::RequestMethodCount(const std::string& path, const std::string& method) const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    const auto found = requestMethodCounts_.find({path, method});
+    return found == requestMethodCounts_.end() ? 0 : found->second;
+}
+
 void LocalHttpTestServer::OnServerCreated(CefRefPtr<CefServer> server) {
     const bool running = server->IsRunning();
     if (running) {
@@ -99,6 +105,10 @@ void LocalHttpTestServer::OnHttpRequest(CefRefPtr<CefServer> server, int connect
     {
         const std::lock_guard<std::mutex> lock(mutex_);
         ++requestCounts_[path];
+        ++requestMethodCounts_[{path, request->GetMethod().ToString()}];
+    }
+    if (SendActionFixture(server, connectionId, path, request->GetMethod().ToString())) {
+        return;
     }
     const bool historyPage = path == "/history-first" || path == "/history-second";
     if (request->GetMethod().ToString() == "GET"
@@ -137,6 +147,24 @@ void LocalHttpTestServer::OnHttpRequest(CefRefPtr<CefServer> server, int connect
     const char html[] = "<!doctype html><title>SBP local HTTP test</title>"
                         "<link rel='icon' href='data:,'><p>Local navigation completed.</p>";
     server->SendHttp200Response(connectionId, "text/html; charset=utf-8", html, sizeof(html) - 1);
+}
+
+bool LocalHttpTestServer::SendActionFixture(
+    CefRefPtr<CefServer> server, int connectionId, const std::string& path, const std::string& method) {
+    const bool parent = path == "/action-parent" && method == "GET";
+    const bool target = path == "/action-target" && (method == "GET" || method == "POST");
+    if (!parent && !target) {
+        return false;
+    }
+    const std::string html = parent
+        ? "<!doctype html><title>SBP action parent</title><link rel='icon' href='data:,'><p>Action source.</p>"
+        : "<!doctype html><title>SBP action target</title><link rel='icon' href='data:,'><p>Action completed.</p>";
+    const CefServer::HeaderMap headers{{"Cache-Control", "no-store"}};
+    server->SendHttpResponse(connectionId, 200, "text/html; charset=utf-8",
+                             static_cast<std::int64_t>(html.size()), headers);
+    server->SendRawData(connectionId, html.data(), html.size());
+    server->CloseConnection(connectionId);
+    return true;
 }
 
 bool LocalHttpTestServer::SendSubframeFixture(
