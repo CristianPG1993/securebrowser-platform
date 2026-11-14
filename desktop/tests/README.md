@@ -297,13 +297,14 @@ y dos de [browser_security_config_test.cpp](browser/browser_security_config_test
 y tres casos de [browser_client_test.cpp](browser/browser_client_test.cpp),
 además de diez casos de [security_navigation_test.cpp](browser/security_navigation_test.cpp)
 y quince casos de [local_http_test_server_test.cpp](browser/local_http_test_server_test.cpp)
-y cuatro de [history_policy_change_test.cpp](browser/history_policy_change_test.cpp)
+y ocho de [history_policy_change_test.cpp](browser/history_policy_change_test.cpp)
 y dos de [service_worker_policy_change_test.cpp](browser/service_worker_policy_change_test.cpp)
 y quince de [redirect_navigation_test.cpp](browser/redirect_navigation_test.cpp)
-y dieciocho de [subframe_navigation_test.cpp](browser/subframe_navigation_test.cpp)
+y diecinueve de [subframe_navigation_test.cpp](browser/subframe_navigation_test.cpp)
+y dieciséis de [navigation_action_test.cpp](browser/navigation_action_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
-informa de los 95 casos, validados en Debug y Release, incluidos los subframes,
-las cadenas HTTP, el service worker y la ruta corta del perfil aislado.
+informa de los 116 casos, validados en Debug y Release tras incorporar el aviso
+de decisión y el bloque representativo de cierre.
 El XML se conserva en
 `desktop/build/cef-tests/cef-adapter/<configuración>/cef-adapter-results.xml`.
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
@@ -618,9 +619,9 @@ cancelación antes de contactar con el dominio bloqueado. El último log CTest,
 correspondiente a Release, ya no contiene avisos `Invalid connection_id` y
 confirma la retirada del perfil tras terminar el proceso.
 
-Estos casos tampoco acreditan redirecciones de subframes, HTTPS, formularios POST
-ni cambios de política durante una cadena. La aceptación del alcance restante
-de redirecciones permanece pendiente.
+Este bloque comprueba cadenas GET del frame principal. Los subframes se describen
+en el apartado siguiente; no constituye una matriz exhaustiva de combinaciones
+POST, TLS o cambios de política entre saltos.
 
 ### Navegación de subframes
 
@@ -669,9 +670,70 @@ sin peticiones HTTP de contenido hijo. En estas ejecuciones CEF no emitió
 `child_callback_observed=0` e `internal_handler_checked_directly=1`. La evidencia
 acredita la carga y el permiso de la excepción mediante la llamada directa,
 no un callback de navegación emitido por CEF. No se han ampliado las excepciones
-de protocolos ni modificado el handler de producción. Permanecen pendientes,
-entre otros recorridos, HTTPS, formularios POST y cambios de política durante
-una cadena de redirecciones.
+de protocolos ni modificado entonces el handler de producción. Esa ejecución
+corresponde al bloque de 95 casos previo a la ampliación representativa de cierre.
+
+### Bloque representativo de cierre de #117
+
+La batería añade 16 casos de acciones reales: carga mediante `LoadURL` como la
+entrada CEF de la barra, clic de enlace, `location.assign`, formularios GET y POST,
+con permiso y bloqueo; rechazo HTTPS sin petición HTTP al destino; dos intentos distintos
+a la misma URL; fallos del receptor del aviso; y navegaciones `data:` y `blob:`.
+El servidor verifica el método real recibido en `/action-target`, sin depender
+del método expuesto por la representación de navegación del callback UI.
+Los bloqueos exigen ausencia de carga y cero peticiones al destino.
+
+Se reutiliza el cliente de historial para cuatro casos adicionales: Adelante y
+Recargar, cada uno con un control permitido y una política nueva que deniega el
+destino. Adelante prepara primero el historial A-B-A y después intenta volver a B.
+Recargar mantiene B como documento actual y comprueba si se permite una nueva
+carga; cancelar la recarga no implica retirar el documento ya visible. La
+inspección final exige terminar una nueva carga, evitando confundir la URL
+anterior con una recarga completada.
+
+Un caso adicional de subframe deniega una navegación HTTPS. Estas comprobaciones
+exigen cancelación, ausencia de carga y cero peticiones HTTP al destino, sin
+excepciones de certificados. No acreditan ausencia de conexiones TCP/TLS
+especulativas: la primera ejecución registró intentos de handshake fallidos al
+usar HTTPS contra el puerto del servidor HTTP de prueba. La interpretación y
+evaluación de HTTPS permitido se comprueban en el adaptador y el núcleo; esta
+batería no acredita una carga TLS permitida contra un servidor HTTPS local.
+
+`NavigationDecisionNotice` entrega una copia de cada bloqueo aplicado, con
+identificador de operación único durante el proceso, instante UTC en microsegundos,
+navegador, frame, contexto y política cuando existen, host interpretado y motivo.
+No contiene URL completa, parámetros, credenciales ni referencias CEF. El aviso
+se emite solo desde la cancelación de `OnBeforeBrowse`: las observaciones IO y
+`OnLoadError` no vuelven a publicarlo. Las pruebas de redirecciones y subframes
+exigen una única entrega por bloqueo; dos intentos distintos a la misma URL
+deben obtener identificadores distintos. Los permisos y las excepciones internas
+no producen avisos de bloqueo.
+
+La primera ejecución del bloque de cierre alcanzó el caso de intentos repetidos
+y agotó su espera. El log de Chromium indica que descartó la segunda navegación
+idéntica por su proximidad a la anterior. La prueba vuelve ahora a cargar la
+página permitida con una query propia y espera a su finalización antes de repetir
+exactamente el mismo destino bloqueado. El XML registra `source_loads` para
+comprobar los dos intentos separados; no se añaden esperas fijas ni se desactiva
+la protección de Chromium frente a navegaciones duplicadas. El 13 de noviembre
+de 2026 se superaron los 116 casos en Debug y Release, con cero fallos y cero
+errores en ambos XML. El caso corregido registra dos cargas de origen, dos
+callbacks de destino, dos bloqueos y dos avisos, con cero peticiones al destino.
+
+El receptor se ejecuta en UI CEF y debe ser breve. Su rechazo o excepción se
+diagnostica sin imprimir mensajes ajenos ni direcciones y mantiene la cancelación.
+La sesión instala un receptor provisional que registra únicamente identificador,
+motivo y tipo de frame. Los avisos visuales y el productor `SecurityEvent`, con
+su UUID persistente, pertenecen a #120 y #121; este aviso no acredita persistencia
+ni sincronización con el backend.
+
+Las pruebas de ausencia o caducidad de política comprueban también el motivo del
+aviso. La validación de los 116 casos incluye las ocho pruebas de historial,
+las 19 de subframes y las 16 de acciones. El 13 de noviembre de 2026 también
+se completó la compilación de `SecureBrowser` en Debug y Release con el nuevo
+receptor; `check-runtime.ps1` y `check-startup.ps1` terminaron con código 0 en
+ambas configuraciones. La validación local de este bloque queda completada.
+La primera validación de esta ampliación en Desktop CI permanece pendiente.
 
 ## Comprobaciones automáticas de Desktop Foundation
 

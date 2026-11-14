@@ -567,6 +567,28 @@ En GoogleTest se utilizará un receptor de prueba que capture los eventos para
 comprobar su contenido sin arrancar Qt, Chromium, SQLite ni el backend.
 Esta captura de prueba no acredita almacenamiento durable ni envío real.
 
+### Aviso de navegación aplicado en #117
+
+`SecurityRequestHandler` ofrece un receptor inyectado de `NavigationDecisionNotice`
+para el bloqueo que devuelve a CEF. El aviso conserva datos propios: correlación
+única durante el proceso, instante UTC, navegador y frame, contexto de origen,
+identidad de la política disponible, host interpretado y motivo controlado.
+No conserva URL completa, parámetros ni credenciales. Los callbacks IO de
+observación y los errores posteriores de carga no emiten otro aviso del mismo
+bloqueo. Los intentos distintos reciben correlaciones distintas, aunque compartan
+dirección, y el receptor no modifica el permiso ni la cancelación.
+
+La entrega ocurre en el hilo UI CEF; un consumidor asíncrono debe copiar los datos
+antes de encolarlos y el receptor no debe bloquear ese hilo. El rechazo o excepción
+se diagnostica y mantiene el bloqueo. La composición actual instala un receptor
+de diagnóstico; los consumidores visuales y la producción de `SecurityEvent`
+se conectarán en #120 y #121. El identificador local no sustituye el `eventUuid`
+durable ni acredita persistencia o sincronización. El 13 de noviembre de 2026 se
+superaron los 116 casos CEF de #117 en Debug y Release, incluidos el aviso y su
+correlación. Ese mismo día se recompiló la aplicación y se superaron los controles
+de runtime, arranque y cierre en ambas configuraciones, con código 0. La primera
+ejecución CI de esta ampliación permanece pendiente.
+
 ### Datos de `SecurityEvent` y contexto de origen
 
 El evento conservará los cuatro datos compatibles con el contrato del backend:
