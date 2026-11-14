@@ -293,6 +293,7 @@ if(SBP_BUILD_CEF_TESTS)
     add_library(sbp_cef_adapter_tests SHARED
         tests/browser/browser_client_test.cpp
         tests/browser/browser_security_config_test.cpp
+        tests/browser/startup_options_test.cpp
         tests/browser/cef_adapter_test_app.h
         tests/browser/cef_adapter_test_app.cpp
         tests/browser/cef_adapter_test_entry_win.cpp
@@ -319,6 +320,8 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/navigation_action_test_client.h
         tests/browser/navigation_action_test_client.cpp
         tests/browser/navigation_action_test.cpp
+        src/app/startup_options.h
+        src/app/startup_options.cpp
         src/browser/browser_security_config.h
         src/browser/browser_security_config.cpp
         src/browser/browser_client.h
@@ -383,6 +386,8 @@ endif()
 # Nuestra DLL implementa la entrada que invoca el bootstrap.
 add_library(SecureBrowser SHARED
     src/app/app_entry_win.cpp
+    src/app/startup_options.h
+    src/app/startup_options.cpp
     src/app/browser_session.cpp
     src/app/browser_session.h
     src/app/browser_navigation.cpp
