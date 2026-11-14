@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/browser_lifecycle.h"
+#include "app/startup_options.h"
 
 class QApplication;
 
@@ -14,7 +15,8 @@ struct NavigationDecisionNotice;
 // El receptor estático OnNavigationDecision se ejecuta en el hilo UI de CEF.
 class BrowserSession final {
 public:
-    BrowserSession() = default;
+    // Conserva una copia de las opciones validadas; recibirlas no carga ninguna política.
+    explicit BrowserSession(const StartupOptions& startup_options);
     BrowserSession(const BrowserSession&) = delete;
     BrowserSession& operator=(const BrowserSession&) = delete;
 
@@ -28,6 +30,9 @@ public:
 private:
     // Receptor provisional observable; UI y productor de eventos se conectarán en sus tareas propias.
     static bool OnNavigationDecision(const NavigationDecisionNotice& notice);
+
+    // La composición utilizará estas opciones; el modo queda fijado durante toda la sesión.
+    const StartupOptions startup_options_;
 
     // Vive hasta después de CefShutdown; los callbacks consultan su estado desde Qt.
     BrowserLifecycle lifecycle_;

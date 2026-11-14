@@ -13,6 +13,9 @@
 
 namespace sbp {
 
+BrowserSession::BrowserSession(const StartupOptions& startup_options)
+    : startup_options_(startup_options) {}
+
 void BrowserSession::OnContextInitialized() {
     lifecycle_.OnContextInitialized();
 }
