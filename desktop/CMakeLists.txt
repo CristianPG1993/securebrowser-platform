@@ -167,6 +167,7 @@ if(BUILD_TESTING)
 
     # GoogleTest proporciona main(); nuestras pruebas enlazan únicamente el núcleo y gtest.
     add_executable(sbp_security_tests
+        tests/demo/demo_policy_source_test.cpp
         tests/security/download_control_config_test.cpp
         tests/security/policy_manager_test.cpp
         tests/security/policy_snapshot_test.cpp
@@ -175,6 +176,8 @@ if(BUILD_TESTING)
         tests/security/url_filter_test.cpp
         tests/security/url_filtering_config_test.cpp
         tests/security/url_target_test.cpp
+        src/demo/demo_policy_source.h
+        src/demo/demo_policy_source.cpp
     )
     target_link_libraries(sbp_security_tests PRIVATE sbp_security_core GTest::gtest_main)
     sbp_deploy_icu(sbp_security_tests)
@@ -409,6 +412,8 @@ add_library(SecureBrowser SHARED
     src/browser/security_request_handler.cpp
     src/browser/security_request_handler.h
     src/browser/navigation_decision_notice.h
+    src/demo/demo_policy_source.h
+    src/demo/demo_policy_source.cpp
     src/diagnostics/diagnostics_log.cpp
     src/diagnostics/diagnostics_log.h
     src/ui/browser_host.cpp
