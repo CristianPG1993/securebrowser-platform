@@ -13,7 +13,8 @@ namespace sbp {
 struct HistoryPolicyChangeCase {
     const char* name;
     bool useJavaScript;
-    bool blockFirstPage;
+    bool blockTarget;
+    HistoryPolicyTestAction action = HistoryPolicyTestAction::Back;
 };
 
 class HistoryPolicyChangeTest : public ::testing::TestWithParam<HistoryPolicyChangeCase> {
@@ -42,7 +43,7 @@ void HistoryPolicyChangeTest::TearDown() {
     server_ = nullptr;
 }
 
-// Los controles permitidos prueban que Atrás funciona; el cambio de política debe impedir el retorno.
+// Los controles permitidos prueban la acción; el cambio de política debe impedir su nueva carga.
 TEST_P(HistoryPolicyChangeTest, RechecksPolicyWhenReturningToCachedPage) {
     const auto& testCase = GetParam();
     CefURLParts endpoint;
@@ -61,20 +62,23 @@ TEST_P(HistoryPolicyChangeTest, RechecksPolicyWhenReturningToCachedPage) {
     ASSERT_EQ(PolicyPublicationResult::Published, manager->PublishPolicy(*context, initialPolicy));
 
     CefRefPtr<HistoryPolicyTestClient> client = new HistoryPolicyTestClient(
-        manager, *context, firstUrl, secondUrl, testCase.useJavaScript, testCase.blockFirstPage);
+        manager, *context, firstUrl, secondUrl, testCase.useJavaScript, testCase.blockTarget, testCase.action);
     const auto result = client->Run();
     server_->Stop();
 
     // Las propiedades quedan en el XML para distinguir HTTP cache de una restauración BFCache.
-    RecordProperty("back_callback_observed", static_cast<int>(result.backCallbackObserved));
+    RecordProperty("back_callback_observed", static_cast<int>(result.actionCallbackObserved));
     RecordProperty("restored_from_bfcache", static_cast<int>(result.restoredFromBfcache));
-    RecordProperty("first_page_returned", static_cast<int>(result.firstPageReturned));
+    RecordProperty("first_page_returned", static_cast<int>(result.targetPageReturned));
     RecordProperty("first_page_requests", static_cast<int>(server_->RequestCount("/history-first")));
     RecordProperty("first_page_http_status", result.firstPageStatusCode);
     RecordProperty("second_page_http_status", result.secondPageStatusCode);
     RecordProperty("return_load_status", result.returnLoadStatus);
     RecordProperty("updated_policy_published", static_cast<int>(result.updatedPolicyPublished));
-    RecordProperty("back_requested", static_cast<int>(result.backRequested));
+    RecordProperty("back_requested", static_cast<int>(result.actionRequested));
+    RecordProperty("action", static_cast<int>(testCase.action));
+    RecordProperty("action_callback_observed", static_cast<int>(result.actionCallbackObserved));
+    RecordProperty("second_page_requests", static_cast<int>(server_->RequestCount("/history-second")));
     ASSERT_TRUE(result.error.empty()) << result.error;
     ASSERT_TRUE(result.browserCreated);
     ASSERT_TRUE(result.browserClosed);
@@ -83,17 +87,22 @@ TEST_P(HistoryPolicyChangeTest, RechecksPolicyWhenReturningToCachedPage) {
     EXPECT_EQ(200, result.firstPageStatusCode);
     EXPECT_EQ(200, result.secondPageStatusCode);
     ASSERT_TRUE(result.updatedPolicyPublished);
-    ASSERT_TRUE(result.backRequested);
-    EXPECT_EQ(testCase.blockFirstPage, result.backBlocked)
-        << "Back callback observed: " << result.backCallbackObserved
+    ASSERT_TRUE(result.actionRequested);
+    EXPECT_EQ(testCase.blockTarget, result.actionBlocked)
+        << "Back callback observed: " << result.actionCallbackObserved
         << "; restored from BFCache: " << result.restoredFromBfcache;
-    EXPECT_EQ(!testCase.blockFirstPage, result.firstPageReturned);
-    EXPECT_EQ(!testCase.blockFirstPage, result.restoredDocumentInspected);
+    EXPECT_EQ(!testCase.blockTarget, result.targetPageReturned);
+    EXPECT_EQ(!testCase.blockTarget, result.restoredDocumentInspected);
     EXPECT_EQ(1U, server_->RequestCount("/history-first"));
-    EXPECT_EQ(1U, server_->RequestCount("/history-second"));
+    if (testCase.action == HistoryPolicyTestAction::Reload && !testCase.blockTarget) {
+        // La recarga puede revalidar la caché HTTP; su política de red no define el permiso.
+        EXPECT_GE(server_->RequestCount("/history-second"), 1U);
+    } else {
+        EXPECT_EQ(1U, server_->RequestCount("/history-second"));
+    }
     // El arranque compartido desactiva BFCache: incluso un retorno permitido debe pasar
     // por el callback y puede aprovechar la caché HTTP sin restaurar el documento anterior.
-    EXPECT_TRUE(result.backCallbackObserved);
+    EXPECT_TRUE(result.actionCallbackObserved);
     EXPECT_FALSE(result.restoredFromBfcache);
 }
 
@@ -104,7 +113,11 @@ INSTANTIATE_TEST_SUITE_P(
         HistoryPolicyChangeCase{"CefBackStillAllowed", false, false},
         HistoryPolicyChangeCase{"JavaScriptBackStillAllowed", true, false},
         HistoryPolicyChangeCase{"CefBackNewlyBlocked", false, true},
-        HistoryPolicyChangeCase{"JavaScriptBackNewlyBlocked", true, true}),
+        HistoryPolicyChangeCase{"JavaScriptBackNewlyBlocked", true, true},
+        HistoryPolicyChangeCase{"CefForwardStillAllowed", false, false, HistoryPolicyTestAction::Forward},
+        HistoryPolicyChangeCase{"CefForwardNewlyBlocked", false, true, HistoryPolicyTestAction::Forward},
+        HistoryPolicyChangeCase{"CefReloadStillAllowed", false, false, HistoryPolicyTestAction::Reload},
+        HistoryPolicyChangeCase{"CefReloadNewlyBlocked", false, true, HistoryPolicyTestAction::Reload}),
     HistoryPolicyChangeTest::CaseName);
 
 }  // namespace sbp

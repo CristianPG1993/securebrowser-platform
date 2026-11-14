@@ -15,11 +15,12 @@ namespace sbp {
 
 HistoryPolicyTestClient::HistoryPolicyTestClient(
     std::shared_ptr<PolicyManager> manager, SecurityContext context,
-    std::string firstUrl, std::string secondUrl, bool useJavaScript, bool blockFirstPage)
+    std::string firstUrl, std::string secondUrl, bool useJavaScript, bool blockTarget,
+    HistoryPolicyTestAction action)
     : manager_(std::move(manager)), context_(std::move(context)),
       handler_(new SecurityRequestHandler(manager_)), firstUrl_(std::move(firstUrl)),
       secondUrl_(std::move(secondUrl)), useJavaScript_(useJavaScript),
-      blockFirstPage_(blockFirstPage) {}
+      blockTarget_(blockTarget), action_(action) {}
 
 HistoryPolicyTestResult HistoryPolicyTestClient::Run() {
     auto completion = completion_.get_future();
@@ -83,7 +84,8 @@ bool HistoryPolicyTestClient::OnBeforeBrowse(
     const std::string url = request->GetURL().ToString();
     const bool expected = (phase_ == Phase::FirstPage && url == firstUrl_)
         || (phase_ == Phase::SecondPage && url == secondUrl_)
-        || (phase_ == Phase::Returning && url == firstUrl_);
+        || (phase_ == Phase::PreparingForward && url == firstUrl_)
+        || (phase_ == Phase::Returning && url == TargetUrl());
     if (!expected) {
         result_.error = "Unexpected navigation in history test.";
         RequestClose(browser);
@@ -91,8 +93,8 @@ bool HistoryPolicyTestClient::OnBeforeBrowse(
     }
     const bool cancel = handler_->OnBeforeBrowse(browser, frame, request, userGesture, isRedirect);
     if (phase_ == Phase::Returning) {
-        result_.backCallbackObserved = true;
-        result_.backBlocked = cancel;
+        result_.actionCallbackObserved = true;
+        result_.actionBlocked = cancel;
     } else if (cancel) {
         result_.error = "An initially permitted history test page was blocked.";
     }
@@ -110,10 +112,14 @@ void HistoryPolicyTestClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
         return;
     }
     const std::string url = frame->GetURL().ToString();
-    if (phase_ == Phase::Returning && url == firstUrl_) {
+    if (phase_ == Phase::Returning && url == TargetUrl()) {
         // CEF 156 emite OnLoadEnd(..., 0) para BFCache. El retorno se comprueba mediante
         // la dirección y el documento activo, sin confundirlo con una nueva respuesta HTTP.
         result_.returnLoadStatus = httpStatusCode;
+        return;
+    }
+    if (phase_ == Phase::PreparingForward && url == firstUrl_) {
+        forwardPrepared_ = true;
         return;
     }
     if (phase_ != Phase::FirstPage && phase_ != Phase::SecondPage) {
@@ -162,21 +168,31 @@ void HistoryPolicyTestClient::OnLoadingStateChange(
             result_.error = "Could not post the second history navigation.";
             RequestClose(browser);
         }
-    } else if (phase_ == Phase::SecondPage && result_.secondPageLoaded && url == secondUrl_) {
+    } else if (phase_ == Phase::SecondPage && result_.secondPageLoaded && url == secondUrl_
+               && action_ == HistoryPolicyTestAction::Forward) {
+        phase_ = Phase::PreparingForward;
+        if (!CefPostTask(TID_UI, base::BindOnce(&HistoryPolicyTestClient::PrepareForward,
+                                              CefRefPtr<HistoryPolicyTestClient>(this), browser))) {
+            result_.error = "Could not prepare forward history navigation.";
+            RequestClose(browser);
+        }
+    } else if ((phase_ == Phase::SecondPage && result_.secondPageLoaded && url == secondUrl_)
+               || (phase_ == Phase::PreparingForward && forwardPrepared_ && url == firstUrl_)) {
         phase_ = Phase::UpdatingPolicy;
-        if (!CefPostTask(TID_UI, base::BindOnce(&HistoryPolicyTestClient::UpdatePolicyAndGoBack,
+        if (!CefPostTask(TID_UI, base::BindOnce(&HistoryPolicyTestClient::UpdatePolicyAndNavigate,
                                               CefRefPtr<HistoryPolicyTestClient>(this), browser))) {
             result_.error = "Could not post policy update and back navigation.";
             RequestClose(browser);
         }
-    } else if (phase_ == Phase::Returning && url == firstUrl_ && !inspectionRequested_) {
-        result_.firstPageReturned = true;
+    } else if (phase_ == Phase::Returning && result_.returnLoadStatus >= 0
+               && url == TargetUrl() && !inspectionRequested_) {
+        result_.targetPageReturned = true;
         inspectionRequested_ = true;
         // La consulta se ejecuta en el documento activo. pageshow.persisted lo rellena la página,
         // no el cliente; un prefijo propio permite ignorar los avisos de título ordinarios.
         frame->ExecuteJavaScript(
             "document.title='SBP history probe/'"
-            "+(window.sbpHistoryRestored?'bfcache':'normal');", firstUrl_, 0);
+            "+(window.sbpHistoryRestored?'bfcache':'normal');", TargetUrl(), 0);
     }
 }
 
@@ -185,21 +201,22 @@ void HistoryPolicyTestClient::LoadSecondPage(CefRefPtr<CefBrowser> browser) {
     browser->GetMainFrame()->LoadURL(secondUrl_);
 }
 
-void HistoryPolicyTestClient::UpdatePolicyAndGoBack(CefRefPtr<CefBrowser> browser) {
+void HistoryPolicyTestClient::UpdatePolicyAndNavigate(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
-    if (!browser->CanGoBack()) {
-        result_.error = "The browser did not retain the first history entry.";
+    if ((action_ == HistoryPolicyTestAction::Back && !browser->CanGoBack())
+        || (action_ == HistoryPolicyTestAction::Forward && !browser->CanGoForward())) {
+        result_.error = "The browser did not retain the required history entry.";
         RequestClose(browser);
         return;
     }
     CefURLParts parts;
-    if (!CefParseURL(firstUrl_, parts)) {
+    if (!CefParseURL(TargetUrl(), parts)) {
         result_.error = "Could not parse the first history test URL.";
         RequestClose(browser);
         return;
     }
     std::vector<std::string> rules;
-    if (blockFirstPage_) {
+    if (blockTarget_) {
         rules.push_back(CefString(&parts.host).ToString());
     }
     const PolicySnapshot::Timestamp timestamp{};
@@ -215,20 +232,38 @@ void HistoryPolicyTestClient::UpdatePolicyAndGoBack(CefRefPtr<CefBrowser> browse
         return;
     }
     phase_ = Phase::Returning;
-    result_.backRequested = true;
-    if (useJavaScript_) {
+    result_.actionRequested = true;
+    if (action_ == HistoryPolicyTestAction::Forward) {
+        browser->GoForward();
+    } else if (action_ == HistoryPolicyTestAction::Reload) {
+        browser->Reload();
+    } else if (useJavaScript_) {
         browser->GetMainFrame()->ExecuteJavaScript("history.back();", secondUrl_, 0);
     } else {
         browser->GoBack();
     }
 }
 
+const std::string& HistoryPolicyTestClient::TargetUrl() const {
+    return action_ == HistoryPolicyTestAction::Back ? firstUrl_ : secondUrl_;
+}
+
+void HistoryPolicyTestClient::PrepareForward(CefRefPtr<CefBrowser> browser) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!browser->CanGoBack()) {
+        result_.error = "Could not return to A before testing Forward.";
+        RequestClose(browser);
+        return;
+    }
+    browser->GoBack();
+}
+
 void HistoryPolicyTestClient::OnAddressChange(CefRefPtr<CefBrowser> /*browser*/,
                                             CefRefPtr<CefFrame> frame, const CefString& url) {
     CEF_REQUIRE_UI_THREAD();
-    if (phase_ == Phase::Returning && frame && frame->IsMain() && url.ToString() == firstUrl_) {
+    if (phase_ == Phase::Returning && frame && frame->IsMain() && url.ToString() == TargetUrl()) {
         // Una dirección restaurada cuenta como retorno aunque no haya otra petición HTTP.
-        result_.firstPageReturned = true;
+        result_.targetPageReturned = true;
     }
 }
 

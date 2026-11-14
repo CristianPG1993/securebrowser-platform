@@ -13,6 +13,8 @@
 
 namespace sbp {
 
+enum class HistoryPolicyTestAction { Back, Forward, Reload };
+
 // Distingue carga inicial, cambio de política, decisión al volver y restauración efectiva.
 struct HistoryPolicyTestResult {
     bool browserCreated = false;
@@ -23,17 +25,17 @@ struct HistoryPolicyTestResult {
     // -1 indica que no se recibió OnLoadEnd al volver; BFCache notifica cero en CEF 156.
     int returnLoadStatus = -1;
     bool updatedPolicyPublished = false;
-    bool backRequested = false;
-    bool backCallbackObserved = false;
-    bool backBlocked = false;
-    bool firstPageReturned = false;
+    bool actionRequested = false;
+    bool actionCallbackObserved = false;
+    bool actionBlocked = false;
+    bool targetPageReturned = false;
     bool restoredFromBfcache = false;
     bool restoredDocumentInspected = false;
     bool browserClosed = false;
     std::string error;
 };
 
-// Mantiene el mismo navegador al cargar A, cargar B, actualizar la política e intentar volver a A.
+// Reutiliza el navegador para comprobar Atrás, Adelante y Recargar tras publicar otra política.
 class HistoryPolicyTestClient final : public CefClient,
                                       public CefLifeSpanHandler,
                                       public CefRequestHandler,
@@ -42,7 +44,8 @@ class HistoryPolicyTestClient final : public CefClient,
 public:
     HistoryPolicyTestClient(std::shared_ptr<PolicyManager> manager, SecurityContext context,
                             std::string firstUrl, std::string secondUrl,
-                            bool useJavaScript, bool blockFirstPage);
+                            bool useJavaScript, bool blockTarget,
+                            HistoryPolicyTestAction action = HistoryPolicyTestAction::Back);
     [[nodiscard]] HistoryPolicyTestResult Run();
 
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
@@ -68,12 +71,14 @@ public:
 private:
     ~HistoryPolicyTestClient() override = default;
 
-    enum class Phase { FirstPage, SecondPage, UpdatingPolicy, Returning, Closing, Finished };
+    enum class Phase { FirstPage, SecondPage, PreparingForward, UpdatingPolicy, Returning, Closing, Finished };
 
     // El estado de fases y los resultados se modifican exclusivamente en el hilo UI de CEF.
     void CreateBrowser();
     void LoadSecondPage(CefRefPtr<CefBrowser> browser);
-    void UpdatePolicyAndGoBack(CefRefPtr<CefBrowser> browser);
+    void PrepareForward(CefRefPtr<CefBrowser> browser);
+    void UpdatePolicyAndNavigate(CefRefPtr<CefBrowser> browser);
+    [[nodiscard]] const std::string& TargetUrl() const;
     void RequestClose(CefRefPtr<CefBrowser> browser);
     void CloseBrowser(CefRefPtr<CefBrowser> browser);
     void Complete();
@@ -84,7 +89,9 @@ private:
     const std::string firstUrl_;
     const std::string secondUrl_;
     const bool useJavaScript_;
-    const bool blockFirstPage_;
+    const bool blockTarget_;
+    const HistoryPolicyTestAction action_;
+    bool forwardPrepared_ = false;
     Phase phase_ = Phase::FirstPage;
     bool inspectionRequested_ = false;
     HistoryPolicyTestResult result_;
