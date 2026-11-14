@@ -7,9 +7,11 @@ class QApplication;
 namespace sbp {
 
 class BrowserWindowUi;
+struct NavigationDecisionNotice;
 
 // Coordina la ventana Qt y su navegador CEF; el arranque de Windows queda fuera.
-// Todos sus métodos y su estado pertenecen al hilo principal de Qt.
+// La coordinación y su estado pertenecen al hilo principal de Qt.
+// El receptor estático OnNavigationDecision se ejecuta en el hilo UI de CEF.
 class BrowserSession final {
 public:
     BrowserSession() = default;
@@ -24,6 +26,9 @@ public:
     int Run(QApplication& qt_app);
 
 private:
+    // Receptor provisional observable; UI y productor de eventos se conectarán en sus tareas propias.
+    static bool OnNavigationDecision(const NavigationDecisionNotice& notice);
+
     // Vive hasta después de CefShutdown; los callbacks consultan su estado desde Qt.
     BrowserLifecycle lifecycle_;
     // Referencia no propietaria a los controles; solo se consulta en Qt y se retira antes de destruirlos.

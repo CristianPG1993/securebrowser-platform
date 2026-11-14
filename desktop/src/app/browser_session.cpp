@@ -30,7 +30,8 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Paso 4.2: Compone el gestor local y su handler. REST/Auth publicará el contexto y la política.
         // No se inventa una política de producción para suplir la adquisición todavía pendiente.
         const auto policy_manager = std::make_shared<PolicyManager>();
-        CefRefPtr<SecurityRequestHandler> security_handler = new SecurityRequestHandler(policy_manager);
+        CefRefPtr<SecurityRequestHandler> security_handler = new SecurityRequestHandler(
+            policy_manager, &BrowserSession::OnNavigationDecision);
         // Paso 5: Preparamos los callbacks, creamos BrowserClient y conservamos una referencia administrada.
         // MakeCallbacks agrupa los avisos de navegación; MakeClientCallbacks añade creación y cierre.
         // El constructor guarda esas funciones: sus avisos se ejecutarán después; aún no creamos el navegador CEF.
@@ -77,6 +78,14 @@ int BrowserSession::Run(QApplication& qt_app) {
     std::fprintf(stderr, "Qt window destroyed; event loop exit code %d.\n", qt_exit_code);
     // Paso 18: Devolvemos el resultado al arranque, que después llamará a CefShutdown.
     return qt_exit_code;
+}
+
+bool BrowserSession::OnNavigationDecision(const NavigationDecisionNotice& notice) {
+    // El aviso pertenece a UI CEF. No accede a Qt ni afirma persistencia o entrega al backend.
+    std::fprintf(stderr, "CEF navigation blocked; operation_id: %llu; reason: %d; main_frame: %d.\n",
+                 static_cast<unsigned long long>(notice.operationId),
+                 static_cast<int>(notice.decision.Reason()), static_cast<int>(notice.mainFrame));
+    return true;
 }
 
 }  // namespace sbp

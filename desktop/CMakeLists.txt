@@ -325,6 +325,7 @@ if(SBP_BUILD_CEF_TESTS)
         src/browser/cef_url_adapter.h
         src/browser/cef_url_adapter.cpp
         src/browser/security_request_handler.h
+        src/browser/navigation_decision_notice.h
         src/browser/security_request_handler.cpp
     )
     target_include_directories(sbp_cef_adapter_tests PRIVATE
@@ -399,6 +400,7 @@ add_library(SecureBrowser SHARED
     src/browser/cef_url_adapter.h
     src/browser/security_request_handler.cpp
     src/browser/security_request_handler.h
+    src/browser/navigation_decision_notice.h
     src/diagnostics/diagnostics_log.cpp
     src/diagnostics/diagnostics_log.h
     src/ui/browser_host.cpp

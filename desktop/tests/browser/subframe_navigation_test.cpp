@@ -92,7 +92,13 @@ TEST_P(SubframeNavigationTest, AppliesPolicyToChildWithoutReplacingParentDocumen
         DownloadControlConfig(false, FilterMode::Denylist, {}), timestamp, timestamp);
     ASSERT_EQ(PolicyPublicationResult::Published, manager->PublishPolicy(*context, policy));
 
-    CefRefPtr<SecurityRequestHandler> handler = new SecurityRequestHandler(manager);
+    const auto notices = std::make_shared<std::vector<NavigationDecisionNotice>>();
+    // La copia se entrega en UI y se consulta tras la promesa de cierre del navegador.
+    CefRefPtr<SecurityRequestHandler> handler = new SecurityRequestHandler(manager,
+        [notices](const NavigationDecisionNotice& notice) {
+            notices->push_back(notice);
+            return true;
+        });
     CefRefPtr<SubframeNavigationTestClient> client = new SubframeNavigationTestClient(
         handler, parentUrl, childUrl, expectedChildUrl, marker);
     const auto result = client->Run();
@@ -106,6 +112,7 @@ TEST_P(SubframeNavigationTest, AppliesPolicyToChildWithoutReplacingParentDocumen
     RecordProperty("callback_trace", trace.str());
     RecordProperty("parent_loaded", static_cast<int>(result.parentLoaded));
     RecordProperty("parent_preserved", static_cast<int>(result.parentPreserved));
+    RecordProperty("notice_count", static_cast<int>(notices->size()));
     RecordProperty("child_callback_observed", static_cast<int>(result.childCallbackObserved));
     RecordProperty("internal_handler_checked_directly", static_cast<int>(result.internalHandlerCheckedDirectly));
     RecordProperty("child_blocked", static_cast<int>(result.childBlocked));
@@ -146,6 +153,18 @@ TEST_P(SubframeNavigationTest, AppliesPolicyToChildWithoutReplacingParentDocumen
     EXPECT_EQ(redirect ? 1U : 0U, server_->RequestCount(prefix + "/first"));
     EXPECT_EQ(redirect ? 1U : 0U, server_->RequestCount(prefix + "/second"));
     EXPECT_EQ(redirect && !testCase.blockChild ? 1U : 0U, server_->RequestCount("/redirect-target"));
+    ASSERT_EQ(testCase.blockChild ? 1U : 0U, notices->size());
+    if (testCase.blockChild) {
+        const auto& notice = notices->front();
+        EXPECT_FALSE(notice.mainFrame);
+        EXPECT_EQ(redirect, notice.redirect);
+        ASSERT_TRUE(notice.context.has_value());
+        EXPECT_EQ(*context, *notice.context);
+        EXPECT_EQ(finalHost, notice.host);
+        EXPECT_EQ(testCase.mode == FilterMode::Allowlist ? SecurityReason::DomainNotAllowed
+                                                       : SecurityReason::DomainDenied,
+                  notice.decision.Reason());
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(

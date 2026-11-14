@@ -68,7 +68,13 @@ TEST_P(RedirectNavigationTest, ChecksEachRedirectBeforeContactingItsDestination)
         DownloadControlConfig(false, FilterMode::Denylist, {}), timestamp, timestamp);
     ASSERT_EQ(PolicyPublicationResult::Published, manager->PublishPolicy(*context, policy));
 
-    CefRefPtr<SecurityRequestHandler> handler = new SecurityRequestHandler(manager);
+    const auto notices = std::make_shared<std::vector<NavigationDecisionNotice>>();
+    // Solo la cancelación UI entrega el aviso; la observación IO no vuelve a publicarlo.
+    CefRefPtr<SecurityRequestHandler> handler = new SecurityRequestHandler(manager,
+        [notices](const NavigationDecisionNotice& notice) {
+            notices->push_back(notice);
+            return true;
+        });
     CefRefPtr<RedirectNavigationTestClient> client = new RedirectNavigationTestClient(handler, port, status);
     const auto result = client->Run();
     server_->Stop();
@@ -86,6 +92,7 @@ TEST_P(RedirectNavigationTest, ChecksEachRedirectBeforeContactingItsDestination)
     RecordProperty("middle_blocked", static_cast<int>(result.middleBlocked));
     RecordProperty("target_blocked", static_cast<int>(result.targetBlocked));
     RecordProperty("target_loaded", static_cast<int>(result.targetLoaded));
+    RecordProperty("notice_count", static_cast<int>(notices->size()));
     const std::string prefix = "/redirect/" + std::to_string(status);
     RecordProperty("first_requests", static_cast<int>(server_->RequestCount(prefix + "/first")));
     RecordProperty("middle_requests", static_cast<int>(server_->RequestCount(prefix + "/second")));
@@ -107,6 +114,17 @@ TEST_P(RedirectNavigationTest, ChecksEachRedirectBeforeContactingItsDestination)
     EXPECT_EQ(1U, server_->RequestCount(prefix + "/first"));
     EXPECT_EQ(blockedAtMiddle ? 0U : 1U, server_->RequestCount(prefix + "/second"));
     EXPECT_EQ(allowed ? 1U : 0U, server_->RequestCount("/redirect-target"));
+    ASSERT_EQ(allowed ? 0U : 1U, notices->size());
+    if (!allowed) {
+        const auto& notice = notices->front();
+        EXPECT_GT(notice.operationId, 0U);
+        EXPECT_TRUE(notice.mainFrame);
+        EXPECT_TRUE(notice.redirect);
+        ASSERT_TRUE(notice.context.has_value());
+        EXPECT_EQ(*context, *notice.context);
+        EXPECT_EQ(blockedAtMiddle ? "middle.sbp.test" : "target.sbp.test", notice.host);
+        EXPECT_EQ(SecurityReason::DomainDenied, notice.decision.Reason());
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(
