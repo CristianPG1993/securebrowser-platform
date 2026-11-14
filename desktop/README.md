@@ -40,7 +40,7 @@ tabla. Las versiones de herramientas están recogidas en
 | Lenguaje | C++20. |
 | Windows SDK (Software Development Kit, kit de desarrollo de software) | Paquete `10.0.28000.2270`; identificador de instalación para CMake: `10.0.28000.0`. |
 | CMake de referencia | `3.29.2`. |
-| Extractor local | 7-Zip x64 en `%ProgramFiles%\7-Zip`; versión encontrada en la validación local: `26.06`. CI fija `26.05`. |
+| Extractor local | 7-Zip x64 en `%ProgramFiles%\7-Zip`; versión encontrada en la validación local y fijada en CI: `26.06`. |
 | Generador y arquitectura | `Visual Studio 17 2022`, `x64`, toolset `v143`. |
 | Qt | `6.12.0`, kit `msvc2022_64`, con Qt Widgets y bibliotecas Debug y Release. |
 | CEF | `156.0.14+g4fa4ab5+chromium-156.0.8078.48`, distribución Standard `windows64`. |
@@ -145,7 +145,7 @@ $sevenZipExecutable = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
 Si la ruta no existe, completar la instalación antes de continuar. El intento
 local encontró `26.06`. Esa instalación se puede utilizar con el script
 compartido; `desktop/ci/setup-cef.ps1` está reservado en esta guía al runner,
-donde comprueba exactamente la versión `26.05` fijada para CI.
+donde comprueba exactamente la versión `26.06` fijada para CI.
 
 Preparar CMake en la terminal donde se continuará trabajando:
 
@@ -225,8 +225,9 @@ if (-not $?) { throw 'La preparación de CEF ha fallado.' }
 
 Este script conserva la verificación de la descarga y del SDK. A diferencia
 del wrapper del runner, permite indicar la instalación local del extractor.
-No es necesario sustituir un 7-Zip local `26.06` por la referencia `26.05`
-de CI. Solo después de una preparación correcta, resolver la ruta del SDK:
+La referencia actual de CI también es `26.06`; el script compartido permite
+seleccionar explícitamente el extractor local. Solo después de una preparación
+correcta, resolver la ruta del SDK:
 
 ```powershell
 $cefManifest = Get-Content -LiteralPath 'desktop/cef-sdk.json' -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -629,7 +630,7 @@ distinguen esos casos de un retorno controlado de inicialización.
 | No se encuentra Python o falla aqtinstall | Seleccionar Python 3.10 o posterior con `-PythonExecutable`; comprobar Git y conectividad. Se usa la revisión de aqtinstall del manifiesto. |
 | Qt está incompleto o no coincide | Revisar el kit indicado por el diagnóstico: versión, arquitectura, ambas configuraciones, plugins e inventarios. No continuar con una preparación fallida. |
 | Falta 7-Zip | Instalarlo en la ubicación de requisitos y comprobar la versión antes de preparar CEF. |
-| El wrapper de CI rechaza un 7-Zip local distinto de 26.05 | Utilizar la ruta local documentada con `scripts/setup-cef.ps1 -ArchiveExtractor SevenZip -SevenZipExecutable ...`. Registrar la versión usada. |
+| El wrapper de CI rechaza un 7-Zip local distinto del manifiesto | Utilizar la ruta local documentada con `scripts/setup-cef.ps1 -ArchiveExtractor SevenZip -SevenZipExecutable ...`. Registrar la versión usada. |
 | La extracción tarda mucho con `tar.exe` | Utilizar la ruta principal con 7-Zip. No corresponde a compilar el motor CEF. |
 | CEF falla por tamaño, SHA-1, versión o arquitectura | Corregir o apartar la descarga/SDK que identifica el diagnóstico y repetir la preparación; se conservan los archivos existentes incorrectos. |
 | CMake no encuentra Qt o CEF | Recuperar `$qtKitDirectory` y `$cefRoot`; deben contener el kit y el SDK, respectivamente, no sus carpetas padre. |

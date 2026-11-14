@@ -5,7 +5,7 @@ El workflow [Desktop CI](../../.github/workflows/desktop.yml) cubre Desktop Foun
 y las pruebas del Security Engine de la
 [tarea #115](https://github.com/CristianPG1993/securebrowser-platform/issues/115).
 La ampliación de [#117](https://github.com/CristianPG1993/securebrowser-platform/issues/117)
-añade adaptador y navegación CEF reales; su primera ejecución CI permanece pendiente.
+añade adaptador y navegación CEF reales; su primera validación completa en CI permanece pendiente.
 Se ejecuta en PR hacia `main`, con los pushes a `main` y mediante ejecución
 manual. El job se llama `Desktop build and tests` y utiliza `windows-2022`.
 
@@ -57,6 +57,12 @@ y extrae el TAR resultante. Cada paso comprueba su código de salida; después s
 validan los archivos, la versión y la arquitectura del SDK antes de publicarlo
 en `.deps/cef`. El paso completo tiene un límite de diez minutos. El script
 compartido mantiene `tar` como opción predeterminada para las ejecuciones locales.
+
+El manifiesto exige 7-Zip `26.06`, presente en la imagen `windows-2022`
+`20261112.366.7` utilizada por la PR #130. La primera ejecución se detuvo antes
+de las pruebas porque la referencia anterior exigía `26.05`. La versión `26.06`
+ya se utilizó para preparar CEF en la validación local; se conserva la comprobación
+exacta de versión del wrapper y las verificaciones del SDK.
 
 ICU se prepara con el mismo script compartido que se utiliza localmente y
 un límite de cinco minutos. El SDK fijado es ICU4C `76.1`, Unicode `16.0`,

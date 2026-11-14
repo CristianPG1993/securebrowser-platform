@@ -6,7 +6,7 @@
   "toolset": "v143",
   "cmakeVersion": "3.29.2",
   "cmakeArchiveSha256": "86b5de51f60a0e9d62be4d8ca76ea467d154083d356fcc9af1409606be341cd8",
-  "sevenZipVersion": "26.05",
+  "sevenZipVersion": "26.06",
   "windowsSdk": {
     "packageVersion": "10.0.28000.2270",
     "targetVersion": "10.0.28000.0",
