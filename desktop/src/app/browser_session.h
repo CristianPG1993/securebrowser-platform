@@ -8,6 +8,7 @@ class QApplication;
 namespace sbp {
 
 class BrowserWindowUi;
+class PolicyManager;
 struct NavigationDecisionNotice;
 
 // Coordina la ventana Qt y su navegador CEF; el arranque de Windows queda fuera.
@@ -28,6 +29,9 @@ public:
     int Run(QApplication& qt_app);
 
 private:
+    // Solo el modo demo crea contexto y publica una política local; un fallo impide crear el navegador.
+    [[nodiscard]] bool PrepareDemoPolicy(PolicyManager& manager) const;
+
     // Receptor provisional observable; UI y productor de eventos se conectarán en sus tareas propias.
     static bool OnNavigationDecision(const NavigationDecisionNotice& notice);
 

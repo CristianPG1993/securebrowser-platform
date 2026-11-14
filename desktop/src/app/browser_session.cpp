@@ -3,6 +3,8 @@
 #include "app/browser_navigation.h"
 #include "app/browser_window_bridge.h"
 #include "browser/security_request_handler.h"
+#include "demo/demo_policy_source.h"
+#include "security/policy_manager.h"
 #include "ui/browser_window.h"
 #include "ui/browser_window_ui.h"
 
@@ -15,6 +17,34 @@ namespace sbp {
 
 BrowserSession::BrowserSession(const StartupOptions& startup_options)
     : startup_options_(startup_options) {}
+
+bool BrowserSession::PrepareDemoPolicy(PolicyManager& manager) const {
+    if (!startup_options_.IsUrlFilteringDemo()) {
+        // El modo normal conserva el gestor vacío hasta la futura adquisición autenticada.
+        return true;
+    }
+
+    const auto context = manager.BeginContext(DemoPolicySource::DeviceId, DemoPolicySource::CompanyId);
+    if (!context.has_value()) {
+        std::fputs("Demo startup failed: could not create the local demo context.\n", stderr);
+        return false;
+    }
+
+    // La selección procede de StartupOptions, que solo admite estos dos presets conocidos.
+    const bool restricted = startup_options_.InitialDemoPolicy() == DemoPolicyPreset::RestrictedNavigation;
+    const auto policy = restricted ? DemoPolicySource::CreateRestrictedPolicy()
+                                   : DemoPolicySource::CreateFreePolicy();
+    const auto result = manager.PublishPolicy(*context, policy);
+    if (result != PolicyPublicationResult::Published) {
+        std::fputs("Demo startup failed: local demo policy publication was rejected.\n", stderr);
+        return false;
+    }
+
+    // Solo registra datos controlados y deja explícita la procedencia local, sin afirmar autenticación.
+    std::fprintf(stderr, "Demo policy published; source: local-demo; preset: %s; policy_id: %lld.\n",
+                 restricted ? "restricted" : "free", static_cast<long long>(policy.Id()));
+    return true;
+}
 
 void BrowserSession::OnContextInitialized() {
     lifecycle_.OnContextInitialized();
@@ -30,9 +60,11 @@ int BrowserSession::Run(QApplication& qt_app) {
         BrowserWindow window;
         // Paso 4.1: Creamos el coordinador de navegación que prepara y conecta sus callbacks.
         BrowserNavigation navigation;
-        // Paso 4.2: Compone el gestor local y su handler. REST/Auth publicará el contexto y la política.
-        // No se inventa una política de producción para suplir la adquisición todavía pendiente.
+        // Paso 4.2: Compone el gestor y prepara la política solo si se activó expresamente la demo.
         const auto policy_manager = std::make_shared<PolicyManager>();
+        if (!PrepareDemoPolicy(*policy_manager)) {
+            return 1;
+        }
         CefRefPtr<SecurityRequestHandler> security_handler = new SecurityRequestHandler(
             policy_manager, &BrowserSession::OnNavigationDecision);
         // Paso 5: Preparamos los callbacks, creamos BrowserClient y conservamos una referencia administrada.
