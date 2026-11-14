@@ -4,6 +4,8 @@ El workflow [Desktop CI](../../.github/workflows/desktop.yml) cubre Desktop Foun
 [tarea #94](https://github.com/CristianPG1993/securebrowser-platform/issues/94)
 y las pruebas del Security Engine de la
 [tarea #115](https://github.com/CristianPG1993/securebrowser-platform/issues/115).
+La ampliación de [#117](https://github.com/CristianPG1993/securebrowser-platform/issues/117)
+añade adaptador y navegación CEF reales; su primera ejecución CI permanece pendiente.
 Se ejecuta en PR hacia `main`, con los pushes a `main` y mediante ejecución
 manual. El job se llama `Desktop build and tests` y utiliza `windows-2022`.
 
@@ -36,6 +38,8 @@ ejemplo, las rutas de los `tar.exe` de Windows y de Git en una sola llamada.
 | Preparar GoogleTest | [setup-googletest.ps1](../../scripts/setup-googletest.ps1); verifica tamaño y SHA-256 del archivo y comprueba las fuentes y la versión fijadas en el manifiesto. |
 | Configurar el núcleo y sus pruebas | Paso `Configure security core tests`; utiliza el generador, toolset y SDK del manifiesto en `desktop/build/tests`, con `SBP_BUILD_DESKTOP_APP=OFF` y `BUILD_TESTING=ON`. |
 | Compilar y ejecutar las pruebas del núcleo | Paso `Build and run security core tests`; construye `sbp_security_tests` y ejecuta CTest en Debug y Release, con `--no-tests=error` y un timeout de 60 segundos por caso. |
+| Configurar las pruebas CEF | Paso `Configure CEF navigation tests`; configura `desktop/build/cef-tests` con el SDK fijado, `SBP_BUILD_CEF_TESTS=ON` y la aplicación Qt desactivada. |
+| Compilar y ejecutar la navegación CEF | Paso `Build and run CEF navigation tests`; construye `sbp_cef_adapter_tests` y ejecuta su lanzador CTest en Debug y Release. Cada proceso usa un perfil aislado, servidor local y sandbox. |
 | Configurar CMake | [configure.ps1](configure.ps1); selecciona los SDK, las configuraciones y los avisos de Qt conservados en el repositorio. |
 | Comprobar rechazo de Qt ausente | [check-configuration-rejection.ps1](../tests/check-configuration-rejection.ps1). |
 | Compilar | `cmake --build desktop/build --config <configuración> --parallel 4`, primero Debug y después Release. |
@@ -44,6 +48,9 @@ ejemplo, las rutas de los `tar.exe` de Windows y de Git en una sola llamada.
 Los programas externos deben devolver el código esperado. Un fallo de
 compilación o verificación detiene el job. Si la aplicación ha generado logs,
 el paso de diagnóstico muestra sus últimas líneas cuando falla el workflow.
+También muestra el último log CTest de navegación y los logs CEF de los perfiles
+conservados tras un fallo. Las comprobaciones CEF no sustituyen la regresión de
+la aplicación ni los casos del núcleo.
 
 La extracción de CEF en CI utiliza 7-Zip en dos pasos: descomprime la capa BZip2
 y extrae el TAR resultante. Cada paso comprueba su código de salida; después se
