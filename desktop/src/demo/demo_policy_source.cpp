@@ -22,10 +22,12 @@ PolicySnapshot DemoPolicySource::CreateRestrictedPolicy() {
     const auto timestamp = std::chrono::time_point_cast<std::chrono::microseconds>(
         std::chrono::system_clock::now());
 
-    // E1 utiliza una regla mínima; E2 completará los dominios definitivos de la demostración.
+    // Dominios explícitos acordados para E2; el motor existente resuelve también sus subdominios.
     return PolicySnapshot(
         2, CompanyId, "Restricci\xC3\xB3n de redes sociales y entretenimiento",
-        UrlFilteringConfig(true, FilterMode::Denylist, {"youtube.com"}),
+        UrlFilteringConfig(true, FilterMode::Denylist, {
+            "facebook.com", "instagram.com", "tiktok.com", "x.com",
+            "youtube.com", "twitch.tv", "netflix.com"}),
         DownloadControlConfig(false, FilterMode::Denylist, {}),
         timestamp, timestamp);
 }

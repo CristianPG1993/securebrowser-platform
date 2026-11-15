@@ -38,7 +38,9 @@ TEST_F(DemoPolicySourceTest, FreePolicyPublishesAndAllowsPublicDomains) {
     ASSERT_EQ(PolicyPublicationResult::Published,
               manager_.PublishPolicy(*context_, DemoPolicySource::CreateFreePolicy()));
 
-    for (const char* host : {"www.wikipedia.org", "youtube.com", "www.youtube.com"}) {
+    for (const char* host : {
+        "www.wikipedia.org", "facebook.com", "instagram.com", "tiktok.com", "x.com",
+        "youtube.com", "www.youtube.com", "twitch.tv", "netflix.com"}) {
         SCOPED_TRACE(host);
         const UrlTarget target(true, "https", host, UrlHostKind::Domain);
         const auto decision = filter_.Evaluate(manager_.ReadPolicy(*context_), target);
@@ -47,12 +49,16 @@ TEST_F(DemoPolicySourceTest, FreePolicyPublishesAndAllowsPublicDomains) {
     }
 }
 
-// La regla mínima de E1 bloquea el dominio y sus subdominios mediante el evaluador existente.
-TEST_F(DemoPolicySourceTest, RestrictedPolicyBlocksYouTubeAndSubdomains) {
+// La lista definitiva de E2 bloquea los siete dominios y sus subdominios mediante el motor existente.
+TEST_F(DemoPolicySourceTest, RestrictedPolicyBlocksConfiguredDomainsAndSubdomains) {
     ASSERT_EQ(PolicyPublicationResult::Published,
               manager_.PublishPolicy(*context_, DemoPolicySource::CreateRestrictedPolicy()));
 
-    for (const char* host : {"youtube.com", "www.youtube.com", "video.www.youtube.com"}) {
+    for (const char* host : {
+        "facebook.com", "www.facebook.com", "instagram.com", "www.instagram.com",
+        "tiktok.com", "www.tiktok.com", "x.com", "www.x.com",
+        "youtube.com", "www.youtube.com", "video.www.youtube.com",
+        "twitch.tv", "www.twitch.tv", "netflix.com", "www.netflix.com"}) {
         SCOPED_TRACE(host);
         const UrlTarget target(true, "https", host, UrlHostKind::Domain);
         const auto decision = filter_.Evaluate(manager_.ReadPolicy(*context_), target);
@@ -66,7 +72,9 @@ TEST_F(DemoPolicySourceTest, RestrictedPolicyKeepsOtherDomainsAllowed) {
     ASSERT_EQ(PolicyPublicationResult::Published,
               manager_.PublishPolicy(*context_, DemoPolicySource::CreateRestrictedPolicy()));
 
-    for (const char* host : {"www.wikipedia.org", "notyoutube.com", "youtube.com.example.org"}) {
+    for (const char* host : {
+        "www.wikipedia.org", "notyoutube.com", "youtube.com.example.org",
+        "notfacebook.com", "facebook.com.example.org", "notx.com", "x.com.example.org"}) {
         SCOPED_TRACE(host);
         const UrlTarget target(true, "https", host, UrlHostKind::Domain);
         EXPECT_EQ(SecurityAction::Allow,
