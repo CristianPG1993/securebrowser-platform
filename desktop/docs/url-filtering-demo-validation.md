@@ -70,10 +70,50 @@ CEF shutdown completed.
 En esta revisión, el motivo `8` corresponde a `SecurityReason::DomainDenied`.
 Los identificadores demo no acreditan un Device autenticado.
 
+## E2 — Cambio de política desde la ventana
+
+Fecha de comprobación: 15 de noviembre de 2026.
+
+La restrictiva incorpora los siete dominios acordados: `facebook.com`,
+`instagram.com`, `tiktok.com`, `x.com`, `youtube.com`, `twitch.tv` y
+`netflix.com`, incluidos sus subdominios mediante el evaluador existente.
+Las reglas y sus pruebas ampliadas se conservan en `c2087c3`.
+
+El panel inferior muestra el modo demostración, el nombre publicado y un
+selector de las dos políticas. El selector solicita la publicación al mismo
+`PolicyManager` que consulta CEF, conservando el contexto original. El nombre
+y la selección solo se confirman después de una publicación correcta. Un rechazo
+conserva la confirmación anterior; durante el cierre se retira el receptor.
+El modo normal no ofrece este selector ni carga políticas locales.
+
+### Resultado manual en Debug
+
+Se confirmó el siguiente recorrido sin cerrar el ejecutable, tras compilar y
+arrancar con `--demo-url-filtering --demo-policy=free`:
+
+| Paso | Comprobación | Resultado confirmado |
+| --- | --- | --- |
+| Libre | Solicitar Wikipedia y YouTube. | Ambas páginas cargan. |
+| Cambiar a Restrictiva | Comprobar el nombre y solicitar de nuevo ambas páginas. | El panel cambia; Wikipedia carga y YouTube se bloquea. |
+| Volver a Libre | Solicitar de nuevo YouTube. | La página vuelve a cargar. |
+
+El resultado procede de la comprobación manual comunicada sobre el árbol de
+trabajo de esta entrega. No se atribuyen a esta revisión capturas, nuevos
+informes automatizados ni una regresión completa no aportados. La comprobación
+del selector en Release continúa pendiente.
+
+Cambiar de política constituye una publicación explícita y establece un nuevo
+instante monotónico de validación. Leer el estado o navegar no renueva los
+15 minutos; elegir otra vez la opción ya confirmada tampoco la republica.
+El cambio afecta a nuevas navegaciones y no retira una página que ya estuviera
+visible. La caducidad del selector no se ha comprobado esperando 15 minutos
+en esta pasada manual.
+
 ## Comprobaciones pendientes
 
-E2 añadirá los dominios definitivos, el selector dentro de la ventana, el
-indicador permanente, los avisos Qt y la acción de recarga explícita.
+E2 continuará con los avisos Qt de bloqueo y la acción de recarga explícita
+de la política. El panel y el selector ya están implementados; la validación
+anterior no equivale a cerrar el hito completo.
 
 E3 completará la regresión y comprobación manual Debug/Release de la entrega,
 las capturas, las pruebas controladas de ausencia de petición HTTP, la distribución

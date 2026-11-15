@@ -29,7 +29,8 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
       status_panel_(&window),
       status_layout_(&status_panel_),
       mode_label_(&status_panel_),
-      policy_label_(&status_panel_) {
+      policy_label_(&status_panel_),
+      policy_selector_(&status_panel_) {
     // Aquí se configura el aspecto inicial de la ventana y la distribución de sus controles.
     window.setWindowTitle("SecureBrowser");
     window.resize(1024, 768);
@@ -98,14 +99,75 @@ void BrowserWindowUi::ConfigureStatusPanel() {
     // El nombre de política se presenta como texto, sin interpretar etiquetas HTML.
     policy_label_.setTextFormat(Qt::PlainText);
     policy_label_.setWordWrap(true);
+
+    // La sesión cargará las opciones y confirmará la política realmente publicada.
+    policy_selector_.setObjectName("policy_selector");
+    policy_selector_.setAccessibleName(QStringLiteral("Seleccionar política"));
+    policy_selector_.setToolTip(QStringLiteral(
+        "Cambiar la política se aplica a nuevas navegaciones e inicia otros 15 minutos de vigencia."));
+    policy_selector_.setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    policy_selector_.setMinimumContentsLength(24);
+    policy_selector_.setEnabled(false);
+    policy_selector_.installEventFilter(this);
+    ConnectPolicySelector();
+
     status_layout_.addWidget(&mode_label_);
     status_layout_.addWidget(&policy_label_);
+    status_layout_.addWidget(&policy_selector_);
     status_panel_.hide();
 }
 
 void BrowserWindowUi::SetPolicyName(const QString& policy_name) {
     policy_label_.setText(QStringLiteral("Política: %1").arg(policy_name));
     status_panel_.show();
+}
+
+void BrowserWindowUi::SetPolicyOptions(const QStringList& policy_names) {
+    // Cargar textos no selecciona ni publica nada; la sesión confirmará después un índice.
+    selected_policy_index_ = -1;
+    policy_selector_.setEnabled(false);
+    policy_selector_.clear();
+    policy_selector_.addItems(policy_names);
+    policy_selector_.setCurrentIndex(-1);
+}
+
+void BrowserWindowUi::SetSelectedPolicy(int index) {
+    if (index < 0 || index >= policy_selector_.count()) {
+        return;
+    }
+    selected_policy_index_ = index;
+    // activated solo procede de una elección del usuario; esta actualización no solicita otra publicación.
+    policy_selector_.setCurrentIndex(index);
+    policy_selector_.setEnabled(static_cast<bool>(on_policy_selected_));
+}
+
+void BrowserWindowUi::SetPolicySelectionHandler(std::function<void(int)> on_policy_selected) {
+    // Instala el receptor sin ejecutarlo; su captura pertenece a la vida de estos controles Qt.
+    on_policy_selected_ = std::move(on_policy_selected);
+    policy_selector_.setEnabled(on_policy_selected_ && selected_policy_index_ >= 0);
+}
+
+void BrowserWindowUi::ConnectPolicySelector() {
+    // Los metadatos evitan importar staticMetaObject y conservan la carga diferida de Qt del bootstrap.
+    const QMetaObject* selector_meta = policy_selector_.metaObject();
+    const int activated_index = selector_meta->indexOfSignal("activated(int)");
+    // Qt entrega el índice en su hilo principal; this vive mientras existe la conexión.
+    const auto connection = QMetaObject::connect(
+        &policy_selector_, selector_meta->method(activated_index), this,
+        [this](int index) { RequestPolicySelection(index); });
+    if (!connection) {
+        std::fputs("Qt policy selector activation could not be connected.\n", stderr);
+    }
+}
+
+void BrowserWindowUi::RequestPolicySelection(int index) {
+    // Conserva la confirmación anterior si la sesión rechaza o no puede publicar la solicitud.
+    policy_selector_.setCurrentIndex(selected_policy_index_);
+    if (index < 0 || index >= policy_selector_.count()
+        || index == selected_policy_index_ || !on_policy_selected_) {
+        return;
+    }
+    on_policy_selected_(index);
 }
 
 BrowserHost& BrowserWindowUi::GetBrowserHost() {
@@ -271,14 +333,15 @@ bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
         }
     }
     // Pasar a otro control Qt termina la edición, también al regresar desde otra aplicación.
-    if ((watched == &back_button_ || watched == &forward_button_ || watched == &reload_button_)
+    if ((watched == &back_button_ || watched == &forward_button_ || watched == &reload_button_
+         || watched == &policy_selector_)
         && event->type() == QEvent::FocusIn) {
         FinishAddressEditing();
     }
     // CEF puede conservar el foco nativo aunque Qt recuerde un control de la barra como enfocado.
     // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.
     if ((watched == &address_input_ || watched == &back_button_ || watched == &forward_button_
-         || watched == &reload_button_)
+         || watched == &reload_button_ || watched == &policy_selector_)
         && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::FocusIn)) {
         QWidget* qt_window = address_input_.window();
         if (qt_window->isActiveWindow()) {

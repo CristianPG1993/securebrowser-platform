@@ -61,6 +61,65 @@ void BrowserSession::ConfigureStatus(BrowserWindowUi& window_ui, const PolicyMan
     window_ui.SetPolicyName(policy_name);
 }
 
+void BrowserSession::ConfigurePolicySelector(
+    BrowserWindowUi& window_ui, const std::shared_ptr<PolicyManager>& manager) const {
+    if (!startup_options_.IsUrlFilteringDemo()) {
+        return;
+    }
+    const auto state = manager->ReadState();
+    if (!state || !state->policy) {
+        return;
+    }
+
+    // Las opciones muestran los nombres de la fuente; construir datos no los publica ni renueva el plazo.
+    const auto free_policy = DemoPolicySource::CreateFreePolicy();
+    const auto restricted_policy = DemoPolicySource::CreateRestrictedPolicy();
+    window_ui.SetPolicyOptions({QString::fromUtf8(free_policy.Name().c_str()),
+                               QString::fromUtf8(restricted_policy.Name().c_str())});
+    // La selección inicial procede de la política publicada, no solo del argumento de arranque.
+    if (state->policy->Id() == free_policy.Id()) {
+        window_ui.SetSelectedPolicy(0);
+    } else if (state->policy->Id() == restricted_policy.Id()) {
+        window_ui.SetSelectedPolicy(1);
+    } else {
+        std::fputs("Demo policy selector unavailable: unknown published policy.\n", stderr);
+        return;
+    }
+
+    // Se ejecuta en Qt: la UI posee esta función y vive menos que la sesión; manager se conserva por valor.
+    // La copia del contexto impide que una solicitud tardía se aplique a otro contexto posterior.
+    window_ui.SetPolicySelectionHandler([this, &window_ui, manager, context = state->context](int index) {
+        ApplyPolicySelection(window_ui, *manager, context, index);
+    });
+}
+
+void BrowserSession::ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyManager& manager,
+                                         const SecurityContext& context, int index) const {
+    // Solo una elección conocida en la sesión demo puede cambiar una política desde estos controles.
+    if (!startup_options_.IsUrlFilteringDemo() || lifecycle_.CloseRequested()
+        || (index != 0 && index != 1)) {
+        return;
+    }
+    if (!manager.IsCurrentContext(context)) {
+        std::fputs("Demo policy selection rejected: the original context is no longer current.\n", stderr);
+        return;
+    }
+
+    const auto policy = index == 0 ? DemoPolicySource::CreateFreePolicy()
+                                   : DemoPolicySource::CreateRestrictedPolicy();
+    // El mismo gestor que consulta CEF valida y publica el snapshot; el motor conserva todas sus guardas.
+    const auto result = manager.PublishPolicy(context, policy);
+    if (result != PolicyPublicationResult::Published) {
+        std::fputs("Demo policy selection rejected: local demo policy publication failed.\n", stderr);
+        return;
+    }
+
+    window_ui.SetPolicyName(QString::fromUtf8(policy.Name().c_str()));
+    window_ui.SetSelectedPolicy(index);
+    std::fprintf(stderr, "Demo policy changed; source: local-demo; preset: %s; policy_id: %lld.\n",
+                 index == 0 ? "free" : "restricted", static_cast<long long>(policy.Id()));
+}
+
 void BrowserSession::OnContextInitialized() {
     lifecycle_.OnContextInitialized();
 }
@@ -111,6 +170,8 @@ int BrowserSession::Run(QApplication& qt_app) {
         window_ui_ = &window_ui;
         // El panel recibe la política efectivamente publicada, antes de mostrar la ventana.
         ConfigureStatus(window_ui, *policy_manager);
+        // El selector solo se conecta en demo; cada elección explícita publica en el mismo contexto.
+        ConfigurePolicySelector(window_ui, policy_manager);
         // Paso 10: Instalamos las acciones de navegación que enviarán las peticiones de Qt al hilo UI de CEF.
         navigation.Connect(window_ui, browser_client, lifecycle_.CloseRequested());
         // Paso 11: Instalamos la sincronización del foco nativo del marco con los controles y el contenido web.
@@ -124,6 +185,9 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Paso 13: exec procesa los eventos Qt hasta terminar la sesión; CEF mantiene su propio hilo UI.
         // Cuando exec retorna, ExitCode conserva un error previo o utiliza el resultado del bucle Qt.
         qt_exit_code = lifecycle_.ExitCode(qt_app.exec());
+
+        // Retira el receptor del selector mientras los controles y el gestor todavía siguen vivos.
+        window_ui.SetPolicySelectionHandler({});
 
         // Paso 14: Liberamos la función de creación y limpiamos los datos del anfitrión, aún con los widgets vivos.
         lifecycle_.Detach();

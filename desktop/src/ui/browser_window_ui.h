@@ -2,11 +2,13 @@
 
 #include "ui/browser_host.h"
 
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QObject>
 #include <QPushButton>
+#include <QStringList>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -36,6 +38,15 @@ public:
 
     // Muestra el panel inferior y el nombre de la política publicada; solo se llama desde Qt.
     void SetPolicyName(const QString& policy_name);
+
+    // Carga las opciones que proporciona la sesión, sin seleccionar ni publicar una política.
+    void SetPolicyOptions(const QStringList& policy_names);
+
+    // Refleja la selección confirmada por la sesión después de publicar una política válida.
+    void SetSelectedPolicy(int index);
+
+    // Guarda el receptor de solicitudes del desplegable; ambos se ejecutan en el hilo Qt.
+    void SetPolicySelectionHandler(std::function<void(int)> on_policy_selected);
 
     // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
     void ClearAddressFocus();
@@ -74,6 +85,11 @@ protected:
 private:
     // Prepara el panel inferior, oculto hasta que la sesión confirma el modo demo.
     void ConfigureStatusPanel();
+
+    // Conecta la elección del usuario con una solicitud a la sesión.
+    void ConnectPolicySelector();
+    // Conserva la selección confirmada mientras la sesión valida y publica la nueva política.
+    void RequestPolicySelection(int index);
 
     // Termina la edición al abandonar realmente la barra y muestra la última dirección de CEF.
     void FinishAddressEditing();
@@ -119,6 +135,13 @@ private:
     QVBoxLayout status_layout_;
     QLabel mode_label_;
     QLabel policy_label_;
+    QComboBox policy_selector_;
+
+    // Última selección confirmada; -1 significa que todavía no se ha confirmado ninguna.
+    int selected_policy_index_ = -1;
+
+    // Recibe un índice de presentación; la sesión decide qué snapshot construir y publicar.
+    std::function<void(int)> on_policy_selected_;
 
     // Aviso síncrono de la interfaz a la sesión; ambos trabajan en el hilo principal Qt.
     std::function<void(const QString&)> on_address_submitted_;

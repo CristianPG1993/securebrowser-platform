@@ -3,12 +3,15 @@
 #include "app/browser_lifecycle.h"
 #include "app/startup_options.h"
 
+#include <memory>
+
 class QApplication;
 
 namespace sbp {
 
 class BrowserWindowUi;
 class PolicyManager;
+class SecurityContext;
 struct NavigationDecisionNotice;
 
 // Compone la ventana, sus controles, el gestor de políticas y los adaptadores Qt/CEF.
@@ -37,6 +40,16 @@ private:
     // Consulta el gestor por referencia de lectura y entrega el nombre publicado a los controles Qt.
     // Solo configura la presentación; leer el estado no renueva su vigencia.
     void ConfigureStatus(BrowserWindowUi& window_ui, const PolicyManager& manager) const;
+
+    // Ofrece los presets únicamente en demo y vincula sus solicitudes al contexto inicial.
+    // La función guardada en los controles conserva el gestor, pero no prolonga la vida de la UI.
+    void ConfigurePolicySelector(
+        BrowserWindowUi& window_ui, const std::shared_ptr<PolicyManager>& manager) const;
+
+    // Publica en el contexto original y solo confirma el cambio visual después del éxito.
+    // Un cambio explícito renueva la vigencia; no inicia otro contexto ni navega automáticamente.
+    void ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyManager& manager,
+                              const SecurityContext& context, int index) const;
 
     // Receptor provisional observable; UI y productor de eventos se conectarán en sus tareas propias.
     static bool OnNavigationDecision(const NavigationDecisionNotice& notice);
