@@ -9,6 +9,7 @@
 #include "ui/browser_window_ui.h"
 
 #include <QApplication>
+#include <QMetaObject>
 #include <QString>
 
 #include <cstdio>
@@ -116,6 +117,8 @@ void BrowserSession::ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyMana
 
     window_ui.SetPolicyName(QString::fromUtf8(policy.Name().c_str()));
     window_ui.SetSelectedPolicy(index);
+    // El mensaje de la política anterior ya no corresponde al estado que acaba de publicarse.
+    window_ui.ClearNavigationBlock();
     std::fprintf(stderr, "Demo policy changed; source: local-demo; preset: %s; policy_id: %lld.\n",
                  index == 0 ? "free" : "restricted", static_cast<long long>(policy.Id()));
 }
@@ -143,9 +146,9 @@ int BrowserSession::Run(QApplication& qt_app) {
             return 1;
         }
         // security_handler recibe OnBeforeBrowse, consulta el motor y cancela las navegaciones bloqueadas.
-        // OnNavigationDecision recibirá los avisos de bloqueo aplicado en el hilo UI de CEF.
+        // El receptor copia el aviso desde CEF y lo encola para presentarlo únicamente en Qt.
         CefRefPtr<SecurityRequestHandler> security_handler = new SecurityRequestHandler(
-            policy_manager, &BrowserSession::OnNavigationDecision);
+            policy_manager, MakeNavigationDecisionHandler(window, policy_manager));
         // Paso 5: browser_client es el cliente que entregamos a CEF para crear y manejar el navegador.
         // Recibe creación, carga, historial y cierre; GetRequestHandler entrega security_handler a CEF.
         // MakeCallbacks agrupa los avisos de navegación; MakeClientCallbacks añade creación y cierre.
@@ -204,12 +207,105 @@ int BrowserSession::Run(QApplication& qt_app) {
     return qt_exit_code;
 }
 
-bool BrowserSession::OnNavigationDecision(const NavigationDecisionNotice& notice) {
-    // El aviso pertenece a UI CEF. No accede a Qt ni afirma persistencia o entrega al backend.
-    std::fprintf(stderr, "CEF navigation blocked; operation_id: %llu; reason: %d; main_frame: %d.\n",
-                 static_cast<unsigned long long>(notice.operationId),
-                 static_cast<int>(notice.decision.Reason()), static_cast<int>(notice.mainFrame));
-    return true;
+std::function<bool(const NavigationDecisionNotice&)> BrowserSession::MakeNavigationDecisionHandler(
+    BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager) {
+    // CEF ejecuta este receptor; window vive hasta la confirmación de cierre y manager se conserva por valor.
+    return [this, &window, manager](const NavigationDecisionNotice& notice) {
+        std::fprintf(stderr, "CEF navigation blocked; operation_id: %llu; reason: %d; main_frame: %d.\n",
+                     static_cast<unsigned long long>(notice.operationId),
+                     static_cast<int>(notice.decision.Reason()), static_cast<int>(notice.mainFrame));
+        // Esta lectura no renueva la vigencia; permite detectar cualquier publicación posterior al envío.
+        const auto observed_state = manager->ReadState();
+        // La tarea posee el aviso y el estado observado; solo aquí se consulta la vida de los controles Qt.
+        return QMetaObject::invokeMethod(&window, [this, manager, notice, observed_state] {
+            if (manager->ReadState() != observed_state) {
+                return;
+            }
+            OnNavigationDecision(notice, *manager);
+        }, Qt::QueuedConnection);
+    };
+}
+
+void BrowserSession::OnNavigationDecision(const NavigationDecisionNotice& notice, const PolicyManager& manager) {
+    if (lifecycle_.CloseRequested() || window_ui_ == nullptr
+        || notice.operationId <= last_notice_operation_id_
+        || notice.decision.Action() != SecurityAction::Block) {
+        return;
+    }
+    last_notice_operation_id_ = notice.operationId;
+
+    // El contexto y el ID deben corresponder al bloqueo recibido, no a otra sesión o política posterior.
+    const auto state = manager.ReadState();
+    if (notice.context.has_value()) {
+        if (!state || !(state->context == *notice.context)) {
+            return;
+        }
+    } else if (state) {
+        return;
+    }
+    if (notice.policyId.has_value()) {
+        if (!state || !state->policy || state->policy->Id() != *notice.policyId) {
+            return;
+        }
+    } else if (state && state->policy) {
+        return;
+    }
+    // Una republicación de la misma política puede haber renovado el plazo antes de entregar el aviso.
+    if (notice.decision.Reason() == SecurityReason::PolicyExpired && state
+        && manager.ReadPolicy(state->context).availability != PolicyAvailability::Expired) {
+        return;
+    }
+
+    const QString policy_name = state && state->policy
+        ? QString::fromUtf8(state->policy->Name().c_str()) : QString{};
+    window_ui_->ShowNavigationBlock(NavigationBlockMessage(notice, policy_name));
+    std::fprintf(stderr, "Qt navigation block notice shown; operation_id: %llu.\n",
+                 static_cast<unsigned long long>(notice.operationId));
+}
+
+QString BrowserSession::NavigationBlockMessage(const NavigationDecisionNotice& notice, const QString& policy_name) {
+    QString reason;
+    switch (notice.decision.Reason()) {
+    case SecurityReason::InvalidContext:
+        reason = QStringLiteral("No hay un contexto de seguridad válido para esta navegación.");
+        break;
+    case SecurityReason::InstallationUnauthorized:
+        reason = QStringLiteral("La instalación no está autorizada para navegar.");
+        break;
+    case SecurityReason::PolicyUnavailable:
+        reason = QStringLiteral("No hay una política disponible. Es necesario cargar una política válida.");
+        break;
+    case SecurityReason::PolicyExpired:
+        reason = QStringLiteral("La política ha caducado tras 15 minutos. Es necesario volver a cargarla.");
+        break;
+    case SecurityReason::InvalidUrl:
+        reason = QStringLiteral("La dirección no se puede interpretar de forma válida.");
+        break;
+    case SecurityReason::UnsupportedScheme:
+        reason = QStringLiteral("El tipo de dirección no está permitido.");
+        break;
+    case SecurityReason::IpBlocked:
+        reason = QStringLiteral("La política no permite navegar a direcciones IP literales.");
+        break;
+    case SecurityReason::DomainDenied:
+        reason = QStringLiteral("El dominio %1 está bloqueado por la política.")
+            .arg(QString::fromUtf8(notice.host.c_str()));
+        break;
+    case SecurityReason::DomainNotAllowed:
+        reason = QStringLiteral("El dominio %1 no está autorizado por la política.")
+            .arg(QString::fromUtf8(notice.host.c_str()));
+        break;
+    default:
+        reason = QStringLiteral("La navegación no supera las comprobaciones de seguridad.");
+        break;
+    }
+    QString message = notice.mainFrame
+        ? QStringLiteral("Navegación bloqueada. %1").arg(reason)
+        : QStringLiteral("Contenido de la página bloqueado. %1").arg(reason);
+    if (!policy_name.isEmpty()) {
+        message += QStringLiteral("\nPolítica: %1").arg(policy_name);
+    }
+    return message;
 }
 
 }  // namespace sbp

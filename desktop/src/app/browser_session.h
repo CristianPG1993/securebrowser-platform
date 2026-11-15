@@ -3,12 +3,16 @@
 #include "app/browser_lifecycle.h"
 #include "app/startup_options.h"
 
+#include <cstdint>
+#include <functional>
 #include <memory>
 
 class QApplication;
+class QString;
 
 namespace sbp {
 
+class BrowserWindow;
 class BrowserWindowUi;
 class PolicyManager;
 class SecurityContext;
@@ -17,7 +21,7 @@ struct NavigationDecisionNotice;
 // Compone la ventana, sus controles, el gestor de políticas y los adaptadores Qt/CEF.
 // Conecta esos objetos durante una sesión; el arranque de Windows queda en app_entry_win.cpp.
 // La coordinación y su estado pertenecen al hilo principal de Qt.
-// El receptor estático OnNavigationDecision se ejecuta en el hilo UI de CEF.
+// El receptor de CEF encola una copia; OnNavigationDecision se ejecuta únicamente en Qt.
 class BrowserSession final {
 public:
     // Conserva una copia de las opciones validadas; recibirlas no carga ninguna política.
@@ -51,8 +55,15 @@ private:
     void ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyManager& manager,
                               const SecurityContext& context, int index) const;
 
-    // Receptor provisional observable; UI y productor de eventos se conectarán en sus tareas propias.
-    static bool OnNavigationDecision(const NavigationDecisionNotice& notice);
+    // Prepara el receptor ejecutado en CEF; no lee controles ni estado Qt desde ese hilo.
+    std::function<bool(const NavigationDecisionNotice&)> MakeNavigationDecisionHandler(
+        BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager);
+
+    // Descarta avisos obsoletos y presenta el bloqueo en Qt, sin reevaluar permisos de navegación.
+    void OnNavigationDecision(const NavigationDecisionNotice& notice, const PolicyManager& manager);
+
+    // Traduce motivos controlados a texto de presentación, sin registrar URL ni datos de navegación.
+    static QString NavigationBlockMessage(const NavigationDecisionNotice& notice, const QString& policy_name);
 
     // Copia de los argumentos validados: modo de ejecución y selección inicial de política.
     // La política publicada se consulta en PolicyManager; el modo queda fijado durante toda la sesión.
@@ -64,6 +75,9 @@ private:
     // Apunta al objeto window_ui local de Run para que los callbacks Qt encuentren los controles.
     // No es propietario de ese objeto y se pone a nullptr antes de destruirlo.
     BrowserWindowUi* window_ui_ = nullptr;
+
+    // Solo Qt lo modifica; impide reemplazar un aviso reciente por otro anterior o duplicado.
+    std::uint64_t last_notice_operation_id_ = 0;
 
 };
 

@@ -48,6 +48,13 @@ public:
     // Guarda el receptor de solicitudes del desplegable; ambos se ejecutan en el hilo Qt.
     void SetPolicySelectionHandler(std::function<void(int)> on_policy_selected);
 
+    // Muestra en Qt el texto de un bloqueo aplicado y ofrece la acción Inicio ya conectada.
+    // La sesión prepara el motivo; la interfaz no evalúa políticas ni decide permisos.
+    void ShowNavigationBlock(const QString& message);
+
+    // Retira el aviso cuando la sesión determina que ya no corresponde al estado mostrado.
+    void ClearNavigationBlock();
+
     // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
     void ClearAddressFocus();
 
@@ -72,7 +79,7 @@ public:
     // Guarda la acción Recargar; la sesión la proporcionará al conectar este control con CEF.
     void SetReloadRequestHandler(std::function<void()> on_reload_requested);
 
-    // Guarda la acción Inicio y habilita su botón cuando existe un receptor.
+    // Guarda una única acción Inicio y habilita sus botones de la barra y del aviso si existe receptor.
     void SetHomeRequestHandler(std::function<void()> on_home_requested);
 
     // Actualiza en Qt si se puede recargar la página actual.
@@ -88,6 +95,11 @@ protected:
 private:
     // Prepara el panel inferior, oculto hasta que la sesión confirma el modo demo.
     void ConfigureStatusPanel();
+
+    // Prepara un aviso no modal, separado del indicador exclusivo del modo demo.
+    void ConfigureNavigationBlockPanel();
+    // Conecta «Ir a inicio» con RequestHome, igual que el botón de la barra.
+    void ConnectBlockHomeButton();
 
     // Conecta la elección del usuario con una solicitud a la sesión.
     void ConnectPolicySelector();
@@ -148,6 +160,13 @@ private:
     // Última selección confirmada; -1 significa que todavía no se ha confirmado ninguna.
     int selected_policy_index_ = -1;
 
+    // El aviso tiene su propio panel: mostrar un bloqueo no debe activar los controles de demo.
+    // El orden conserva la destrucción de los controles antes que su layout y su contenedor.
+    QWidget block_panel_;
+    QHBoxLayout block_layout_;
+    QLabel block_message_;
+    QPushButton block_home_button_;
+
     // Recibe un índice de presentación; la sesión decide qué snapshot construir y publicar.
     std::function<void(int)> on_policy_selected_;
 
@@ -163,7 +182,7 @@ private:
     // Acción para recargar la página; se ejecuta únicamente al activar el botón Recargar.
     std::function<void()> on_reload_requested_;
 
-    // Se comparte como acción entre el botón Inicio y el futuro aviso de bloqueo.
+    // Se comparte como acción entre el botón Inicio y el aviso de bloqueo.
     std::function<void()> on_home_requested_;
 
     // Referencia no propietaria al diálogo local de ConfirmPageLeave; solo se utiliza en Qt.

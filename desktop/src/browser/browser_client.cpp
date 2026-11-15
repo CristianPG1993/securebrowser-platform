@@ -376,6 +376,9 @@ void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
     // No registramos la URL ni conservamos referencias al navegador o al frame.
     std::fprintf(stderr, "CEF main document load started; time_ms: %llu.\n",
                  static_cast<unsigned long long>(GetTickCount64()));
+    if (callbacks_.on_main_document_started) {
+        callbacks_.on_main_document_started();
+    }
 }
 
 void BrowserClient::OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,

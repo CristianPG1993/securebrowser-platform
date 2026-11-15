@@ -120,13 +120,21 @@ excepciones de seguridad ni renovación del plazo de validación.
 
 La comprobación en Release queda pendiente. El icono estándar se representa
 como carpeta en el tema de Windows utilizado; su sustitución por una casa se
-aplazó. La acción «Ir a inicio» del aviso de bloqueo todavía no está conectada.
+aplazó. La acción «Ir a inicio» del aviso de bloqueo utiliza la misma navegación.
+
+### Aviso Qt de bloqueo
+
+Se confirmó en Debug el aviso con el motivo, el dominio y el nombre de la
+política. «Ir a inicio» reutiliza la acción de la barra; el mensaje se retira
+cuando CEF confirma otro documento principal o se publica otra política.
+Los avisos se copian a la cola Qt y se comprueba su correspondencia con el
+estado antes de mostrarlos. La comprobación en Release sigue pendiente.
 
 ## Comprobaciones pendientes
 
-E2 continuará con los avisos Qt de bloqueo y la acción de recarga explícita
-de la política. El panel y el selector ya están implementados; la validación
-anterior no equivale a cerrar el hito completo.
+El aviso Qt ya está implementado y comprobado manualmente en Debug. La acción
+de recarga explícita de la política y las comprobaciones en Release siguen
+pendientes; esta validación no equivale a cerrar el hito completo.
 
 E3 completará la regresión y comprobación manual Debug/Release de la entrega,
 las capturas, las pruebas controladas de ausencia de petición HTTP, la distribución

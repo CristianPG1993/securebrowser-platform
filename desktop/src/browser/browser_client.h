@@ -32,6 +32,8 @@ struct BrowserClientCallbacks {
     std::function<void(bool)> on_forward_availability_changed;
     // Recargar se habilita cuando la consulta encuentra una entrada en el historial.
     std::function<void(bool)> on_reload_availability_changed;
+    // Se emite al confirmar un nuevo documento principal; no significa que haya terminado de cargar.
+    std::function<void()> on_main_document_started;
 };
 
 // Crea una única instancia del navegador y recibe sus avisos de vida, dirección e historial.
