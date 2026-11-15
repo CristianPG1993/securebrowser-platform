@@ -102,12 +102,13 @@ trabajo de esta entrega. No se atribuyen a esta revisión capturas, nuevos
 informes automatizados ni una regresión completa no aportados. La comprobación
 del selector en Release continúa pendiente.
 
-Cambiar de política constituye una publicación explícita y establece un nuevo
-instante monotónico de validación. Leer el estado o navegar no renueva los
-15 minutos; elegir otra vez la opción ya confirmada tampoco la republica.
-El cambio afecta a nuevas navegaciones y no retira una página que ya estuviera
-visible. La caducidad del selector no se ha comprobado esperando 15 minutos
-en esta pasada manual.
+En la revisión de esta primera comprobación, cambiar de política constituía
+una publicación explícita con otro instante monotónico de validación y un
+plazo de 15 minutos. Leer el estado o navegar no lo renovaba. No se comprobó
+esa caducidad esperando tiempo real. El ajuste posterior de alcance se recoge
+más abajo. El cambio de política afecta a nuevas navegaciones y no retira
+una página que ya estuviera visible; elegir otra vez la opción confirmada
+tampoco la republica.
 
 ### Botón Inicio
 
@@ -120,7 +121,8 @@ excepciones de seguridad ni renovación del plazo de validación.
 
 La comprobación en Release queda pendiente. El icono estándar se representa
 como carpeta en el tema de Windows utilizado; su sustitución por una casa se
-aplazó. La acción «Ir a inicio» del aviso de bloqueo utiliza la misma navegación.
+aplazó. La acción «Ir a inicio» del aviso de bloqueo se añadió en el bloque
+posterior.
 
 ### Aviso Qt de bloqueo
 
@@ -128,19 +130,56 @@ Se confirmó en Debug el aviso con el motivo, el dominio y el nombre de la
 política. «Ir a inicio» reutiliza la acción de la barra; el mensaje se retira
 cuando CEF confirma otro documento principal o se publica otra política.
 Los avisos se copian a la cola Qt y se comprueba su correspondencia con el
-estado antes de mostrarlos. La comprobación en Release sigue pendiente.
+estado antes de mostrarlos. Esta comprobación precede al ajuste de vigencia
+descrito a continuación.
+
+### Ajuste de alcance: demo sin caducidad
+
+El 15 de noviembre de 2026 se aprobó que las políticas de la demostración
+autónoma no caduquen por tiempo. La composición construye explícitamente ese
+gestor con `PolicyManager::Validity::Unlimited`; el modo normal y los
+constructores sin opción conservan la vigencia monotónica de 15 minutos.
+La configuración pertenece a cada gestor y no puede cambiarse desde el
+selector ni a través de un snapshot.
+
+La interfaz identifica la política demo como «sin caducidad». Se descarta el
+botón de recarga por vencimiento y su indicador periódico, que ya no son
+necesarios para este recorrido. La validación de políticas, las guardas de
+contexto y las decisiones del motor siguen siendo obligatorias. No se añade
+una política local como sustitución del modo conectado.
+
+Se prepararon pruebas con reloj controlado para la disponibilidad de ambas
+políticas demo tras 15 minutos y un día adicional, la conservación de sus
+decisiones de dominio y el bloqueo sin política o tras cerrar el contexto.
+Otra prueba compara un gestor ilimitado con uno predeterminado en el límite
+exacto de 15 minutos; este último debe caducar.
+
+### Validación del ajuste sin caducidad
+
+Se confirmó el funcionamiento tras compilar las pruebas de seguridad y el
+ejecutable en Debug y Release. La comprobación manual incluyó el indicador
+«sin caducidad», Wikipedia permitida, YouTube bloqueado con la restrictiva
+y el cambio a Libre dentro de la misma aplicación.
+
+El último `desktop/build/tests/Testing/Temporary/LastTest.log` disponible
+corresponde a Release y registra 283 pruebas superadas y cero fallos. Incluye
+los casos nuevos de vigencia ilimitada y aislamiento del límite predeterminado.
+Ese archivo conserva la última pasada; no se presenta como informe separado
+de Debug. La comprobación del tiempo transcurrido se realiza con reloj
+controlado, sin esperar 15 minutos durante la prueba manual.
 
 ## Comprobaciones pendientes
 
-El aviso Qt ya está implementado y comprobado manualmente en Debug. La acción
-de recarga explícita de la política y las comprobaciones en Release siguen
-pendientes; esta validación no equivale a cerrar el hito completo.
+El recorrido funcional de E2 está implementado y el ajuste de demo sin
+caducidad ya se ha comprobado. La validación anterior no equivale a completar
+la verificación y entrega de E3.
 
 E3 completará la regresión y comprobación manual Debug/Release de la entrega,
 las capturas, las pruebas controladas de ausencia de petición HTTP, la distribución
 portátil y su guía. La observación de una web pública bloqueada no acredita por
-sí sola que no se haya enviado ninguna petición al destino. La vigencia sigue
-siendo monotónica de 15 minutos y no se renueva por navegar.
+sí sola que no se haya enviado ninguna petición al destino. La vigencia
+predeterminada sigue siendo monotónica de 15 minutos y no se renueva por
+navegar; la demo utiliza la configuración explícita sin caducidad.
 
 La aceptación de la integración centralizada permanece en #122 y #123; la de
 avisos completos y producción de eventos, en #120 y #121. Este registro no cierra

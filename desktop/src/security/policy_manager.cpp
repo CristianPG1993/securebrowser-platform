@@ -14,10 +14,16 @@
 
 namespace sbp {
 
-// Conserva el reloj proporcionado y rechaza una dependencia que no se pueda invocar.
-PolicyManager::PolicyManager(NowFunction now) : now_(std::move(now)) {
+PolicyManager::PolicyManager(Validity validity) : PolicyManager(&Clock::now, validity) {}
+
+// Conserva el reloj y la vigencia explícita; rechaza dependencias u opciones inválidas.
+PolicyManager::PolicyManager(NowFunction now, Validity validity)
+    : now_(std::move(now)), validity_(validity) {
     if (!now_) {
         throw std::invalid_argument("PolicyManager requires a clock function.");
+    }
+    if (validity_ != Validity::FifteenMinutes && validity_ != Validity::Unlimited) {
+        throw std::invalid_argument("PolicyManager requires a known validity option.");
     }
 }
 
@@ -127,7 +133,9 @@ PolicyManager::PolicyReadResult PolicyManager::ReadPolicy(const SecurityContext&
         return {};
     }
 
-    if (now - *state->validatedAt >= std::chrono::minutes{15}) {
+    // Unlimited omite únicamente la caducidad; las guardas de contexto y política siguen siendo obligatorias.
+    if (validity_ == Validity::FifteenMinutes
+        && now - *state->validatedAt >= std::chrono::minutes{15}) {
         return {PolicyAvailability::Expired, state};
     }
 

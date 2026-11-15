@@ -785,6 +785,40 @@ TEST(PolicyManagerTest, RejectsEmptyClockFunction) {
     EXPECT_THROW(PolicyManager{PolicyManager::NowFunction{}}, std::invalid_argument);
 }
 
+// Una opción desconocida no debe convertirse accidentalmente en vigencia ilimitada.
+TEST(PolicyManagerTest, RejectsUnknownValidity) {
+    const auto unknown = static_cast<PolicyManager::Validity>(-1);
+    EXPECT_THROW(PolicyManager{unknown}, std::invalid_argument);
+    EXPECT_THROW((PolicyManager{&PolicyManager::Clock::now, unknown}), std::invalid_argument);
+}
+
+// Activar Unlimited en un gestor no modifica el límite predeterminado de otro gestor.
+TEST(PolicyManagerTest, UnlimitedValidityDoesNotChangeDefaultExpiration) {
+    PolicyManager::Clock::time_point now{};
+    // Ambos gestores comparten el reloj controlado del test, que vive más que ellos.
+    const PolicyManager::NowFunction clock = [&now] { return now; };
+    PolicyManager normal(clock);
+    PolicyManager unlimited(clock, PolicyManager::Validity::Unlimited);
+    const auto normal_context = normal.BeginContext(10, 20);
+    const auto unlimited_context = unlimited.BeginContext(10, 20);
+    ASSERT_TRUE(normal_context.has_value());
+    ASSERT_TRUE(unlimited_context.has_value());
+
+    const PolicySnapshot::Timestamp timestamp{};
+    const PolicySnapshot policy(1, 20, "Validity isolation policy",
+        UrlFilteringConfig(false, FilterMode::Denylist, {}),
+        DownloadControlConfig(false, FilterMode::Denylist, {}), timestamp, timestamp);
+    ASSERT_EQ(PolicyPublicationResult::Published, normal.PublishPolicy(*normal_context, policy));
+    ASSERT_EQ(PolicyPublicationResult::Published, unlimited.PublishPolicy(*unlimited_context, policy));
+
+    now += std::chrono::minutes{15} - std::chrono::microseconds{1};
+    EXPECT_EQ(PolicyAvailability::Available, normal.ReadPolicy(*normal_context).availability);
+    EXPECT_EQ(PolicyAvailability::Available, unlimited.ReadPolicy(*unlimited_context).availability);
+    now += std::chrono::microseconds{1};
+    EXPECT_EQ(PolicyAvailability::Expired, normal.ReadPolicy(*normal_context).availability);
+    EXPECT_EQ(PolicyAvailability::Available, unlimited.ReadPolicy(*unlimited_context).availability);
+}
+
 // Una política completa de la compañía actual puede publicarse sin cambiar el contexto.
 TEST(PolicyManagerTest, PublishesValidPolicyForCurrentContext) {
     const PolicySnapshot::Timestamp timestamp{std::chrono::microseconds{1'700'000'000'123'456}};

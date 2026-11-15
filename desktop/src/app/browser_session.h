@@ -51,7 +51,7 @@ private:
         BrowserWindowUi& window_ui, const std::shared_ptr<PolicyManager>& manager) const;
 
     // Publica en el contexto original y solo confirma el cambio visual después del éxito.
-    // Un cambio explícito renueva la vigencia; no inicia otro contexto ni navega automáticamente.
+    // La política demo no caduca; el cambio no inicia otro contexto ni navega automáticamente.
     void ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyManager& manager,
                               const SecurityContext& context, int index) const;
 

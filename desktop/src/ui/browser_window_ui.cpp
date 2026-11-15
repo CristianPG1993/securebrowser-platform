@@ -109,7 +109,7 @@ void BrowserWindowUi::ConfigureStatusPanel() {
 
     mode_label_.setObjectName("mode_label");
     mode_label_.setTextFormat(Qt::PlainText);
-    mode_label_.setText(QStringLiteral("Modo demostración — política local"));
+    mode_label_.setText(QStringLiteral("Modo demostración — política local sin caducidad"));
     mode_label_.setWordWrap(true);
 
     policy_label_.setObjectName("policy_label");
@@ -121,7 +121,7 @@ void BrowserWindowUi::ConfigureStatusPanel() {
     policy_selector_.setObjectName("policy_selector");
     policy_selector_.setAccessibleName(QStringLiteral("Seleccionar política"));
     policy_selector_.setToolTip(QStringLiteral(
-        "Cambiar la política se aplica a nuevas navegaciones e inicia otros 15 minutos de vigencia."));
+        "Cambiar la política se aplica a nuevas navegaciones. Las políticas demo no caducan."));
     policy_selector_.setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     policy_selector_.setMinimumContentsLength(24);
     policy_selector_.setEnabled(false);

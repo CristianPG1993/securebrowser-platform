@@ -45,7 +45,7 @@ bool BrowserSession::PrepareDemoPolicy(PolicyManager& manager) const {
     }
 
     // Solo registra datos controlados y deja explícita la procedencia local, sin afirmar autenticación.
-    std::fprintf(stderr, "Demo policy published; source: local-demo; preset: %s; policy_id: %lld.\n",
+    std::fprintf(stderr, "Demo policy published; source: local-demo; preset: %s; policy_id: %lld; validity: unlimited.\n",
                  restricted ? "restricted" : "free", static_cast<long long>(policy.Id()));
     return true;
 }
@@ -119,7 +119,7 @@ void BrowserSession::ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyMana
     window_ui.SetSelectedPolicy(index);
     // El mensaje de la política anterior ya no corresponde al estado que acaba de publicarse.
     window_ui.ClearNavigationBlock();
-    std::fprintf(stderr, "Demo policy changed; source: local-demo; preset: %s; policy_id: %lld.\n",
+    std::fprintf(stderr, "Demo policy changed; source: local-demo; preset: %s; policy_id: %lld; validity: unlimited.\n",
                  index == 0 ? "free" : "restricted", static_cast<long long>(policy.Id()));
 }
 
@@ -141,7 +141,9 @@ int BrowserSession::Run(QApplication& qt_app) {
         BrowserNavigation navigation;
         // Paso 4.2: policy_manager conserva contexto, snapshot y vigencia; el handler comparte este gestor.
         // La política local se prepara una vez al arrancar, solo si se activó expresamente la demo.
-        const auto policy_manager = std::make_shared<PolicyManager>();
+        // La demo autónoma no caduca; el modo normal conserva el límite monotónico de 15 minutos.
+        const auto policy_manager = std::make_shared<PolicyManager>(startup_options_.IsUrlFilteringDemo()
+            ? PolicyManager::Validity::Unlimited : PolicyManager::Validity::FifteenMinutes);
         if (!PrepareDemoPolicy(*policy_manager)) {
             return 1;
         }
