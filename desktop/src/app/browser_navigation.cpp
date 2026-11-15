@@ -49,6 +49,7 @@ void BrowserNavigation::Connect(BrowserWindowUi& window_ui,
     ConnectBackControl(window_ui, browser_client, close_requested);
     ConnectForwardControl(window_ui, browser_client, close_requested);
     ConnectReloadControl(window_ui, browser_client, close_requested);
+    ConnectHomeControl(window_ui, browser_client, close_requested);
     ConnectAddressControl(window_ui, browser_client, close_requested);
 }
 
@@ -98,6 +99,21 @@ void BrowserNavigation::ConnectReloadControl(BrowserWindowUi& window_ui,
         // BindOnce conserva una referencia al cliente hasta ejecutar o descartar la tarea.
         if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::ReloadPage, browser_client))) {
             std::fputs("Qt reload request could not be posted to CEF.\n", stderr);
+        }
+    });
+}
+
+void BrowserNavigation::ConnectHomeControl(BrowserWindowUi& window_ui,
+                                          const CefRefPtr<BrowserClient>& browser_client,
+                                          const bool& close_requested) const {
+    // La petición se recibe en Qt; el cliente queda conservado por valor hasta retirar el control.
+    window_ui.SetHomeRequestHandler([browser_client, &close_requested] {
+        if (close_requested) {
+            return;
+        }
+        // La tarea utiliza el mismo cliente y handler de seguridad de las navegaciones normales.
+        if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::GoHome, browser_client))) {
+            std::fputs("Qt home navigation request could not be posted to CEF.\n", stderr);
         }
     });
 }

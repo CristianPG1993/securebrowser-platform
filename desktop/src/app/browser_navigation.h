@@ -58,6 +58,10 @@ private:
     void ConnectReloadControl(BrowserWindowUi& window_ui,
                               const CefRefPtr<BrowserClient>& browser_client,
                               const bool& close_requested) const;
+    // Inicio solo solicita navegar; no concede permisos ni modifica la política.
+    void ConnectHomeControl(BrowserWindowUi& window_ui,
+                            const CefRefPtr<BrowserClient>& browser_client,
+                            const bool& close_requested) const;
 };
 
 }  // namespace sbp

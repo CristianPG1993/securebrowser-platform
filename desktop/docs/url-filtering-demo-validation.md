@@ -109,6 +109,19 @@ El cambio afecta a nuevas navegaciones y no retira una página que ya estuviera
 visible. La caducidad del selector no se ha comprobado esperando 15 minutos
 en esta pasada manual.
 
+### Botón Inicio
+
+Se añadió Inicio a la barra de navegación y se confirmó manualmente su
+funcionamiento en Debug. La acción recorre `RequestHome`, el receptor de
+`BrowserNavigation`, la tarea CEF `GoHome` y `Navigate(HomeUrl())`.
+`HomeUrl()` conserva `https://example.com/` como destino compartido con el
+arranque; la solicitud utiliza el mismo handler y la política vigente, sin
+excepciones de seguridad ni renovación del plazo de validación.
+
+La comprobación en Release queda pendiente. El icono estándar se representa
+como carpeta en el tema de Windows utilizado; su sustitución por una casa se
+aplazó. La acción «Ir a inicio» del aviso de bloqueo todavía no está conectada.
+
 ## Comprobaciones pendientes
 
 E2 continuará con los avisos Qt de bloqueo y la acción de recarga explícita

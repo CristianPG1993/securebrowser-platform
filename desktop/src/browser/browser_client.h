@@ -71,6 +71,9 @@ public:
     // Carga la URL validada por la sesión en el documento principal, desde el hilo UI de CEF.
     void Navigate(std::string url);
 
+    // Solicita la página inicial mediante Navigate; OnBeforeBrowse conserva el control de seguridad.
+    void GoHome();
+
     // Solicita volver a la entrada anterior del historial, desde el hilo UI de CEF.
     void GoBack();
 
@@ -136,6 +139,9 @@ public:
 private:
     // La última referencia libera el cliente; su vida se gestiona mediante CefRefPtr.
     ~BrowserClient() override;
+
+    // Único destino compartido por el arranque y el botón Inicio; no implica permiso para cargarlo.
+    [[nodiscard]] static const char* HomeUrl() noexcept;
 
     // Publica una sola confirmación después de que termine el callback CEF actual.
     void NotifyClosed();

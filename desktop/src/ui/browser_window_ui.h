@@ -72,6 +72,9 @@ public:
     // Guarda la acción Recargar; la sesión la proporcionará al conectar este control con CEF.
     void SetReloadRequestHandler(std::function<void()> on_reload_requested);
 
+    // Guarda la acción Inicio y habilita su botón cuando existe un receptor.
+    void SetHomeRequestHandler(std::function<void()> on_home_requested);
+
     // Actualiza en Qt si se puede recargar la página actual.
     void SetReloadAvailable(bool available);
 
@@ -101,6 +104,8 @@ private:
     void RequestForward();
     void ConnectReloadButton();
     void RequestReload();
+    void ConnectHomeButton();
+    void RequestHome();
 
     // El orden permite destruir los controles antes del layout y de la ventana que los contiene.
     // Layout vertical para la barra de navegación, el contenido web y el panel inferior.
@@ -117,6 +122,9 @@ private:
 
     // Botón Recargar; empieza deshabilitado hasta recibir la disponibilidad desde CEF.
     QPushButton reload_button_;
+
+    // Inicio solicita el destino inicial; la política vigente sigue decidiendo si puede cargarse.
+    QPushButton home_button_;
 
     // Campo de texto Qt donde el usuario escribe y edita la dirección web.
     QLineEdit address_input_;
@@ -154,6 +162,9 @@ private:
 
     // Acción para recargar la página; se ejecuta únicamente al activar el botón Recargar.
     std::function<void()> on_reload_requested_;
+
+    // Se comparte como acción entre el botón Inicio y el futuro aviso de bloqueo.
+    std::function<void()> on_home_requested_;
 
     // Referencia no propietaria al diálogo local de ConfirmPageLeave; solo se utiliza en Qt.
     QMessageBox* page_leave_dialog_ = nullptr;

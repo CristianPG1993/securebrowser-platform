@@ -24,6 +24,7 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
       back_button_(&window),
       forward_button_(&window),
       reload_button_(&window),
+      home_button_(&window),
       address_input_(&window),
       browser_host_(std::move(host_callbacks), &window),
       status_panel_(&window),
@@ -64,6 +65,15 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     reload_button_.installEventFilter(this);
     ConnectReloadButton();
 
+    // Inicio conserva el mismo recorrido Qt→CEF que el resto de controles de navegación.
+    home_button_.setObjectName("home_button");
+    home_button_.setIcon(window.style()->standardIcon(QStyle::SP_DirHomeIcon));
+    home_button_.setToolTip(QStringLiteral("Inicio"));
+    home_button_.setAccessibleName(QStringLiteral("Ir a la página de inicio"));
+    home_button_.setEnabled(false);
+    home_button_.installEventFilter(this);
+    ConnectHomeButton();
+
     // El campo permite editar una dirección; Enter avisará a la sesión mediante su callback.
     address_input_.setObjectName("address_input");
     address_input_.setAccessibleName("Dirección web");
@@ -76,6 +86,7 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     navigation_layout_.addWidget(&back_button_);
     navigation_layout_.addWidget(&forward_button_);
     navigation_layout_.addWidget(&reload_button_);
+    navigation_layout_.addWidget(&home_button_);
     navigation_layout_.addWidget(&address_input_, 1);
     ConfigureStatusPanel();
     // El navegador ocupa el espacio restante y el panel queda debajo, sin superponer contenido.
@@ -255,6 +266,11 @@ void BrowserWindowUi::SetReloadRequestHandler(std::function<void()> on_reload_re
     on_reload_requested_ = std::move(on_reload_requested);
 }
 
+void BrowserWindowUi::SetHomeRequestHandler(std::function<void()> on_home_requested) {
+    on_home_requested_ = std::move(on_home_requested);
+    home_button_.setEnabled(static_cast<bool>(on_home_requested_));
+}
+
 void BrowserWindowUi::SetForwardAvailable(bool available) {
     forward_button_.setEnabled(available);
 }
@@ -308,6 +324,24 @@ void BrowserWindowUi::RequestReload() {
     }
 }
 
+void BrowserWindowUi::ConnectHomeButton() {
+    // La conexión por metadatos mantiene la carga diferida de Qt, igual que las otras flechas.
+    const QMetaObject* button_meta = home_button_.metaObject();
+    const int clicked_index = button_meta->indexOfSignal("clicked(bool)");
+    // Qt entrega la activación en su hilo; this pertenece a la vida de la interfaz.
+    const auto connection = QMetaObject::connect(&home_button_, button_meta->method(clicked_index),
+                                                this, [this] { RequestHome(); });
+    if (!connection) {
+        std::fputs("Qt home button activation could not be connected.\n", stderr);
+    }
+}
+
+void BrowserWindowUi::RequestHome() {
+    if (on_home_requested_) {
+        on_home_requested_();
+    }
+}
+
 void BrowserWindowUi::SetReloadAvailable(bool available) {
     reload_button_.setEnabled(available);
 }
@@ -334,14 +368,14 @@ bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
     }
     // Pasar a otro control Qt termina la edición, también al regresar desde otra aplicación.
     if ((watched == &back_button_ || watched == &forward_button_ || watched == &reload_button_
-         || watched == &policy_selector_)
+         || watched == &home_button_ || watched == &policy_selector_)
         && event->type() == QEvent::FocusIn) {
         FinishAddressEditing();
     }
     // CEF puede conservar el foco nativo aunque Qt recuerde un control de la barra como enfocado.
     // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.
     if ((watched == &address_input_ || watched == &back_button_ || watched == &forward_button_
-         || watched == &reload_button_ || watched == &policy_selector_)
+         || watched == &reload_button_ || watched == &home_button_ || watched == &policy_selector_)
         && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::FocusIn)) {
         QWidget* qt_window = address_input_.window();
         if (qt_window->isActiveWindow()) {

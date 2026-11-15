@@ -25,6 +25,11 @@ BrowserClient::BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<CefRequ
 
 BrowserClient::~BrowserClient() = default;
 
+const char* BrowserClient::HomeUrl() noexcept {
+    // Conserva el destino de arranque existente, sin excepciones por tratarse de Inicio.
+    return "https://example.com/";
+}
+
 CefRefPtr<CefLifeSpanHandler> BrowserClient::GetLifeSpanHandler() {
     // CEF recibe una referencia al mismo cliente, visto como receptor del ciclo de vida.
     return this;
@@ -59,7 +64,7 @@ void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
     CefBrowserSettings settings;
     // CEF copia los parámetros y conserva su referencia al cliente mientras crea el navegador.
     const bool accepted = CefBrowserHost::CreateBrowser(
-        window_info, this, "https://example.com/", settings, nullptr, nullptr);
+        window_info, this, HomeUrl(), settings, nullptr, nullptr);
     std::fprintf(stderr, "CEF browser creation requested; accepted: %d; CEF UI thread: %d.\n",
                  accepted, CefCurrentlyOn(TID_UI));
     if (!accepted) {
@@ -95,6 +100,12 @@ void BrowserClient::Navigate(std::string url) {
     // LoadURL solicita la carga asíncrona; CEF mantiene sus comprobaciones normales de certificados.
     frame->LoadURL(CefString(url));
     std::fprintf(stderr, "CEF navigation requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
+}
+
+void BrowserClient::GoHome() {
+    CEF_REQUIRE_UI_THREAD();
+    // Navigate descarta tareas tardías y LoadURL vuelve a pasar por el handler de seguridad.
+    Navigate(HomeUrl());
 }
 
 void BrowserClient::GoBack() {
