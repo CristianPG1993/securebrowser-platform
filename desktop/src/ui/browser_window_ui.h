@@ -3,10 +3,12 @@
 #include "ui/browser_host.h"
 
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QLineEdit>
 #include <QObject>
 #include <QPushButton>
 #include <QVBoxLayout>
+#include <QWidget>
 
 #include <functional>
 
@@ -31,6 +33,9 @@ public:
 
     // Recibe la URL actual en Qt; conserva el borrador mientras la sesión de edición siga abierta.
     void SetAddress(const QString& address);
+
+    // Muestra el panel inferior y el nombre de la política publicada; solo se llama desde Qt.
+    void SetPolicyName(const QString& policy_name);
 
     // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
     void ClearAddressFocus();
@@ -67,6 +72,9 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+    // Prepara el panel inferior, oculto hasta que la sesión confirma el modo demo.
+    void ConfigureStatusPanel();
+
     // Termina la edición al abandonar realmente la barra y muestra la última dirección de CEF.
     void FinishAddressEditing();
 
@@ -79,7 +87,7 @@ private:
     void RequestReload();
 
     // El orden permite destruir los controles antes del layout y de la ventana que los contiene.
-    // Layout vertical que coloca la barra de navegación arriba y el contenido web debajo.
+    // Layout vertical para la barra de navegación, el contenido web y el panel inferior.
     QVBoxLayout window_layout_;
 
     // Fila horizontal que reúne las flechas de navegación y el campo de dirección.
@@ -105,6 +113,12 @@ private:
 
     // Widget Qt con ventana nativa que aloja la ventana hija del navegador CEF.
     BrowserHost browser_host_;
+
+    // Controles del panel inferior; se destruyen antes que su layout y el panel que los contiene.
+    QWidget status_panel_;
+    QVBoxLayout status_layout_;
+    QLabel mode_label_;
+    QLabel policy_label_;
 
     // Aviso síncrono de la interfaz a la sesión; ambos trabajan en el hilo principal Qt.
     std::function<void(const QString&)> on_address_submitted_;

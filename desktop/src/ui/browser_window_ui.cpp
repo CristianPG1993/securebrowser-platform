@@ -25,7 +25,11 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
       forward_button_(&window),
       reload_button_(&window),
       address_input_(&window),
-      browser_host_(std::move(host_callbacks), &window) {
+      browser_host_(std::move(host_callbacks), &window),
+      status_panel_(&window),
+      status_layout_(&status_panel_),
+      mode_label_(&status_panel_),
+      policy_label_(&status_panel_) {
     // Aquí se configura el aspecto inicial de la ventana y la distribución de sus controles.
     window.setWindowTitle("SecureBrowser");
     window.resize(1024, 768);
@@ -72,9 +76,36 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     navigation_layout_.addWidget(&forward_button_);
     navigation_layout_.addWidget(&reload_button_);
     navigation_layout_.addWidget(&address_input_, 1);
-    // El layout principal mantiene la barra completa encima del contenido web.
+    ConfigureStatusPanel();
+    // El navegador ocupa el espacio restante y el panel queda debajo, sin superponer contenido.
     window_layout_.addLayout(&navigation_layout_);
-    window_layout_.addWidget(&browser_host_);
+    window_layout_.addWidget(&browser_host_, 1);
+    window_layout_.addWidget(&status_panel_);
+}
+
+void BrowserWindowUi::ConfigureStatusPanel() {
+    status_panel_.setObjectName("status_panel");
+    status_panel_.setAccessibleName(QStringLiteral("Estado de navegación"));
+    status_layout_.setContentsMargins(8, 4, 8, 4);
+    status_layout_.setSpacing(2);
+
+    mode_label_.setObjectName("mode_label");
+    mode_label_.setTextFormat(Qt::PlainText);
+    mode_label_.setText(QStringLiteral("Modo demostración — política local"));
+    mode_label_.setWordWrap(true);
+
+    policy_label_.setObjectName("policy_label");
+    // El nombre de política se presenta como texto, sin interpretar etiquetas HTML.
+    policy_label_.setTextFormat(Qt::PlainText);
+    policy_label_.setWordWrap(true);
+    status_layout_.addWidget(&mode_label_);
+    status_layout_.addWidget(&policy_label_);
+    status_panel_.hide();
+}
+
+void BrowserWindowUi::SetPolicyName(const QString& policy_name) {
+    policy_label_.setText(QStringLiteral("Política: %1").arg(policy_name));
+    status_panel_.show();
 }
 
 BrowserHost& BrowserWindowUi::GetBrowserHost() {
