@@ -24,8 +24,18 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
       back_button_(&window),
       forward_button_(&window),
       reload_button_(&window),
+      home_button_(&window),
       address_input_(&window),
-      browser_host_(std::move(host_callbacks), &window) {
+      browser_host_(std::move(host_callbacks), &window),
+      status_panel_(&window),
+      status_layout_(&status_panel_),
+      mode_label_(&status_panel_),
+      policy_label_(&status_panel_),
+      policy_selector_(&status_panel_),
+      block_panel_(&window),
+      block_layout_(&block_panel_),
+      block_message_(&block_panel_),
+      block_home_button_(&block_panel_) {
     // Aquí se configura el aspecto inicial de la ventana y la distribución de sus controles.
     window.setWindowTitle("SecureBrowser");
     window.resize(1024, 768);
@@ -59,6 +69,15 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     reload_button_.installEventFilter(this);
     ConnectReloadButton();
 
+    // Inicio conserva el mismo recorrido Qt→CEF que el resto de controles de navegación.
+    home_button_.setObjectName("home_button");
+    home_button_.setIcon(window.style()->standardIcon(QStyle::SP_DirHomeIcon));
+    home_button_.setToolTip(QStringLiteral("Inicio"));
+    home_button_.setAccessibleName(QStringLiteral("Ir a la página de inicio"));
+    home_button_.setEnabled(false);
+    home_button_.installEventFilter(this);
+    ConnectHomeButton();
+
     // El campo permite editar una dirección; Enter avisará a la sesión mediante su callback.
     address_input_.setObjectName("address_input");
     address_input_.setAccessibleName("Dirección web");
@@ -71,10 +90,136 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     navigation_layout_.addWidget(&back_button_);
     navigation_layout_.addWidget(&forward_button_);
     navigation_layout_.addWidget(&reload_button_);
+    navigation_layout_.addWidget(&home_button_);
     navigation_layout_.addWidget(&address_input_, 1);
-    // El layout principal mantiene la barra completa encima del contenido web.
+    ConfigureStatusPanel();
+    ConfigureNavigationBlockPanel();
+    // El navegador ocupa el espacio restante y el panel queda debajo, sin superponer contenido.
     window_layout_.addLayout(&navigation_layout_);
-    window_layout_.addWidget(&browser_host_);
+    window_layout_.addWidget(&browser_host_, 1);
+    window_layout_.addWidget(&block_panel_);
+    window_layout_.addWidget(&status_panel_);
+}
+
+void BrowserWindowUi::ConfigureStatusPanel() {
+    status_panel_.setObjectName("status_panel");
+    status_panel_.setAccessibleName(QStringLiteral("Estado de navegación"));
+    status_layout_.setContentsMargins(8, 4, 8, 4);
+    status_layout_.setSpacing(2);
+
+    mode_label_.setObjectName("mode_label");
+    mode_label_.setTextFormat(Qt::PlainText);
+    mode_label_.setText(QStringLiteral("Modo demostración — política local sin caducidad"));
+    mode_label_.setWordWrap(true);
+
+    policy_label_.setObjectName("policy_label");
+    // El nombre de política se presenta como texto, sin interpretar etiquetas HTML.
+    policy_label_.setTextFormat(Qt::PlainText);
+    policy_label_.setWordWrap(true);
+
+    // La sesión cargará las opciones y confirmará la política realmente publicada.
+    policy_selector_.setObjectName("policy_selector");
+    policy_selector_.setAccessibleName(QStringLiteral("Seleccionar política"));
+    policy_selector_.setToolTip(QStringLiteral(
+        "Cambiar la política se aplica a nuevas navegaciones. Las políticas demo no caducan."));
+    policy_selector_.setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    policy_selector_.setMinimumContentsLength(24);
+    policy_selector_.setEnabled(false);
+    policy_selector_.installEventFilter(this);
+    ConnectPolicySelector();
+
+    status_layout_.addWidget(&mode_label_);
+    status_layout_.addWidget(&policy_label_);
+    status_layout_.addWidget(&policy_selector_);
+    status_panel_.hide();
+}
+
+void BrowserWindowUi::ConfigureNavigationBlockPanel() {
+    block_panel_.setObjectName("navigation_block_panel");
+    block_panel_.setAccessibleName(QStringLiteral("Aviso de navegación bloqueada"));
+    block_layout_.setContentsMargins(8, 6, 8, 6);
+    block_layout_.setSpacing(8);
+
+    block_message_.setObjectName("navigation_block_message");
+    // El texto puede incluir un host; nunca se interpreta como HTML ni como un enlace.
+    block_message_.setTextFormat(Qt::PlainText);
+    block_message_.setWordWrap(true);
+
+    block_home_button_.setObjectName("navigation_block_home_button");
+    block_home_button_.setText(QStringLiteral("Ir a inicio"));
+    block_home_button_.setAccessibleName(QStringLiteral("Ir a inicio desde el aviso de bloqueo"));
+    block_home_button_.setEnabled(false);
+    block_home_button_.installEventFilter(this);
+    ConnectBlockHomeButton();
+
+    block_layout_.addWidget(&block_message_, 1);
+    block_layout_.addWidget(&block_home_button_);
+    block_panel_.hide();
+}
+
+void BrowserWindowUi::ShowNavigationBlock(const QString& message) {
+    // La sesión solo llama desde Qt, después de recibir el aviso de bloqueo aplicado por CEF.
+    block_message_.setText(message);
+    block_panel_.show();
+}
+
+void BrowserWindowUi::ClearNavigationBlock() {
+    // Retirar el aviso no cambia la política ni inicia una navegación.
+    block_message_.clear();
+    block_panel_.hide();
+}
+
+void BrowserWindowUi::SetPolicyName(const QString& policy_name) {
+    policy_label_.setText(QStringLiteral("Política: %1").arg(policy_name));
+    status_panel_.show();
+}
+
+void BrowserWindowUi::SetPolicyOptions(const QStringList& policy_names) {
+    // Cargar textos no selecciona ni publica nada; la sesión confirmará después un índice.
+    selected_policy_index_ = -1;
+    policy_selector_.setEnabled(false);
+    policy_selector_.clear();
+    policy_selector_.addItems(policy_names);
+    policy_selector_.setCurrentIndex(-1);
+}
+
+void BrowserWindowUi::SetSelectedPolicy(int index) {
+    if (index < 0 || index >= policy_selector_.count()) {
+        return;
+    }
+    selected_policy_index_ = index;
+    // activated solo procede de una elección del usuario; esta actualización no solicita otra publicación.
+    policy_selector_.setCurrentIndex(index);
+    policy_selector_.setEnabled(static_cast<bool>(on_policy_selected_));
+}
+
+void BrowserWindowUi::SetPolicySelectionHandler(std::function<void(int)> on_policy_selected) {
+    // Instala el receptor sin ejecutarlo; su captura pertenece a la vida de estos controles Qt.
+    on_policy_selected_ = std::move(on_policy_selected);
+    policy_selector_.setEnabled(on_policy_selected_ && selected_policy_index_ >= 0);
+}
+
+void BrowserWindowUi::ConnectPolicySelector() {
+    // Los metadatos evitan importar staticMetaObject y conservan la carga diferida de Qt del bootstrap.
+    const QMetaObject* selector_meta = policy_selector_.metaObject();
+    const int activated_index = selector_meta->indexOfSignal("activated(int)");
+    // Qt entrega el índice en su hilo principal; this vive mientras existe la conexión.
+    const auto connection = QMetaObject::connect(
+        &policy_selector_, selector_meta->method(activated_index), this,
+        [this](int index) { RequestPolicySelection(index); });
+    if (!connection) {
+        std::fputs("Qt policy selector activation could not be connected.\n", stderr);
+    }
+}
+
+void BrowserWindowUi::RequestPolicySelection(int index) {
+    // Conserva la confirmación anterior si la sesión rechaza o no puede publicar la solicitud.
+    policy_selector_.setCurrentIndex(selected_policy_index_);
+    if (index < 0 || index >= policy_selector_.count()
+        || index == selected_policy_index_ || !on_policy_selected_) {
+        return;
+    }
+    on_policy_selected_(index);
 }
 
 BrowserHost& BrowserWindowUi::GetBrowserHost() {
@@ -162,6 +307,13 @@ void BrowserWindowUi::SetReloadRequestHandler(std::function<void()> on_reload_re
     on_reload_requested_ = std::move(on_reload_requested);
 }
 
+void BrowserWindowUi::SetHomeRequestHandler(std::function<void()> on_home_requested) {
+    // Ambos botones ejecutan el mismo receptor; no se conserva una segunda función para el aviso.
+    on_home_requested_ = std::move(on_home_requested);
+    home_button_.setEnabled(static_cast<bool>(on_home_requested_));
+    block_home_button_.setEnabled(static_cast<bool>(on_home_requested_));
+}
+
 void BrowserWindowUi::SetForwardAvailable(bool available) {
     forward_button_.setEnabled(available);
 }
@@ -215,6 +367,36 @@ void BrowserWindowUi::RequestReload() {
     }
 }
 
+void BrowserWindowUi::ConnectHomeButton() {
+    // La conexión por metadatos mantiene la carga diferida de Qt, igual que las otras flechas.
+    const QMetaObject* button_meta = home_button_.metaObject();
+    const int clicked_index = button_meta->indexOfSignal("clicked(bool)");
+    // Qt entrega la activación en su hilo; this pertenece a la vida de la interfaz.
+    const auto connection = QMetaObject::connect(&home_button_, button_meta->method(clicked_index),
+                                                this, [this] { RequestHome(); });
+    if (!connection) {
+        std::fputs("Qt home button activation could not be connected.\n", stderr);
+    }
+}
+
+void BrowserWindowUi::ConnectBlockHomeButton() {
+    // La conexión por metadatos conserva la carga diferida de Qt del bootstrap.
+    const QMetaObject* button_meta = block_home_button_.metaObject();
+    const int clicked_index = button_meta->indexOfSignal("clicked(bool)");
+    // Este botón reutiliza RequestHome en el hilo Qt y no introduce una segunda ruta de navegación.
+    const auto connection = QMetaObject::connect(&block_home_button_, button_meta->method(clicked_index),
+                                                this, [this] { RequestHome(); });
+    if (!connection) {
+        std::fputs("Qt blocked navigation home action could not be connected.\n", stderr);
+    }
+}
+
+void BrowserWindowUi::RequestHome() {
+    if (on_home_requested_) {
+        on_home_requested_();
+    }
+}
+
 void BrowserWindowUi::SetReloadAvailable(bool available) {
     reload_button_.setEnabled(available);
 }
@@ -240,14 +422,16 @@ bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
         }
     }
     // Pasar a otro control Qt termina la edición, también al regresar desde otra aplicación.
-    if ((watched == &back_button_ || watched == &forward_button_ || watched == &reload_button_)
+    if ((watched == &back_button_ || watched == &forward_button_ || watched == &reload_button_
+         || watched == &home_button_ || watched == &policy_selector_ || watched == &block_home_button_)
         && event->type() == QEvent::FocusIn) {
         FinishAddressEditing();
     }
     // CEF puede conservar el foco nativo aunque Qt recuerde un control de la barra como enfocado.
     // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.
     if ((watched == &address_input_ || watched == &back_button_ || watched == &forward_button_
-         || watched == &reload_button_)
+         || watched == &reload_button_ || watched == &home_button_ || watched == &policy_selector_
+         || watched == &block_home_button_)
         && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::FocusIn)) {
         QWidget* qt_window = address_input_.window();
         if (qt_window->isActiveWindow()) {

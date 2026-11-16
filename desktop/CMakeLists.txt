@@ -167,6 +167,7 @@ if(BUILD_TESTING)
 
     # GoogleTest proporciona main(); nuestras pruebas enlazan únicamente el núcleo y gtest.
     add_executable(sbp_security_tests
+        tests/demo/demo_policy_source_test.cpp
         tests/security/download_control_config_test.cpp
         tests/security/policy_manager_test.cpp
         tests/security/policy_snapshot_test.cpp
@@ -175,6 +176,8 @@ if(BUILD_TESTING)
         tests/security/url_filter_test.cpp
         tests/security/url_filtering_config_test.cpp
         tests/security/url_target_test.cpp
+        src/demo/demo_policy_source.h
+        src/demo/demo_policy_source.cpp
     )
     target_link_libraries(sbp_security_tests PRIVATE sbp_security_core GTest::gtest_main)
     sbp_deploy_icu(sbp_security_tests)
@@ -293,6 +296,7 @@ if(SBP_BUILD_CEF_TESTS)
     add_library(sbp_cef_adapter_tests SHARED
         tests/browser/browser_client_test.cpp
         tests/browser/browser_security_config_test.cpp
+        tests/browser/startup_options_test.cpp
         tests/browser/cef_adapter_test_app.h
         tests/browser/cef_adapter_test_app.cpp
         tests/browser/cef_adapter_test_entry_win.cpp
@@ -304,6 +308,10 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/local_http_test_server.h
         tests/browser/local_http_test_server.cpp
         tests/browser/local_http_test_server_test.cpp
+        tests/browser/demo_policy_navigation_test.cpp
+        tests/browser/document_policy_test_client.h
+        tests/browser/document_policy_test_client.cpp
+        tests/browser/document_policy_change_test.cpp
         tests/browser/history_policy_test_client.h
         tests/browser/history_policy_test_client.cpp
         tests/browser/history_policy_change_test.cpp
@@ -319,6 +327,10 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/navigation_action_test_client.h
         tests/browser/navigation_action_test_client.cpp
         tests/browser/navigation_action_test.cpp
+        src/demo/demo_policy_source.h
+        src/demo/demo_policy_source.cpp
+        src/app/startup_options.h
+        src/app/startup_options.cpp
         src/browser/browser_security_config.h
         src/browser/browser_security_config.cpp
         src/browser/browser_client.h
@@ -383,6 +395,8 @@ endif()
 # Nuestra DLL implementa la entrada que invoca el bootstrap.
 add_library(SecureBrowser SHARED
     src/app/app_entry_win.cpp
+    src/app/startup_options.h
+    src/app/startup_options.cpp
     src/app/browser_session.cpp
     src/app/browser_session.h
     src/app/browser_navigation.cpp
@@ -404,6 +418,8 @@ add_library(SecureBrowser SHARED
     src/browser/security_request_handler.cpp
     src/browser/security_request_handler.h
     src/browser/navigation_decision_notice.h
+    src/demo/demo_policy_source.h
+    src/demo/demo_policy_source.cpp
     src/diagnostics/diagnostics_log.cpp
     src/diagnostics/diagnostics_log.h
     src/ui/browser_host.cpp

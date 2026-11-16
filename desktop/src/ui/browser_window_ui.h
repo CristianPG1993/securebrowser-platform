@@ -2,11 +2,15 @@
 
 #include "ui/browser_host.h"
 
+#include <QComboBox>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QLineEdit>
 #include <QObject>
 #include <QPushButton>
+#include <QStringList>
 #include <QVBoxLayout>
+#include <QWidget>
 
 #include <functional>
 
@@ -32,6 +36,25 @@ public:
     // Recibe la URL actual en Qt; conserva el borrador mientras la sesión de edición siga abierta.
     void SetAddress(const QString& address);
 
+    // Muestra el panel inferior y el nombre de la política publicada; solo se llama desde Qt.
+    void SetPolicyName(const QString& policy_name);
+
+    // Carga las opciones que proporciona la sesión, sin seleccionar ni publicar una política.
+    void SetPolicyOptions(const QStringList& policy_names);
+
+    // Refleja la selección confirmada por la sesión después de publicar una política válida.
+    void SetSelectedPolicy(int index);
+
+    // Guarda el receptor de solicitudes del desplegable; ambos se ejecutan en el hilo Qt.
+    void SetPolicySelectionHandler(std::function<void(int)> on_policy_selected);
+
+    // Muestra en Qt el texto de un bloqueo aplicado y ofrece la acción Inicio ya conectada.
+    // La sesión prepara el motivo; la interfaz no evalúa políticas ni decide permisos.
+    void ShowNavigationBlock(const QString& message);
+
+    // Retira el aviso cuando la sesión determina que ya no corresponde al estado mostrado.
+    void ClearNavigationBlock();
+
     // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
     void ClearAddressFocus();
 
@@ -56,6 +79,9 @@ public:
     // Guarda la acción Recargar; la sesión la proporcionará al conectar este control con CEF.
     void SetReloadRequestHandler(std::function<void()> on_reload_requested);
 
+    // Guarda una única acción Inicio y habilita sus botones de la barra y del aviso si existe receptor.
+    void SetHomeRequestHandler(std::function<void()> on_home_requested);
+
     // Actualiza en Qt si se puede recargar la página actual.
     void SetReloadAvailable(bool available);
 
@@ -67,6 +93,19 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+    // Prepara el panel inferior, oculto hasta que la sesión confirma el modo demo.
+    void ConfigureStatusPanel();
+
+    // Prepara un aviso no modal, separado del indicador exclusivo del modo demo.
+    void ConfigureNavigationBlockPanel();
+    // Conecta «Ir a inicio» con RequestHome, igual que el botón de la barra.
+    void ConnectBlockHomeButton();
+
+    // Conecta la elección del usuario con una solicitud a la sesión.
+    void ConnectPolicySelector();
+    // Conserva la selección confirmada mientras la sesión valida y publica la nueva política.
+    void RequestPolicySelection(int index);
+
     // Termina la edición al abandonar realmente la barra y muestra la última dirección de CEF.
     void FinishAddressEditing();
 
@@ -77,9 +116,11 @@ private:
     void RequestForward();
     void ConnectReloadButton();
     void RequestReload();
+    void ConnectHomeButton();
+    void RequestHome();
 
     // El orden permite destruir los controles antes del layout y de la ventana que los contiene.
-    // Layout vertical que coloca la barra de navegación arriba y el contenido web debajo.
+    // Layout vertical para la barra de navegación, el contenido web y el panel inferior.
     QVBoxLayout window_layout_;
 
     // Fila horizontal que reúne las flechas de navegación y el campo de dirección.
@@ -94,6 +135,9 @@ private:
     // Botón Recargar; empieza deshabilitado hasta recibir la disponibilidad desde CEF.
     QPushButton reload_button_;
 
+    // Inicio solicita el destino inicial; la política vigente sigue decidiendo si puede cargarse.
+    QPushButton home_button_;
+
     // Campo de texto Qt donde el usuario escribe y edita la dirección web.
     QLineEdit address_input_;
 
@@ -106,6 +150,26 @@ private:
     // Widget Qt con ventana nativa que aloja la ventana hija del navegador CEF.
     BrowserHost browser_host_;
 
+    // Controles del panel inferior; se destruyen antes que su layout y el panel que los contiene.
+    QWidget status_panel_;
+    QVBoxLayout status_layout_;
+    QLabel mode_label_;
+    QLabel policy_label_;
+    QComboBox policy_selector_;
+
+    // Última selección confirmada; -1 significa que todavía no se ha confirmado ninguna.
+    int selected_policy_index_ = -1;
+
+    // El aviso tiene su propio panel: mostrar un bloqueo no debe activar los controles de demo.
+    // El orden conserva la destrucción de los controles antes que su layout y su contenedor.
+    QWidget block_panel_;
+    QHBoxLayout block_layout_;
+    QLabel block_message_;
+    QPushButton block_home_button_;
+
+    // Recibe un índice de presentación; la sesión decide qué snapshot construir y publicar.
+    std::function<void(int)> on_policy_selected_;
+
     // Aviso síncrono de la interfaz a la sesión; ambos trabajan en el hilo principal Qt.
     std::function<void(const QString&)> on_address_submitted_;
 
@@ -117,6 +181,9 @@ private:
 
     // Acción para recargar la página; se ejecuta únicamente al activar el botón Recargar.
     std::function<void()> on_reload_requested_;
+
+    // Se comparte como acción entre el botón Inicio y el aviso de bloqueo.
+    std::function<void()> on_home_requested_;
 
     // Referencia no propietaria al diálogo local de ConfirmPageLeave; solo se utiliza en Qt.
     QMessageBox* page_leave_dialog_ = nullptr;

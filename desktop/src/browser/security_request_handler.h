@@ -37,6 +37,10 @@ public:
                         bool user_gesture,
                         bool is_redirect) override;
 
+    // Reevalúa la URL del documento abierto con la política vigente, en el hilo UI de CEF.
+    // true exige retirar el documento; este método comunica el bloqueo pero no navega por sí solo.
+    [[nodiscard]] bool ShouldBlockDocument(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame);
+
 private:
     // Destruye el handler al desaparecer el último CefRefPtr; el código externo no hace delete.
     ~SecurityRequestHandler() override = default;
@@ -44,6 +48,11 @@ private:
     // Reconoce solo about:blank y, fuera del documento principal, about:srcdoc.
     // Una navegación web originada por esos documentos seguirá sometida al evaluador.
     [[nodiscard]] static bool IsAllowedInternalNavigation(const CefString& url, bool isMainFrame);
+
+    // Comparte las mismas guardas para una petición nueva y para un documento ya existente.
+    // true indica bloqueo; la decisión continúa perteneciendo a PolicyManager y UrlFilter.
+    [[nodiscard]] bool ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                      const CefString& url, bool isRedirect);
 
     // La entrega fallida se diagnostica y nunca convierte una cancelación en permiso.
     void NotifyBlocked(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,

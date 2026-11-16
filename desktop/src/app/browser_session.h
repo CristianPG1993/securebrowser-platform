@@ -1,20 +1,31 @@
 #pragma once
 
 #include "app/browser_lifecycle.h"
+#include "app/startup_options.h"
+
+#include <cstdint>
+#include <functional>
+#include <memory>
 
 class QApplication;
+class QString;
 
 namespace sbp {
 
+class BrowserWindow;
 class BrowserWindowUi;
+class PolicyManager;
+class SecurityContext;
 struct NavigationDecisionNotice;
 
-// Coordina la ventana Qt y su navegador CEF; el arranque de Windows queda fuera.
+// Compone la ventana, sus controles, el gestor de políticas y los adaptadores Qt/CEF.
+// Conecta esos objetos durante una sesión; el arranque de Windows queda en app_entry_win.cpp.
 // La coordinación y su estado pertenecen al hilo principal de Qt.
-// El receptor estático OnNavigationDecision se ejecuta en el hilo UI de CEF.
+// El receptor de CEF encola una copia; OnNavigationDecision se ejecuta únicamente en Qt.
 class BrowserSession final {
 public:
-    BrowserSession() = default;
+    // Conserva una copia de las opciones validadas; recibirlas no carga ninguna política.
+    explicit BrowserSession(const StartupOptions& startup_options);
     BrowserSession(const BrowserSession&) = delete;
     BrowserSession& operator=(const BrowserSession&) = delete;
 
@@ -26,13 +37,49 @@ public:
     int Run(QApplication& qt_app);
 
 private:
-    // Receptor provisional observable; UI y productor de eventos se conectarán en sus tareas propias.
-    static bool OnNavigationDecision(const NavigationDecisionNotice& notice);
+    // Prepara el gestor que utilizará el handler: en modo demo crea contexto y publica el snapshot.
+    // true indica que la preparación permite continuar el arranque; el permiso de navegar lo decide el motor.
+    [[nodiscard]] bool PrepareDemoPolicy(PolicyManager& manager) const;
 
+    // Consulta el gestor por referencia de lectura y entrega el nombre publicado a los controles Qt.
+    // Solo configura la presentación; leer el estado no renueva su vigencia.
+    void ConfigureStatus(BrowserWindowUi& window_ui, const PolicyManager& manager) const;
+
+    // Ofrece los presets únicamente en demo y vincula sus solicitudes al contexto inicial.
+    // La función guardada conserva el gestor y el cliente CEF, pero no prolonga la vida de la UI.
+    void ConfigurePolicySelector(
+        BrowserWindowUi& window_ui, const std::shared_ptr<PolicyManager>& manager,
+        const CefRefPtr<BrowserClient>& browser_client) const;
+
+    // Publica en el contexto original y solo confirma el cambio visual después del éxito.
+    // Después solicita en CEF la reevaluación del documento abierto con la política vigente.
+    void ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyManager& manager,
+                              const SecurityContext& context, int index,
+                              const CefRefPtr<BrowserClient>& browser_client) const;
+
+    // Prepara el receptor ejecutado en CEF; no lee controles ni estado Qt desde ese hilo.
+    std::function<bool(const NavigationDecisionNotice&)> MakeNavigationDecisionHandler(
+        BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager);
+
+    // Descarta avisos obsoletos y presenta el bloqueo en Qt, sin reevaluar permisos de navegación.
+    void OnNavigationDecision(const NavigationDecisionNotice& notice, const PolicyManager& manager);
+
+    // Traduce motivos controlados a texto de presentación, sin registrar URL ni datos de navegación.
+    static QString NavigationBlockMessage(const NavigationDecisionNotice& notice, const QString& policy_name);
+
+    // Copia de los argumentos validados: modo de ejecución y selección inicial de política.
+    // La política publicada se consulta en PolicyManager; el modo queda fijado durante toda la sesión.
+    const StartupOptions startup_options_;
+
+    // Coordina la preparación de CEF y del HWND anfitrión, la creación del navegador y su cierre.
     // Vive hasta después de CefShutdown; los callbacks consultan su estado desde Qt.
     BrowserLifecycle lifecycle_;
-    // Referencia no propietaria a los controles; solo se consulta en Qt y se retira antes de destruirlos.
+    // Apunta al objeto window_ui local de Run para que los callbacks Qt encuentren los controles.
+    // No es propietario de ese objeto y se pone a nullptr antes de destruirlo.
     BrowserWindowUi* window_ui_ = nullptr;
+
+    // Solo Qt lo modifica; impide reemplazar un aviso reciente por otro anterior o duplicado.
+    std::uint64_t last_notice_operation_id_ = 0;
 
 };
 

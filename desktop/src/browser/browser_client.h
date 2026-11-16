@@ -1,5 +1,7 @@
 #pragma once
 
+#include "browser/security_request_handler.h"
+
 #include "include/cef_client.h"
 #include "include/cef_display_handler.h"
 #include "include/cef_jsdialog_handler.h"
@@ -32,6 +34,8 @@ struct BrowserClientCallbacks {
     std::function<void(bool)> on_forward_availability_changed;
     // Recargar se habilita cuando la consulta encuentra una entrada en el historial.
     std::function<void(bool)> on_reload_availability_changed;
+    // Se emite al confirmar un nuevo documento principal; no significa que haya terminado de cargar.
+    std::function<void()> on_main_document_started;
 };
 
 // Crea una única instancia del navegador y recibe sus avisos de vida, dirección e historial.
@@ -43,7 +47,7 @@ class BrowserClient final : public CefClient,
                             public CefJSDialogHandler {
 public:
     // Conserva los avisos y el handler de seguridad como dependencias separadas.
-    BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<CefRequestHandler> requestHandler);
+    BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<SecurityRequestHandler> requestHandler);
 
     // Compartimos referencias al cliente, sin copiar el objeto ni su contador.
     BrowserClient(const BrowserClient&) = delete;
@@ -71,6 +75,9 @@ public:
     // Carga la URL validada por la sesión en el documento principal, desde el hilo UI de CEF.
     void Navigate(std::string url);
 
+    // Solicita la página inicial mediante Navigate; OnBeforeBrowse conserva el control de seguridad.
+    void GoHome();
+
     // Solicita volver a la entrada anterior del historial, desde el hilo UI de CEF.
     void GoBack();
 
@@ -79,6 +86,10 @@ public:
 
     // Solicita recargar la página actual, desde el hilo UI de CEF.
     void ReloadPage();
+
+    // Reevalúa el documento principal tras cambiar la política, en el hilo UI de CEF.
+    // Si el motor lo bloquea, lo sustituye por about:blank y conserva el aviso del bloqueo.
+    void RevalidateCurrentDocument();
 
     // Ajusta la ventana hija al área nativa actual de su padre, desde el hilo UI de CEF.
     void ResizeBrowser();
@@ -137,6 +148,9 @@ private:
     // La última referencia libera el cliente; su vida se gestiona mediante CefRefPtr.
     ~BrowserClient() override;
 
+    // Único destino compartido por el arranque y el botón Inicio; no implica permiso para cargarlo.
+    [[nodiscard]] static const char* HomeUrl() noexcept;
+
     // Publica una sola confirmación después de que termine el callback CEF actual.
     void NotifyClosed();
 
@@ -148,11 +162,15 @@ private:
     // Consulta una sola entrada sin esperar al final de la carga; los avisos actualizan ambas flechas en Qt.
     void RefreshNavigationAvailability(CefRefPtr<CefBrowser> browser);
 
+    // Aplica la decisión del handler al documento abierto; no contiene reglas de filtrado.
+    // true indica que su retirada ya está pendiente o acaba de solicitarse.
+    [[nodiscard]] bool EnforceDocumentPolicy(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame);
+
     // Se fijan al construir el cliente; quien las proporciona controla la vida de sus capturas.
     const BrowserClientCallbacks callbacks_;
 
     // Mantiene vivo el handler recibido; CEF obtendrá referencias al mismo objeto.
-    const CefRefPtr<CefRequestHandler> request_handler_;
+    const CefRefPtr<SecurityRequestHandler> request_handler_;
 
     // Solo se lee o modifica en el hilo UI de CEF. -1 significa que no hay navegador registrado.
     // Guardamos un identificador, sin mantener una referencia circular navegador -> cliente -> navegador.
@@ -162,6 +180,9 @@ private:
     bool close_notified_ = false;
     // Conserva una petición anterior a OnAfterCreated; solo se utiliza en el hilo UI de CEF.
     bool focus_requested_ = false;
+
+    // Solo CEF lo modifica; impide mantener un documento revocado mediante beforeunload.
+    bool document_retirement_pending_ = false;
 
     // El callback nativo permanece en CEF; Qt recibe únicamente una función de respuesta con un booleano.
     CefRefPtr<CefJSDialogCallback> page_leave_callback_;

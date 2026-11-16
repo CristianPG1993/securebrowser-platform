@@ -16,7 +16,7 @@
 namespace sbp {
 
 // Conserva las dependencias y rechaza un cliente que carezca de handler de seguridad.
-BrowserClient::BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<CefRequestHandler> requestHandler)
+BrowserClient::BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<SecurityRequestHandler> requestHandler)
     : callbacks_(std::move(callbacks)), request_handler_(std::move(requestHandler)) {
     if (!request_handler_) {
         throw std::invalid_argument("BrowserClient requires a request handler.");
@@ -24,6 +24,11 @@ BrowserClient::BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<CefRequ
 }
 
 BrowserClient::~BrowserClient() = default;
+
+const char* BrowserClient::HomeUrl() noexcept {
+    // Conserva el destino de arranque existente, sin excepciones por tratarse de Inicio.
+    return "https://example.com/";
+}
 
 CefRefPtr<CefLifeSpanHandler> BrowserClient::GetLifeSpanHandler() {
     // CEF recibe una referencia al mismo cliente, visto como receptor del ciclo de vida.
@@ -59,7 +64,7 @@ void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
     CefBrowserSettings settings;
     // CEF copia los parámetros y conserva su referencia al cliente mientras crea el navegador.
     const bool accepted = CefBrowserHost::CreateBrowser(
-        window_info, this, "https://example.com/", settings, nullptr, nullptr);
+        window_info, this, HomeUrl(), settings, nullptr, nullptr);
     std::fprintf(stderr, "CEF browser creation requested; accepted: %d; CEF UI thread: %d.\n",
                  accepted, CefCurrentlyOn(TID_UI));
     if (!accepted) {
@@ -95,6 +100,12 @@ void BrowserClient::Navigate(std::string url) {
     // LoadURL solicita la carga asíncrona; CEF mantiene sus comprobaciones normales de certificados.
     frame->LoadURL(CefString(url));
     std::fprintf(stderr, "CEF navigation requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
+}
+
+void BrowserClient::GoHome() {
+    CEF_REQUIRE_UI_THREAD();
+    // Navigate descarta tareas tardías y LoadURL vuelve a pasar por el handler de seguridad.
+    Navigate(HomeUrl());
 }
 
 void BrowserClient::GoBack() {
@@ -147,6 +158,49 @@ void BrowserClient::ReloadPage() {
     }
     browser->Reload();
     std::fprintf(stderr, "CEF reload requested; CEF UI thread: %d.\n", CefCurrentlyOn(TID_UI));
+}
+
+void BrowserClient::RevalidateCurrentDocument() {
+    CEF_REQUIRE_UI_THREAD();
+    // La publicación puede llegar durante el arranque o después de solicitar el cierre.
+    if (browser_id_ == -1 || close_requested_) {
+        return;
+    }
+    const auto browser = CefBrowserHost::GetBrowserByIdentifier(browser_id_);
+    if (!browser) {
+        return;
+    }
+    const auto frame = browser->GetMainFrame();
+    if (frame) {
+        // La función realiza también la retirada; aquí no se necesita consumir su booleano.
+        static_cast<void>(EnforceDocumentPolicy(browser, frame));
+    }
+}
+
+bool BrowserClient::EnforceDocumentPolicy(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) {
+    CEF_REQUIRE_UI_THREAD();
+    if (document_retirement_pending_) {
+        return true;
+    }
+    if (!request_handler_->ShouldBlockDocument(browser, frame)) {
+        return false;
+    }
+
+    // Cancelar una navegación nueva no destruye el documento anterior ni detiene su JavaScript.
+    // La retirada provoca una sustitución de documento, también cuando el historial era de una SPA.
+    document_retirement_pending_ = true;
+    if (page_leave_callback_) {
+        // La página revocada no puede conservarse mediante una pregunta de abandono ya abierta.
+        const auto callback = std::move(page_leave_callback_);
+        if (callbacks_.on_page_leave_reset) {
+            callbacks_.on_page_leave_reset();
+        }
+        callback->Continue(true, CefString());
+    }
+    browser->StopLoad();
+    frame->LoadURL("about:blank");
+    std::fputs("CEF current document revoked by policy; neutral document requested.\n", stderr);
+    return true;
 }
 
 void BrowserClient::ResizeBrowser() {
@@ -260,6 +314,12 @@ void BrowserClient::CancelClose() {
 bool BrowserClient::OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser, const CefString&,
                                          bool is_reload, CefRefPtr<CefJSDialogCallback> callback) {
     CEF_REQUIRE_UI_THREAD();
+    if (browser && browser->GetIdentifier() == browser_id_ && callback
+        && document_retirement_pending_) {
+        // Una decisión de seguridad no puede depender de que la página acepte abandonarse.
+        callback->Continue(true, CefString());
+        return true;
+    }
     if (!browser || browser->GetIdentifier() != browser_id_ || !callback
         || !callbacks_.on_page_leave_requested) {
         // Sin receptor propio, CEF conserva la responsabilidad de mostrar su diálogo predeterminado.
@@ -331,6 +391,11 @@ void BrowserClient::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<Cef
         || browser->GetIdentifier() != browser_id_) {
         return;
     }
+    // Incluye history.pushState, fragmentos y recorridos del historial sin documento nuevo.
+    // Es una comprobación del documento ya activo, no una cancelación previa de esa transición.
+    if (EnforceDocumentPolicy(browser, frame)) {
+        return;
+    }
     // Verificamos el aviso sin imprimir la URL ni acceder a controles Qt.
     std::fprintf(stderr, "CEF main address changed; length %zu; CEF UI thread: %d.\n",
                  url.length(), CefCurrentlyOn(TID_UI));
@@ -361,10 +426,20 @@ void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
         || browser->GetIdentifier() != browser_id_) {
         return;
     }
+    if (document_retirement_pending_) {
+        document_retirement_pending_ = false;
+        // El documento neutro retira el contenido revocado, pero no debe borrar su aviso Qt.
+        if (frame->GetURL().ToString() == "about:blank") {
+            return;
+        }
+    }
     // CEF confirma aquí la navegación del documento; esta marca no mide su primer pintado.
     // No registramos la URL ni conservamos referencias al navegador o al frame.
     std::fprintf(stderr, "CEF main document load started; time_ms: %llu.\n",
                  static_cast<unsigned long long>(GetTickCount64()));
+    if (callbacks_.on_main_document_started) {
+        callbacks_.on_main_document_started();
+    }
 }
 
 void BrowserClient::OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,

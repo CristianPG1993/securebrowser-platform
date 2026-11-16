@@ -26,6 +26,12 @@ public:
     // Función sin argumentos que proporciona el instante monotónico actual.
     using NowFunction = std::function<Clock::time_point()>;
 
+    // La composición fija la vigencia al construir el gestor; no cambia al publicar otra política.
+    enum class Validity {
+        FifteenMinutes,
+        Unlimited
+    };
+
     // Contexto, política y vigencia se comparten juntos mediante una referencia de solo lectura.
     struct State {
         SecurityContext context;
@@ -43,11 +49,15 @@ public:
         std::shared_ptr<const State> state{};
     };
 
-    // Utiliza el reloj monotónico real cuando no se proporciona uno de pruebas.
+    // Utiliza el reloj monotónico real y la vigencia predeterminada de 15 minutos.
     PolicyManager() = default;
 
-    // Permite proporcionar un reloj controlado; la función no puede estar vacía.
-    explicit PolicyManager(NowFunction now);
+    // Permite elegir explícitamente otra vigencia; la aplicación solo utiliza Unlimited en modo demo.
+    explicit PolicyManager(Validity validity);
+
+    // Permite proporcionar un reloj controlado; conserva 15 minutos si no se especifica otra vigencia.
+    // La función no puede estar vacía y la opción de vigencia debe ser conocida.
+    explicit PolicyManager(NowFunction now, Validity validity = Validity::FifteenMinutes);
 
     // REST/Auth lo llamará tras confirmar una sesión y una instalación autorizadas.
     // Inicia un contexto con generación nueva, sin reutilizar la política del anterior.
@@ -112,6 +122,9 @@ private:
 
     // Se invocará fuera del mutex; el reloj inyectado debe admitir llamadas concurrentes.
     NowFunction now_ = &Clock::now;
+
+    // Es una opción inmutable de este gestor, no una excepción por URL ni una renovación automática.
+    const Validity validity_ = Validity::FifteenMinutes;
 
     // Protege la obtención y sustitución del estado y la asignación de generaciones.
     mutable std::mutex stateMutex_;

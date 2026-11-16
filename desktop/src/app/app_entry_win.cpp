@@ -1,4 +1,5 @@
 #include "app/browser_session.h"
+#include "app/startup_options.h"
 #include "browser/browser_app.h"
 #include "diagnostics/diagnostics_log.h"
 
@@ -12,6 +13,8 @@
 #include <shlobj.h>
 
 #include <cstdio>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 // Entrada que el bootstrap llama al cargar nuestra DLL (Dynamic-Link Library).
@@ -49,6 +52,33 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         return 1;
     }
 
+    // Solo el principal interpreta las opciones propias; los subprocesos ya han terminado su entrada.
+    std::optional<sbp::StartupOptions> startup_options;
+    try {
+        const auto command_line = CefCommandLine::CreateCommandLine();
+        if (command_line) {
+            command_line->InitFromString(GetCommandLineW());
+        }
+        startup_options.emplace(sbp::StartupOptions::FromCommandLine(command_line));
+    } catch (const std::invalid_argument& error) {
+        // Los mensajes del lector son propios y no incluyen argumentos ni direcciones introducidas.
+        std::fprintf(stderr, "Application startup options rejected: %s; exit code 1.\n", error.what());
+        MessageBoxW(nullptr,
+                    L"Opciones de arranque no válidas.\n\n"
+                    L"Usa --demo-url-filtering para activar la demostración.\n"
+                    L"La opción --demo-policy admite free o restricted dentro del modo demo.",
+                    L"SecureBrowser - Opciones de arranque", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+    if (startup_options->IsUrlFilteringDemo()) {
+        const char* requested_policy = startup_options->InitialDemoPolicy()
+            == sbp::DemoPolicyPreset::RestrictedNavigation ? "restricted" : "free";
+        // La selección todavía no acredita que exista una política publicada en el gestor.
+        std::fprintf(stderr, "Application startup mode: demo; requested policy: %s.\n", requested_policy);
+    } else {
+        std::fputs("Application startup mode: normal.\n", stderr);
+    }
+
     // Qt necesita argumentos vivos hasta destruir QApplication; empezamos con el nombre del programa.
     int qt_argc = 1;
     char qt_program_name[] = "SecureBrowser";
@@ -59,7 +89,7 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
 
     // La sesión coordina la interfaz y permanece viva hasta después de CefShutdown.
     // Se declara antes de cef_app para liberar esa referencia CEF antes de destruir la sesión.
-    sbp::BrowserSession session;
+    sbp::BrowserSession session(*startup_options);
 
     // CEF ejecuta esta lambda en su hilo UI; aquí solo publicamos el aviso para Qt.
     CefRefPtr<sbp::BrowserApp> cef_app(new sbp::BrowserApp([&qt_app, &session] {
@@ -98,8 +128,11 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
         return 1;
     }
 
+    // La demostración utiliza otro perfil para no compartir cookies ni caché con el modo normal.
     // Copiamos la ruta antes de liberar la memoria que nos ha entregado Windows.
-    const std::wstring root_cache_path = std::wstring(local_app_data) + L"\\SecureBrowser\\CEF";
+    const wchar_t* profile_suffix = startup_options->IsUrlFilteringDemo()
+        ? L"\\SecureBrowser\\Demo\\CEF" : L"\\SecureBrowser\\CEF";
+    const std::wstring root_cache_path = std::wstring(local_app_data) + profile_suffix;
     CoTaskMemFree(local_app_data);
     // CEF recibe su propia copia de la cadena y crea sus datos internos bajo esta raíz absoluta.
     CefString(&settings.root_cache_path) = root_cache_path;

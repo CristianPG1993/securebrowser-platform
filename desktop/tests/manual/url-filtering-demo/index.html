@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>SecureBrowser — destino local controlado</title>
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    <h1>Destino local recibido</h1>
+    <p id="step"></p>
+    <p id="run"></p>
+    <p>Esta página procede del servidor de pruebas de este equipo.</p>
+    <p>La barra conserva el dominio twitch.tv. La resolución de esta ejecución dirige la conexión a 127.0.0.1.</p>
+    <p>La política Libre debe permitirla. La política Restrictiva debe cancelar una nueva visita antes de solicitarla.</p>
+    <p>El registro HTTP del servidor permite comprobar qué visitas llegaron realmente.</p>
+    <script>
+        // Solo identifica la página realmente cargada; no cambia ni consulta la política de SecureBrowser.
+        const parameters = new URLSearchParams(window.location.search);
+        document.getElementById("step").textContent =
+            "Paso cargado: " + (parameters.get("case") || "sin identificar");
+        document.getElementById("run").textContent =
+            "Pasada: " + (parameters.get("run") || "sin identificar");
+    </script>
+</body>
+</html>

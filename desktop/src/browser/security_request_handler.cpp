@@ -28,11 +28,27 @@ bool SecurityRequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                           bool /*user_gesture*/,
                                           bool is_redirect) {
     CEF_REQUIRE_UI_THREAD();
-    if (!browser || !frame || !request) {
+    if (!request) {
         return true;
     }
+    return ShouldBlockUrl(browser, frame, request->GetURL(), is_redirect);
+}
 
-    const CefString url = request->GetURL();
+bool SecurityRequestHandler::ShouldBlockDocument(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!frame) {
+        return true;
+    }
+    // No simula OnBeforeBrowse: consulta la dirección del documento que CEF ya mantiene abierto.
+    return ShouldBlockUrl(browser, frame, frame->GetURL(), false);
+}
+
+bool SecurityRequestHandler::ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                          const CefString& url, bool isRedirect) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!browser || !frame) {
+        return true;
+    }
     if (IsAllowedInternalNavigation(url, frame->IsMain())) {
         return false;
     }
@@ -41,7 +57,7 @@ bool SecurityRequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
     const auto state = policyManager_->ReadState();
     const UrlTarget target = urlAdapter_.Parse(url);
     if (!state) {
-        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, is_redirect, nullptr);
+        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, nullptr);
         return true;
     }
 
@@ -50,13 +66,13 @@ bool SecurityRequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
     const auto evaluatedState = policy.state && policy.state->context == state->context
         ? policy.state : state;
     if (decision.Action() == SecurityAction::Block) {
-        NotifyBlocked(browser, frame, target, decision.Reason(), is_redirect, evaluatedState);
+        NotifyBlocked(browser, frame, target, decision.Reason(), isRedirect, evaluatedState);
         return true;
     }
 
     // Un cambio de sesión o instalación durante la evaluación impide aplicar el permiso anterior.
     if (!policyManager_->IsCurrentContext(state->context)) {
-        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, is_redirect, evaluatedState);
+        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, evaluatedState);
         return true;
     }
     return false;

@@ -37,6 +37,7 @@ BrowserClientCallbacks BrowserNavigation::MakeCallbacks(
     callbacks.on_back_availability_changed = MakeBackAvailabilityHandler(window, window_ui, close_requested);
     callbacks.on_forward_availability_changed = MakeForwardAvailabilityHandler(window, window_ui, close_requested);
     callbacks.on_reload_availability_changed = MakeReloadAvailabilityHandler(window, window_ui, close_requested);
+    callbacks.on_main_document_started = MakeMainDocumentStartedHandler(window, window_ui, close_requested);
     callbacks.on_page_leave_requested = MakePageLeaveRequestHandler(window, window_ui);
     callbacks.on_page_leave_reset = MakePageLeaveResetHandler(window, window_ui);
     return callbacks;
@@ -49,6 +50,7 @@ void BrowserNavigation::Connect(BrowserWindowUi& window_ui,
     ConnectBackControl(window_ui, browser_client, close_requested);
     ConnectForwardControl(window_ui, browser_client, close_requested);
     ConnectReloadControl(window_ui, browser_client, close_requested);
+    ConnectHomeControl(window_ui, browser_client, close_requested);
     ConnectAddressControl(window_ui, browser_client, close_requested);
 }
 
@@ -98,6 +100,21 @@ void BrowserNavigation::ConnectReloadControl(BrowserWindowUi& window_ui,
         // BindOnce conserva una referencia al cliente hasta ejecutar o descartar la tarea.
         if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::ReloadPage, browser_client))) {
             std::fputs("Qt reload request could not be posted to CEF.\n", stderr);
+        }
+    });
+}
+
+void BrowserNavigation::ConnectHomeControl(BrowserWindowUi& window_ui,
+                                          const CefRefPtr<BrowserClient>& browser_client,
+                                          const bool& close_requested) const {
+    // La petición se recibe en Qt; el cliente queda conservado por valor hasta retirar el control.
+    window_ui.SetHomeRequestHandler([browser_client, &close_requested] {
+        if (close_requested) {
+            return;
+        }
+        // La tarea utiliza el mismo cliente y handler de seguridad de las navegaciones normales.
+        if (!CefPostTask(TID_UI, base::BindOnce(&sbp::BrowserClient::GoHome, browser_client))) {
+            std::fputs("Qt home navigation request could not be posted to CEF.\n", stderr);
         }
     });
 }
@@ -196,6 +213,23 @@ std::function<void(std::string)> BrowserNavigation::MakeAddressHandler(
             }, Qt::QueuedConnection);
         if (!queued) {
             std::fputs("CEF address notification could not be queued to Qt.\n", stderr);
+        }
+    };
+}
+
+std::function<void()> BrowserNavigation::MakeMainDocumentStartedHandler(
+    BrowserWindow& window, BrowserWindowUi* const& window_ui, const bool& close_requested) const {
+    // CEF confirma un documento: esta lambda solo encola su recepción y no accede a controles Qt.
+    return [&window, &window_ui, &close_requested] {
+        // La tarea comparte la cola Qt de los avisos de bloqueo y respeta su orden de emisión desde UI CEF.
+        const bool queued = QMetaObject::invokeMethod(&window, [&window_ui, &close_requested] {
+            if (close_requested || window_ui == nullptr) {
+                return;
+            }
+            window_ui->ClearNavigationBlock();
+        }, Qt::QueuedConnection);
+        if (!queued) {
+            std::fputs("CEF main document notification could not be queued to Qt.\n", stderr);
         }
     };
 }
