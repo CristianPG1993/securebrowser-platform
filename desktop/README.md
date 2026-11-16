@@ -13,7 +13,14 @@ Foundation todavía no se comunica con él ni implementa sus políticas.
 La preparación incorpora ahora ICU para el núcleo de seguridad de
 [#115](https://github.com/CristianPG1993/securebrowser-platform/issues/115).
 El registro de clon limpio conserva la evidencia de Foundation anterior a esta incorporación;
-la validación de la aplicación completa con ICU sigue pendiente.
+el estado posterior del motor y de la demostración se recoge en sus registros específicos.
+
+La implementación actual permite una [demostración autónoma de URL Filtering](distribution/README.md),
+con políticas locales explícitas, selector y avisos Qt. Su
+[guía breve](distribution/LEEME-demo.txt) acompaña al paquete portátil y su
+[registro de validación](docs/url-filtering-demo-validation.md) recoge los resultados.
+Abrir directamente el EXE sin opciones utiliza el modo normal: la navegación
+permanece bloqueada mientras no exista una política válida.
 
 Seguir los apartados de preparación en orden y detenerse si un comando falla.
 Los scripts están bajo `ci/` porque también los utiliza Actions; se pueden

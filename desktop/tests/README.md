@@ -8,6 +8,12 @@ Ejecutar los comandos desde la raíz del repositorio, con Windows PowerShell 5.1
 o PowerShell en Windows. La preparación de MSVC, Qt, CEF e ICU y los comandos de
 construcción están en el [README de Desktop](../README.md).
 
+La verificación E2E de las políticas locales, el historial dentro del mismo
+documento y la copia portátil se recogen en el
+[registro de URL Filtering demo](../docs/url-filtering-demo-validation.md).
+La [guía HTTP controlada](manual/url-filtering-demo/README.md) conserva el
+procedimiento para distinguir un bloqueo de un fallo de red.
+
 ## Pruebas unitarias del Security Engine
 
 Estas pruebas requieren CMake 3.29 o posterior, MSVC 2022 x64 con el toolset
