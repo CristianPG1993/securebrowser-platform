@@ -11,7 +11,7 @@ namespace sbp {
 // El cliente exige un handler para evitar una conexión de seguridad inexistente.
 TEST(BrowserClientTest, RejectsMissingRequestHandler) {
     const BrowserClientCallbacks callbacks{};
-    const CefRefPtr<CefRequestHandler> missing_handler{};
+    const CefRefPtr<SecurityRequestHandler> missing_handler{};
 
     EXPECT_THROW({
         CefRefPtr<BrowserClient> client = new BrowserClient(callbacks, missing_handler);

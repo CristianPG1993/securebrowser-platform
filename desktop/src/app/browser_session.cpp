@@ -8,6 +8,9 @@
 #include "ui/browser_window.h"
 #include "ui/browser_window_ui.h"
 
+#include "include/base/cef_callback.h"
+#include "include/wrapper/cef_closure_task.h"
+
 #include <QApplication>
 #include <QMetaObject>
 #include <QString>
@@ -63,7 +66,8 @@ void BrowserSession::ConfigureStatus(BrowserWindowUi& window_ui, const PolicyMan
 }
 
 void BrowserSession::ConfigurePolicySelector(
-    BrowserWindowUi& window_ui, const std::shared_ptr<PolicyManager>& manager) const {
+    BrowserWindowUi& window_ui, const std::shared_ptr<PolicyManager>& manager,
+    const CefRefPtr<BrowserClient>& browser_client) const {
     if (!startup_options_.IsUrlFilteringDemo()) {
         return;
     }
@@ -87,15 +91,16 @@ void BrowserSession::ConfigurePolicySelector(
         return;
     }
 
-    // Se ejecuta en Qt: la UI posee esta función y vive menos que la sesión; manager se conserva por valor.
+    // Se ejecuta en Qt: la UI posee esta función; manager y browser_client se conservan por valor.
     // La copia del contexto impide que una solicitud tardía se aplique a otro contexto posterior.
-    window_ui.SetPolicySelectionHandler([this, &window_ui, manager, context = state->context](int index) {
-        ApplyPolicySelection(window_ui, *manager, context, index);
+    window_ui.SetPolicySelectionHandler([this, &window_ui, manager, browser_client, context = state->context](int index) {
+        ApplyPolicySelection(window_ui, *manager, context, index, browser_client);
     });
 }
 
 void BrowserSession::ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyManager& manager,
-                                         const SecurityContext& context, int index) const {
+                                         const SecurityContext& context, int index,
+                                         const CefRefPtr<BrowserClient>& browser_client) const {
     // Solo una elección conocida en la sesión demo puede cambiar una política desde estos controles.
     if (!startup_options_.IsUrlFilteringDemo() || lifecycle_.CloseRequested()
         || (index != 0 && index != 1)) {
@@ -121,6 +126,11 @@ void BrowserSession::ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyMana
     window_ui.ClearNavigationBlock();
     std::fprintf(stderr, "Demo policy changed; source: local-demo; preset: %s; policy_id: %lld; validity: unlimited.\n",
                  index == 0 ? "free" : "restricted", static_cast<long long>(policy.Id()));
+    // La publicación ya terminó. La tarea conserva el cliente y consulta la política vigente al ejecutarse.
+    // Los objetos CefBrowser y CefFrame se obtienen y utilizan únicamente dentro del hilo UI de CEF.
+    if (!CefPostTask(TID_UI, base::BindOnce(&BrowserClient::RevalidateCurrentDocument, browser_client))) {
+        std::fputs("Demo policy changed, but current-document revalidation could not be posted to CEF.\n", stderr);
+    }
 }
 
 void BrowserSession::OnContextInitialized() {
@@ -176,7 +186,7 @@ int BrowserSession::Run(QApplication& qt_app) {
         // El panel recibe la política efectivamente publicada, antes de mostrar la ventana.
         ConfigureStatus(window_ui, *policy_manager);
         // El selector solo se conecta en demo; cada elección explícita publica en el mismo contexto.
-        ConfigurePolicySelector(window_ui, policy_manager);
+        ConfigurePolicySelector(window_ui, policy_manager, browser_client);
         // Paso 10: Instalamos las acciones de navegación que enviarán las peticiones de Qt al hilo UI de CEF.
         navigation.Connect(window_ui, browser_client, lifecycle_.CloseRequested());
         // Paso 11: Instalamos la sincronización del foco nativo del marco con los controles y el contenido web.

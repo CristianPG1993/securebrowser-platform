@@ -46,14 +46,16 @@ private:
     void ConfigureStatus(BrowserWindowUi& window_ui, const PolicyManager& manager) const;
 
     // Ofrece los presets únicamente en demo y vincula sus solicitudes al contexto inicial.
-    // La función guardada en los controles conserva el gestor, pero no prolonga la vida de la UI.
+    // La función guardada conserva el gestor y el cliente CEF, pero no prolonga la vida de la UI.
     void ConfigurePolicySelector(
-        BrowserWindowUi& window_ui, const std::shared_ptr<PolicyManager>& manager) const;
+        BrowserWindowUi& window_ui, const std::shared_ptr<PolicyManager>& manager,
+        const CefRefPtr<BrowserClient>& browser_client) const;
 
     // Publica en el contexto original y solo confirma el cambio visual después del éxito.
-    // La política demo no caduca; el cambio no inicia otro contexto ni navega automáticamente.
+    // Después solicita en CEF la reevaluación del documento abierto con la política vigente.
     void ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyManager& manager,
-                              const SecurityContext& context, int index) const;
+                              const SecurityContext& context, int index,
+                              const CefRefPtr<BrowserClient>& browser_client) const;
 
     // Prepara el receptor ejecutado en CEF; no lee controles ni estado Qt desde ese hilo.
     std::function<bool(const NavigationDecisionNotice&)> MakeNavigationDecisionHandler(
