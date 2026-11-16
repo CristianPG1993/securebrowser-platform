@@ -1,0 +1,46 @@
+SECUREBROWSER — DEMOSTRACIÓN DE FILTRADO DE NAVEGACIÓN
+
+Requisitos
+Windows de 64 bits. La comprobación manual de esta versión se realiza en
+Windows 11. Se necesita conexión a Internet para abrir las páginas públicas
+de los ejemplos. No se requiere instalar Java, PostgreSQL, Docker ni Python.
+
+Inicio
+1. Extraer el ZIP completo en una carpeta local del usuario, por ejemplo
+   en el Escritorio. Conservar juntos el EXE,
+   las DLL, las subcarpetas y los avisos de terceros.
+2. Abrir Iniciar-demo.cmd con doble clic. El lanzador activa explícitamente
+   la demostración y selecciona «Navegación libre».
+3. Comprobar que el panel inferior indica «Modo demostración» y el nombre
+   de la política. El selector permite cambiarla sin cerrar la aplicación.
+
+Comprobación del filtrado
+1. Con «Navegación libre», abrir https://www.youtube.com/ y comprobar
+   que carga. Un fallo de red por sí solo no demuestra un bloqueo.
+2. Seleccionar «Restricción de redes sociales y entretenimiento». La página
+   de YouTube abierta debe retirarse y debe aparecer el aviso de bloqueo.
+3. Volver a escribir https://www.youtube.com/ y pulsar Intro. La navegación
+   sigue bloqueada. Atrás y Adelante tampoco deben recuperar el vídeo.
+4. Con la misma política restrictiva, abrir https://www.wikipedia.org/.
+   Este dominio está permitido.
+5. Volver a «Navegación libre» y repetir la dirección de YouTube.
+   La navegación vuelve a estar permitida.
+
+Políticas incluidas
+Libre: filtrado de URL desactivado.
+Restrictiva: lista de denegación para facebook.com, instagram.com,
+tiktok.com, x.com, youtube.com, twitch.tv y netflix.com, con sus subdominios.
+El botón de inicio solicita https://example.com/ mediante el mismo filtro.
+
+Alcance
+Las políticas y las identidades de esta demostración son locales y no
+representan una sesión autenticada del backend. La demo utiliza políticas
+sin caducidad. El modo conectado conserva su vigencia de 15 minutos y no
+obtiene automáticamente estas políticas locales.
+El control de descargas no forma parte de esta entrega.
+
+Diagnóstico y cierre
+Los registros se conservan en %LOCALAPPDATA%\SecureBrowser\Logs.
+Cerrar mediante la X de la ventana. Abrir directamente SecureBrowser.exe
+sin argumentos inicia el modo normal, que bloquea la navegación mientras
+no exista una política válida.
