@@ -95,6 +95,8 @@ endfunction()
 add_library(sbp_security_core STATIC
     src/security/download_control_config.h
     src/security/download_control_config.cpp
+    src/security/download_policy.h
+    src/security/download_policy.cpp
     src/security/filter_mode.h
     src/security/policy_availability.h
     src/security/policy_manager.h
@@ -169,6 +171,7 @@ if(BUILD_TESTING)
     add_executable(sbp_security_tests
         tests/demo/demo_policy_source_test.cpp
         tests/security/download_control_config_test.cpp
+        tests/security/download_policy_test.cpp
         tests/security/policy_manager_test.cpp
         tests/security/policy_snapshot_test.cpp
         tests/security/security_context_test.cpp
