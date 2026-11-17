@@ -54,16 +54,22 @@ cmake -S desktop -B desktop/build/tests -G "Visual Studio 17 2022" -A "x64,versi
 Compilar y ejecutar en Debug:
 
 ```powershell
-cmake --build desktop/build/tests --config Debug --target sbp_security_tests --parallel 4
-ctest --test-dir desktop/build/tests -C Debug --output-on-failure --no-tests=error --timeout 60
+cmake --build desktop/build/tests --config Debug --target sbp_security_tests --parallel 1
+$testReportDirectory = (Resolve-Path 'desktop/build/tests').Path
+ctest --test-dir desktop/build/tests -C Debug --output-on-failure --no-tests=error --timeout 60 --output-junit "$testReportDirectory/security-core-debug.xml"
 ```
 
 Repetir en Release utilizando la misma carpeta del generador de Visual Studio:
 
 ```powershell
-cmake --build desktop/build/tests --config Release --target sbp_security_tests --parallel 4
-ctest --test-dir desktop/build/tests -C Release --output-on-failure --no-tests=error --timeout 60
+cmake --build desktop/build/tests --config Release --target sbp_security_tests --parallel 1
+$testReportDirectory = (Resolve-Path 'desktop/build/tests').Path
+ctest --test-dir desktop/build/tests -C Release --output-on-failure --no-tests=error --timeout 60 --output-junit "$testReportDirectory/security-core-release.xml"
 ```
+
+Los informes XML utilizan el formato JUnit y se conservan por separado en
+`desktop/build/tests/`. Las pruebas se ejecutan mediante GoogleTest y CTest.
+Los comandos anteriores ejecutan la batería completa, sin filtros de selección.
 
 La compilación copia `icuuc76.dll`, `icudt76.dll` y `icu-notices/` junto a
 `sbp_security_tests.exe`, tanto en Debug como en Release. Los avisos incluyen
@@ -71,7 +77,7 @@ la licencia y una copia del manifiesto ICU. No es necesario añadir el SDK
 al `PATH` para ejecutar las pruebas.
 
 CTest descubre cada prueba de GoogleTest antes de ejecutarla, incluidos los
-casos parametrizados. Actualmente se esperan 275 casos:
+casos parametrizados. Actualmente se esperan 447 casos:
 
 - [security_decision_test.cpp](security/security_decision_test.cpp): 14 casos,
   uno para `Allowed` y trece para los motivos de bloqueo. Comprueban la acción
@@ -86,7 +92,7 @@ casos parametrizados. Actualmente se esperan 275 casos:
   comprueban identificadores de 64 bits, nombre, fechas con microsegundos,
   conservación separada de ambas configuraciones e independencia respecto
   a cambios posteriores en los objetos de entrada.
-- [policy_manager_test.cpp](security/policy_manager_test.cpp): 160 casos.
+- [policy_manager_test.cpp](security/policy_manager_test.cpp): 162 casos.
   Los 109 casos de validación mediante `PolicyManager::Validate` incluyen una
   política válida, cinco identidades inválidas o ajenas, 23 nombres, ocho combinaciones de modos,
   24 configuraciones de dominios, 25 configuraciones básicas de extensiones,
@@ -109,6 +115,9 @@ casos parametrizados. Actualmente se esperan 275 casos:
   Otros 16 casos cubren `ReadPolicy`, el límite exacto de 15 minutos, la renovación
   con una política idéntica, la conservación del plazo ante lecturas o respuestas
   rechazadas, los cambios durante la consulta y dos recorridos con hilos concurrentes.
+  Dos casos adicionales comprueban el rechazo de una vigencia desconocida y que
+  la vigencia `Unlimited` de un gestor no cambia los 15 minutos predeterminados
+  de otro gestor.
 - [security_context_test.cpp](security/security_context_test.cpp): cinco casos
   que comprueban la conservación de identificadores de 64 bits y la igualdad
   de contextos. Una generación, un dispositivo o una compañía distintos hacen
@@ -123,6 +132,24 @@ casos parametrizados. Actualmente se esperan 275 casos:
   y tres límites de caducidad. Las tablas de dominios e IP comprueban ambos
   modos, activación/desactivación y HTTP/HTTPS dentro de cada caso registrado.
   Estas combinaciones internas no aumentan el número de casos que muestra CTest.
+- [demo_policy_source_test.cpp](demo/demo_policy_source_test.cpp): seis casos.
+  Se comprueban publicación y evaluación de las políticas locales libre y
+  restrictiva, dominios y subdominios, destinos ajenos a las reglas, selección
+  de otra política, ausencia de caducidad en la demo explícita y mantenimiento
+  del bloqueo sin política o tras cerrar el contexto.
+- [download_policy_test.cpp](security/download_policy_test.cpp): 164 casos.
+  Incluyen 13 pruebas directas de contexto, activación, rechazo y sustitución
+  de políticas, conservación del snapshot y evaluación sin modificar datos,
+  consultar el reloj ni renovar la vigencia. Se comprueba también la independencia
+  respecto a URL Filtering.
+  Las tablas parametrizadas incluyen tres límites de caducidad, diez lecturas
+  incompletas o no utilizables, diez prioridades entre bloqueos, 22 nombres
+  Windows inválidos, 28 dispositivos reservados, 21 secuencias UTF-8 malformadas,
+  tres rangos que recorren los 65 controles C0/DEL/C1, 30 casos de extensiones y
+  listas y 24 casos Unicode válidos.
+  Se comprueban ambos modos y estados de activación cuando corresponde, además
+  de variantes de nombres reservados y posiciones de los controles dentro del
+  nombre. Estas combinaciones internas no aumentan el total de casos de CTest.
 
 El 9 de noviembre de 2026 se superaron las 14 pruebas
 en Debug y en Release. En Debug, CTest informó de 0 fallos y 4,68 segundos.
@@ -233,7 +260,7 @@ El 12 de noviembre de 2026, durante la
 [tarea #116](https://github.com/CristianPG1993/securebrowser-platform/issues/116),
 se confirmó la compilación y se superaron las 275 pruebas en Debug y Release.
 La incorporación de `UrlTarget` y `UrlHostKind` añade tres casos a los 188
-anteriores; los 84 casos de `UrlFilter` completan la batería actual.
+anteriores; los 84 casos de `UrlFilter` completaron entonces la batería.
 
 Se comprueban coincidencias exactas y de subdominio con límite de etiqueta,
 nombres engañosos, listas vacías, varias reglas y coincidencias en distintas
@@ -266,6 +293,39 @@ commit `92c8106`, tras finalizar correctamente
 y [Backend CI](https://github.com/CristianPG1993/securebrowser-platform/actions/runs/43209501790).
 Estos resultados no acreditan todavía la aplicación del filtrado en CEF.
 
+El 17 de noviembre de 2026, durante la
+[tarea #118](https://github.com/CristianPG1993/securebrowser-platform/issues/118),
+se confirmó la compilación de `sbp_security_core` y `sbp_security_tests` en Debug
+y Release. El autor ejecutó la batería completa sin filtro de selección y se
+revisaron los informes XML generados por CTest:
+
+| Configuración | Casos totales | Casos de DownloadPolicy | Fallos | Errores | Omitidos |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Debug | 447 | 164 | 0 | 0 | 0 |
+| Release | 447 | 164 | 0 | 0 | 0 |
+
+Los informes locales se conservan en
+`desktop/build/tests/security-core-debug.xml` y
+`desktop/build/tests/security-core-release.xml`. La comprobación corresponde
+al árbol de trabajo de `feature/security-download-policy`, con base
+`6e479e104d13a01dd9674dc3914d22afa2939ca7`, antes de registrar estos cambios
+en un commit. Los XML y binarios permanecen dentro de `build/` y no se
+incorporan al control de versiones.
+
+Se acredita la evaluación pura del nombre de archivo y de su última extensión,
+con validación Windows y UTF-8, minúsculas Unicode mediante ICU con locale raíz,
+DENYLIST/ALLOWLIST, listas vacías, activación y precedencia de motivos. Se
+conservan los acentos y se mantienen distintas las formas compuestas y
+descompuestas y los caracteres que solo se parecen visualmente. No se aplica
+case folding ni normalización canónica adicional. Las pruebas utilizan políticas
+locales y relojes controlados, sin QApplication, CEF ni operaciones sobre archivos.
+
+La aplicación de Download Control a descargas reales y el diálogo de guardado
+corresponden a la
+[tarea #119](https://github.com/CristianPG1993/securebrowser-platform/issues/119).
+Esta evidencia no acredita cancelación en CEF, archivos finales completados,
+adquisición REST ni producción, persistencia o sincronización de eventos.
+
 La aplicación conserva `SBP_BUILD_DESKTOP_APP=ON` y `BUILD_TESTING=OFF` por
 defecto. Las fuentes de GoogleTest, el SDK ICU y sus salidas permanecen en `.deps/` y `build/`;
 no se incorporan al control de versiones.
@@ -289,10 +349,10 @@ cmake -S desktop -B desktop/build/cef-tests -G "Visual Studio 17 2022" -A "x64,v
 Compilar y ejecutar en Debug y Release:
 
 ```powershell
-cmake --build desktop/build/cef-tests --config Debug --target sbp_cef_adapter_tests --parallel 4
+cmake --build desktop/build/cef-tests --config Debug --target sbp_cef_adapter_tests --parallel 1
 ctest --test-dir desktop/build/cef-tests -C Debug -R "^sbp_cef_adapter_tests$" -V --no-tests=error
 
-cmake --build desktop/build/cef-tests --config Release --target sbp_cef_adapter_tests --parallel 4
+cmake --build desktop/build/cef-tests --config Release --target sbp_cef_adapter_tests --parallel 1
 ctest --test-dir desktop/build/cef-tests -C Release -R "^sbp_cef_adapter_tests$" -V --no-tests=error
 ```
 
