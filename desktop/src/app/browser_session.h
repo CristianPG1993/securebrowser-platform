@@ -3,6 +3,7 @@
 #include "app/browser_lifecycle.h"
 #include "app/startup_options.h"
 #include "browser/security_download_handler.h"
+#include "browser/security_request_handler.h"
 
 #include <cstdint>
 #include <functional>
@@ -22,7 +23,7 @@ struct NavigationDecisionNotice;
 // Compone la ventana, sus controles, el gestor de políticas y los adaptadores Qt/CEF.
 // Conecta esos objetos durante una sesión; el arranque de Windows queda en app_entry_win.cpp.
 // La coordinación y su estado pertenecen al hilo principal de Qt.
-// El receptor de CEF encola una copia; OnNavigationDecision se ejecuta únicamente en Qt.
+// Los receptores de CEF encolan copias; los avisos de navegación y descarga se presentan únicamente en Qt.
 class BrowserSession final {
 public:
     // Conserva una copia de las opciones validadas; recibirlas no carga ninguna política.
@@ -66,8 +67,12 @@ private:
     // Encola el ID en Qt para cerrar solo su diálogo, sin acceder a controles desde el hilo CEF.
     SecurityDownloadHandler::RequestCloseSaveDialogCallback MakeSaveDialogCloseHandler(BrowserWindow& window);
 
-    // Prepara el receptor ejecutado en CEF; no lee controles ni estado Qt desde ese hilo.
-    std::function<bool(const NavigationDecisionNotice&)> MakeNavigationDecisionHandler(
+    // Recibe en CEF un bloqueo aplicado y confirma si pudo encolar una copia para Qt.
+    SecurityRequestHandler::DecisionCallback MakeNavigationDecisionHandler(
+        BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager);
+
+    // Recibe en CEF un bloqueo aplicado y confirma si pudo encolar una copia para Qt.
+    SecurityDownloadHandler::DecisionCallback MakeDownloadDecisionHandler(
         BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager);
 
     // Descarta avisos obsoletos y presenta el bloqueo en Qt, sin reevaluar permisos de navegación.
@@ -75,6 +80,12 @@ private:
 
     // Traduce motivos controlados a texto de presentación, sin registrar URL ni datos de navegación.
     static QString NavigationBlockMessage(const NavigationDecisionNotice& notice, const QString& policy_name);
+
+    // Descarta avisos de otro contexto o política y presenta el bloqueo en el hilo Qt.
+    void OnDownloadDecision(const DownloadDecisionNotice& notice, const PolicyManager& manager);
+
+    // Traduce los motivos de descarga a texto, sin incluir rutas locales ni nombres recibidos de CEF.
+    static QString DownloadBlockMessage(const DownloadDecisionNotice& notice, const QString& policy_name);
 
     // Copia de los argumentos validados: modo de ejecución y selección inicial de política.
     // La política publicada se consulta en PolicyManager; el modo queda fijado durante toda la sesión.

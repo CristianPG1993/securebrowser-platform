@@ -171,6 +171,12 @@ void BrowserWindowUi::ClearNavigationBlock() {
     block_panel_.hide();
 }
 
+void BrowserWindowUi::ShowDownloadBlock(const QString& message) {
+    // La sesión solo llama desde Qt, después de recibir el aviso de bloqueo de descarga aplicado por CEF.
+    block_message_.setText(message);
+    block_panel_.show();
+}
+
 void BrowserWindowUi::SetPolicyName(const QString& policy_name) {
     policy_label_.setText(QStringLiteral("Política: %1").arg(policy_name));
     status_panel_.show();

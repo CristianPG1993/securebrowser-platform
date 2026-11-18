@@ -58,6 +58,10 @@ public:
     // La sesión prepara el motivo; la interfaz no evalúa políticas ni decide permisos.
     void ShowNavigationBlock(const QString& message);
 
+    // Muestra en Qt un aviso de descarga bloqueada con el texto preparado por la sesión.
+    // Solo presenta el motivo; no evalúa reglas ni ofrece reanudar la descarga cancelada.
+    void ShowDownloadBlock(const QString& message);
+
     // Retira el aviso cuando la sesión determina que ya no corresponde al estado mostrado.
     void ClearNavigationBlock();
 

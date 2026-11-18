@@ -4,6 +4,7 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <limits>
@@ -17,13 +18,15 @@ namespace sbp {
 // Empieza en cero para que el primer identificador asignado sea uno.
 std::uint64_t SecurityDownloadHandler::lastOperationId_ = 0;
 
-// Conserva el gestor y las funciones de petición y cierre de los diálogos; todavía no las ejecuta.
+// Conserva el gestor y los receptores de diálogo y bloqueo; construir el handler no ejecuta esas funciones.
 SecurityDownloadHandler::SecurityDownloadHandler(std::shared_ptr<PolicyManager> policyManager,
                                                  RequestSaveDialogCallback onRequestSaveDialog,
-                                                 RequestCloseSaveDialogCallback onRequestCloseSaveDialog)
+                                                 RequestCloseSaveDialogCallback onRequestCloseSaveDialog,
+                                                 DecisionCallback onDecision)
     : policyManager_(std::move(policyManager)),
       onRequestSaveDialog_(std::move(onRequestSaveDialog)),
-      onRequestCloseSaveDialog_(std::move(onRequestCloseSaveDialog)) {
+      onRequestCloseSaveDialog_(std::move(onRequestCloseSaveDialog)),
+      onDecision_(std::move(onDecision)) {
     if (!policyManager_) {
         throw std::invalid_argument("SecurityDownloadHandler requires a policy manager.");
     }
@@ -39,15 +42,49 @@ bool SecurityDownloadHandler::CanDownload(CefRefPtr<CefBrowser> browser,
     }
 
     const auto state = policyManager_->ReadState();
-    if (!state) {
+    // El gestor comprueba de nuevo ese contexto y su vigencia sin renovar el plazo.
+    const auto policy = state ? policyManager_->ReadPolicy(state->context)
+                              : PolicyManager::PolicyReadResult{};
+
+    // Solo permite pasar a las comprobaciones posteriores del nombre y del destino final.
+    if (policy.availability == PolicyAvailability::Available) {
+        return true;
+    }
+
+    // Traduce el rechazo inicial sin evaluar un nombre que este callback todavía no recibe.
+    SecurityReason reason = SecurityReason::PolicyUnavailable;
+    if (policy.availability == PolicyAvailability::InvalidContext) {
+        reason = SecurityReason::InvalidContext;
+    } else if (policy.availability == PolicyAvailability::Expired) {
+        reason = SecurityReason::PolicyExpired;
+    }
+
+    const auto operationId = AllocateOperationId();
+    if (!operationId.has_value()) {
+        std::fputs("CEF download blocked; decision correlation counter exhausted.\n", stderr);
         return false;
     }
 
-    // El gestor comprueba de nuevo ese contexto y su vigencia sin renovar el plazo.
-    const auto policy = policyManager_->ReadPolicy(state->context);
+    // No hay CefDownloadItem ni seguimiento todavía; downloadId permanece sin valor.
+    DownloadDecisionNotice notice;
+    notice.operationId = *operationId;
+    notice.occurredAt = std::chrono::time_point_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now());
+    notice.browserId = browser->GetIdentifier();
+    notice.decision = SecurityDecision(reason);
 
-    // Solo permite pasar a las comprobaciones posteriores del nombre y del destino final.
-    return policy.availability == PolicyAvailability::Available;
+    // Si terminó el contexto durante la lectura, conserva su origen sin tomar datos de otra sesión.
+    const auto evaluatedState = policy.state ? policy.state : state;
+    if (evaluatedState) {
+        notice.context = evaluatedState->context;
+        if (evaluatedState->policy) {
+            notice.policyId = evaluatedState->policy->Id();
+        }
+    }
+
+    // false aplica el rechazo en este callback; el resultado del receptor no puede convertirlo en permiso.
+    NotifyBlocked(notice);
+    return false;
 }
 
 // Comprueba el nombre sugerido antes de pedir a Qt un destino editable.
@@ -70,10 +107,15 @@ bool SecurityDownloadHandler::OnBeforeDownload(CefRefPtr<CefBrowser> browser,
 
     // No sustituye el origen de una descarga observada antes ni abre otro diálogo para la misma solicitud.
     if (tracked->phase != DownloadPhase::AwaitingAuthorization ||
-        !tracked->context.has_value() ||
         pendingDownloads_.find(key) != pendingDownloads_.end() ||
         downloadItem->IsComplete() || downloadItem->IsCanceled() || downloadItem->IsInterrupted()) {
         CancelDownload(key);
+        return true;
+    }
+
+    // Un origen sin contexto es un bloqueo de seguridad, también para StartDownload, y se comunica con su ID.
+    if (!tracked->context.has_value()) {
+        BlockDownload(key, SecurityReason::InvalidContext, nullptr);
         return true;
     }
 
@@ -82,7 +124,8 @@ bool SecurityDownloadHandler::OnBeforeDownload(CefRefPtr<CefBrowser> browser,
     const auto policy = policyManager_->ReadPolicy(*tracked->context);
     const SecurityDecision decision = downloadPolicy_.Evaluate(policy, fileName);
     if (decision.Action() != SecurityAction::Allow) {
-        CancelDownload(key);
+        // Cancela y conserva el motivo del evaluador antes de solicitar cualquier diálogo Qt.
+        BlockDownload(key, decision.Reason(), policy.state);
         return true;
     }
 
@@ -164,14 +207,16 @@ void SecurityDownloadHandler::OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
         tracked->cancelCallback = callback;
     }
 
-    // Las transferencias autorizadas no reevalúan reglas ni caducidad de política.
-    // Sí se cancelan si desaparece o cambia su contexto, o si ya se solicitó cancelarlas.
-    // Este flujo no reanuda interrupciones: solicita cancelarlas y espera el estado final.
-    if (tracked->phase == DownloadPhase::CancelRequested ||
-        !tracked->context.has_value() ||
-        !policyManager_->IsCurrentContext(*tracked->context) ||
-        downloadItem->IsInterrupted()) {
+    // Una cancelación ya solicitada o una interrupción no producen otro aviso de bloqueo.
+    if (tracked->phase == DownloadPhase::CancelRequested || downloadItem->IsInterrupted()) {
         CancelDownload(key);
+        return;
+    }
+
+    // También comunica el bloqueo si este fue el primer callback y el origen carece de contexto válido.
+    // Las transferencias autorizadas no reevalúan reglas ni caducidad, pero sí conservan esta guarda de origen.
+    if (!tracked->context.has_value() || !policyManager_->IsCurrentContext(*tracked->context)) {
+        BlockDownload(key, SecurityReason::InvalidContext, nullptr);
     }
 }
 
@@ -248,6 +293,45 @@ void SecurityDownloadHandler::CancelDownload(DownloadKey key) {
     }
 }
 
+// Conserva los datos del bloqueo antes de cancelar y comunica un solo aviso por operación seguida.
+void SecurityDownloadHandler::BlockDownload(
+    DownloadKey key, SecurityReason reason,
+    const std::shared_ptr<const PolicyManager::State>& state) {
+    CEF_REQUIRE_UI_THREAD();
+
+    // Un permiso no es un motivo de cancelación ni debe circular por el canal de avisos de bloqueo.
+    const SecurityDecision decision(reason);
+    if (decision.Action() != SecurityAction::Block) {
+        return;
+    }
+
+    const auto tracked = trackedDownloads_.find(key);
+    if (tracked == trackedDownloads_.end() || tracked->second.phase == DownloadPhase::CancelRequested) {
+        // Sin registro no hay operación que correlacionar; una cancelación ya solicitada tampoco repite el aviso.
+        CancelDownload(key);
+        return;
+    }
+
+    // La copia permanece válida aunque CancelDownload provoque avisos CEF que eliminen el seguimiento.
+    DownloadDecisionNotice notice;
+    notice.operationId = tracked->second.operationId;
+    notice.occurredAt = std::chrono::time_point_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now());
+    notice.browserId = key.first;
+    notice.downloadId = key.second;
+    notice.context = tracked->second.context;
+    notice.decision = decision;
+
+    // Una lectura de otro contexto no puede atribuir su política al origen de esta descarga.
+    if (state && state->policy && notice.context.has_value() && state->context == *notice.context) {
+        notice.policyId = state->policy->Id();
+    }
+
+    // CancelDownload marca CancelRequested antes de llamar a CEF, impidiendo avisos duplicados por reentrada.
+    CancelDownload(key);
+    NotifyBlocked(notice);
+}
+
 // Separa el nombre de la carpeta sin consultar el disco ni corregir la ruta recibida.
 std::optional<std::string> SecurityDownloadHandler::ExtractDestinationFileName(
     const std::string& path) {
@@ -315,14 +399,16 @@ void SecurityDownloadHandler::CompleteSaveDialog(DownloadKey key,
     const auto policy = policyManager_->ReadPolicy(pending->second.context);
     const SecurityDecision decision = downloadPolicy_.Evaluate(policy, *fileName);
     if (decision.Action() != SecurityAction::Allow) {
-        CancelDownload(key);
+        // Conserva el motivo de la política vigente al confirmar, incluido un nombre definitivo inválido o bloqueado.
+        BlockDownload(key, decision.Reason(), policy.state);
         return;
     }
 
     // Comprueba otra vez el origen justo antes de aplicar la decisión, sin trasladarlo a otra sesión.
     const CefString destination(*path);
     if (!policyManager_->IsCurrentContext(pending->second.context)) {
-        CancelDownload(key);
+        // Un cambio de contexto después de evaluar impide aplicar el permiso y genera su propio motivo de bloqueo.
+        BlockDownload(key, SecurityReason::InvalidContext, policy.state);
         return;
     }
 
@@ -333,6 +419,25 @@ void SecurityDownloadHandler::CompleteSaveDialog(DownloadKey key,
 
     // Utiliza exactamente el destino evaluado y evita abrir un segundo diálogo de CEF.
     callback->Continue(destination, false);
+}
+
+// Entrega el aviso de un bloqueo aplicado sin permitir que un fallo del receptor reanude la descarga.
+void SecurityDownloadHandler::NotifyBlocked(const DownloadDecisionNotice& notice) {
+    CEF_REQUIRE_UI_THREAD();
+
+    // Este canal solo comunica bloqueos, nunca descargas permitidas ni cancelaciones voluntarias.
+    if (notice.decision.Action() != SecurityAction::Block) {
+        return;
+    }
+
+    try {
+        if (!onDecision_ || !onDecision_(notice)) {
+            std::fputs("CEF download blocked; decision notice was not accepted.\n", stderr);
+        }
+    } catch (...) {
+        // No registra mensajes de excepciones ajenas, que podrían contener rutas u otros datos de la petición.
+        std::fputs("CEF download blocked; decision receiver failed.\n", stderr);
+    }
 }
 
 // Solicita cancelar todas las descargas conocidas sin recorrer mapas durante las llamadas a CEF.
