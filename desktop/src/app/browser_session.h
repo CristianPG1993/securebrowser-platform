@@ -2,6 +2,7 @@
 
 #include "app/browser_lifecycle.h"
 #include "app/startup_options.h"
+#include "browser/security_download_handler.h"
 
 #include <cstdint>
 #include <functional>
@@ -56,6 +57,10 @@ private:
     void ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyManager& manager,
                               const SecurityContext& context, int index,
                               const CefRefPtr<BrowserClient>& browser_client) const;
+
+    // Prepara la función que CEF invocará para solicitar Guardar como.
+    // Encola en Qt el ID, el nombre sugerido y la respuesta, sin acceder a controles desde CEF.
+    SecurityDownloadHandler::RequestSaveDialogCallback MakeSaveDialogRequestHandler(BrowserWindow& window);
 
     // Prepara el receptor ejecutado en CEF; no lee controles ni estado Qt desde ese hilo.
     std::function<bool(const NavigationDecisionNotice&)> MakeNavigationDecisionHandler(

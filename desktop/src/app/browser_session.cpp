@@ -17,6 +17,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <utility>
 
 namespace sbp {
 
@@ -161,14 +162,18 @@ int BrowserSession::Run(QApplication& qt_app) {
         // El receptor copia el aviso desde CEF y lo encola para presentarlo únicamente en Qt.
         CefRefPtr<SecurityRequestHandler> security_handler = new SecurityRequestHandler(
             policy_manager, MakeNavigationDecisionHandler(window, policy_manager));
+        // El handler de descargas comparte el gestor y recibe la función que encola Guardar como en Qt.
+        // Todavía no se abre ningún diálogo; CEF invocará esta función al solicitar un destino permitido.
+        CefRefPtr<SecurityDownloadHandler> download_handler = new SecurityDownloadHandler(
+            policy_manager, MakeSaveDialogRequestHandler(window));
         // Paso 5: browser_client es el cliente que entregamos a CEF para crear y manejar el navegador.
-        // Recibe creación, carga, historial y cierre; GetRequestHandler entrega security_handler a CEF.
+        // Recibe creación, carga, historial y cierre; entrega a CEF los handlers de navegación y descarga.
         // MakeCallbacks agrupa los avisos de navegación; MakeClientCallbacks añade creación y cierre.
         // El constructor guarda esas funciones: sus avisos se ejecutarán después; aún no creamos el navegador CEF.
         CefRefPtr<BrowserClient> browser_client(new BrowserClient(
             lifecycle_.MakeClientCallbacks(
                 window, navigation.MakeCallbacks(window, window_ui_, lifecycle_.CloseRequested())),
-            security_handler));
+            security_handler, download_handler));
 
         std::fputs("CEF browser client prepared.\n", stderr);
 
@@ -203,6 +208,8 @@ int BrowserSession::Run(QApplication& qt_app) {
 
         // Retira el receptor del selector mientras los controles y el gestor todavía siguen vivos.
         window_ui.SetPolicySelectionHandler({});
+        // Resuelve los diálogos pendientes antes de retirar los controles y sus conexiones de respuesta.
+        window_ui.CancelDownloadSaveDialogs();
 
         // Paso 14: Liberamos la función de creación y limpiamos los datos del anfitrión, aún con los widgets vivos.
         lifecycle_.Detach();
@@ -217,6 +224,40 @@ int BrowserSession::Run(QApplication& qt_app) {
     std::fprintf(stderr, "Qt window destroyed; event loop exit code %d.\n", qt_exit_code);
     // Paso 18: Devolvemos el resultado al arranque, que después llamará a CefShutdown.
     return qt_exit_code;
+}
+
+// Prepara el puente CEF -> Qt sin abrir el diálogo durante la composición de la sesión.
+SecurityDownloadHandler::RequestSaveDialogCallback BrowserSession::MakeSaveDialogRequestHandler(
+    BrowserWindow& window) {
+    // CEF invocará esta función; solo se accede a la ventana como receptor de la tarea encolada.
+    return [this, &window](std::uint64_t operationId, std::string suggestedName,
+                           SecurityDownloadHandler::SaveDialogResultCallback onResult) {
+        if (!onResult) {
+            return false;
+        }
+
+        // La tarea conserva sus datos y la respuesta; solo en el hilo Qt consulta el cierre y los controles.
+        const bool queued = QMetaObject::invokeMethod(&window,
+            [this, operationId, suggestedName = std::move(suggestedName), onResult = std::move(onResult)]() mutable {
+                if (lifecycle_.CloseRequested()) {
+                    onResult(std::nullopt);
+                    return;
+                }
+                if (window_ui_ == nullptr) {
+                    // La ausencia de controles impide entregar la petición; una ruta vacía se rechazará como destino.
+                    onResult(std::string{});
+                    return;
+                }
+                window_ui_->ShowDownloadSaveDialog(
+                    operationId, QString::fromUtf8(suggestedName.c_str()), std::move(onResult));
+            }, Qt::QueuedConnection);
+
+        // false hará que OnBeforeDownload retire la solicitud al no poder entregarla a Qt.
+        if (!queued) {
+            std::fputs("CEF save dialog request could not be queued to Qt.\n", stderr);
+        }
+        return queued;
+    };
 }
 
 std::function<bool(const NavigationDecisionNotice&)> BrowserSession::MakeNavigationDecisionHandler(
