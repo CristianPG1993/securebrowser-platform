@@ -165,7 +165,7 @@ int BrowserSession::Run(QApplication& qt_app) {
         // El handler de descargas comparte el gestor y recibe la función que encola Guardar como en Qt.
         // Todavía no se abre ningún diálogo; CEF invocará esta función al solicitar un destino permitido.
         CefRefPtr<SecurityDownloadHandler> download_handler = new SecurityDownloadHandler(
-            policy_manager, MakeSaveDialogRequestHandler(window));
+            policy_manager, MakeSaveDialogRequestHandler(window), MakeSaveDialogCloseHandler(window));
         // Paso 5: browser_client es el cliente que entregamos a CEF para crear y manejar el navegador.
         // Recibe creación, carga, historial y cierre; entrega a CEF los handlers de navegación y descarga.
         // MakeCallbacks agrupa los avisos de navegación; MakeClientCallbacks añade creación y cierre.
@@ -257,6 +257,26 @@ SecurityDownloadHandler::RequestSaveDialogCallback BrowserSession::MakeSaveDialo
             std::fputs("CEF save dialog request could not be queued to Qt.\n", stderr);
         }
         return queued;
+    };
+}
+
+// Prepara el aviso CEF -> Qt para retirar el diálogo de una solicitud cuyo destino ya no está pendiente.
+SecurityDownloadHandler::RequestCloseSaveDialogCallback BrowserSession::MakeSaveDialogCloseHandler(BrowserWindow& window) {
+    // CEF ejecutará esta lambda con el ID de operación; aquí no se consultan ni modifican controles Qt.
+    return [this, &window](std::uint64_t operationId) {
+        // La lambda interior se encola en el hilo principal de Qt, conservando una copia del ID.
+        const bool queued = QMetaObject::invokeMethod(&window, [this, operationId] {
+            // Los controles pueden haberse retirado antes de atender el aviso; solo se utilizan si siguen disponibles.
+            if (window_ui_ != nullptr) {
+                // Cierra únicamente el diálogo de esta operación; su respuesta tardía será descartada por CEF.
+                window_ui_->CancelDownloadSaveDialog(operationId);
+            }
+        }, Qt::QueuedConnection);
+
+        // La solicitud ya se retiró en CEF; registra si no se pudo entregar a Qt el cierre de su diálogo.
+        if (!queued) {
+            std::fputs("CEF save dialog close request could not be queued to Qt.\n", stderr);
+        }
     };
 }
 

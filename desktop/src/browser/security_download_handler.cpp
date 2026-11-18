@@ -17,10 +17,13 @@ namespace sbp {
 // Empieza en cero para que el primer identificador asignado sea uno.
 std::uint64_t SecurityDownloadHandler::lastOperationId_ = 0;
 
-// Conserva la propiedad compartida del gestor y rechaza una dependencia inexistente.
+// Conserva el gestor y las funciones de petición y cierre de los diálogos; todavía no las ejecuta.
 SecurityDownloadHandler::SecurityDownloadHandler(std::shared_ptr<PolicyManager> policyManager,
-                                                 RequestSaveDialogCallback onRequestSaveDialog)
-    : policyManager_(std::move(policyManager)), onRequestSaveDialog_(std::move(onRequestSaveDialog)) {
+                                                 RequestSaveDialogCallback onRequestSaveDialog,
+                                                 RequestCloseSaveDialogCallback onRequestCloseSaveDialog)
+    : policyManager_(std::move(policyManager)),
+      onRequestSaveDialog_(std::move(onRequestSaveDialog)),
+      onRequestCloseSaveDialog_(std::move(onRequestCloseSaveDialog)) {
     if (!policyManager_) {
         throw std::invalid_argument("SecurityDownloadHandler requires a policy manager.");
     }
@@ -129,13 +132,21 @@ void SecurityDownloadHandler::OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
         // Retira ambos registros antes de liberar una posible continuación pendiente.
         // Una respuesta posterior de Qt ya no encontrará la solicitud original.
         CefRefPtr<CefBeforeDownloadCallback> pendingCallback;
+        std::optional<std::uint64_t> pendingOperationId;
         const auto pending = pendingDownloads_.find(key);
         if (pending != pendingDownloads_.end()) {
+            pendingOperationId = pending->second.operationId;
             pendingCallback = std::move(pending->second.callback);
             pendingDownloads_.erase(pending);
         }
         trackedDownloads_.erase(key);
         pendingCallback = nullptr;
+
+        // CEF puede cancelar antes de que Qt responda; solicita retirar también el diálogo de ese ID.
+        // Los registros ya se eliminaron, por lo que la respuesta del cierre no podrá continuar la descarga.
+        if (pendingOperationId.has_value() && onRequestCloseSaveDialog_) {
+            onRequestCloseSaveDialog_(*pendingOperationId);
+        }
         return;
     }
 
@@ -207,8 +218,11 @@ void SecurityDownloadHandler::CancelDownload(DownloadKey key) {
 
     // Mantiene la continuación localmente para actualizar el estado antes de liberar su última referencia.
     CefRefPtr<CefBeforeDownloadCallback> pendingCallback;
+    // Conserva el identificador propio para cerrar únicamente el diálogo de la solicitud retirada.
+    std::optional<std::uint64_t> pendingOperationId;
     const auto pending = pendingDownloads_.find(key);
     if (pending != pendingDownloads_.end()) {
+        pendingOperationId = pending->second.operationId;
         pendingCallback = std::move(pending->second.callback);
         pendingDownloads_.erase(pending);
     }
@@ -225,6 +239,12 @@ void SecurityDownloadHandler::CancelDownload(DownloadKey key) {
     pendingCallback = nullptr;
     if (cancelCallback) {
         cancelCallback->Cancel();
+    }
+
+    // El receptor encolará el cierre en Qt; su respuesta tardía ya no encontrará la solicitud pendiente.
+    // Usa el ID copiado, sin acceder a entradas que CEF haya podido retirar durante la cancelación.
+    if (pendingOperationId.has_value() && onRequestCloseSaveDialog_) {
+        onRequestCloseSaveDialog_(*pendingOperationId);
     }
 }
 

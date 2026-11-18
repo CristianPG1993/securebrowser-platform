@@ -32,13 +32,18 @@ public:
     using RequestSaveDialogCallback =
         std::function<bool(std::uint64_t, std::string, SaveDialogResultCallback)>;
 
+    // CEF solicita retirar el diálogo de una operación cuyo destino ya no está pendiente.
+    // Se invoca en UI CEF; el receptor encolará su cierre en Qt usando el identificador propio.
+    using RequestCloseSaveDialogCallback = std::function<void(std::uint64_t)>;
+
     // Comparte el gestor existente y lo mantiene vivo mientras el handler lo utiliza.
     // Consultará la política vigente, sin conservar una copia fija de sus reglas.
     // El receptor encolará las peticiones de guardado para Qt desde el hilo UI de CEF.
     // Si está vacío, no se podrá solicitar un destino y la solicitud deberá cancelarse.
     explicit SecurityDownloadHandler(
         std::shared_ptr<PolicyManager> policyManager,
-        RequestSaveDialogCallback onRequestSaveDialog = {});
+        RequestSaveDialogCallback onRequestSaveDialog = {},
+        RequestCloseSaveDialogCallback onRequestCloseSaveDialog = {});
 
     // Las referencias CefRefPtr comparten el handler; el objeto no se copia.
     SecurityDownloadHandler(const SecurityDownloadHandler&) = delete;
@@ -156,6 +161,9 @@ private:
 
     // Se fija al construir el handler; solo se invocará desde el hilo UI de CEF.
     const RequestSaveDialogCallback onRequestSaveDialog_;
+
+    // Avisa a Qt al retirar un destino pendiente; el cierre no puede resolver otra operación posterior.
+    const RequestCloseSaveDialogCallback onRequestCloseSaveDialog_;
 
     // Reutiliza el evaluador puro para los nombres sugerido y definitivo, sin duplicar sus reglas.
     DownloadPolicy downloadPolicy_;

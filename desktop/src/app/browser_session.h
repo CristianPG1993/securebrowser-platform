@@ -62,6 +62,10 @@ private:
     // Encola en Qt el ID, el nombre sugerido y la respuesta, sin acceder a controles desde CEF.
     SecurityDownloadHandler::RequestSaveDialogCallback MakeSaveDialogRequestHandler(BrowserWindow& window);
 
+    // Prepara el receptor del aviso de cierre emitido desde CEF al retirar un destino pendiente.
+    // Encola el ID en Qt para cerrar solo su diálogo, sin acceder a controles desde el hilo CEF.
+    SecurityDownloadHandler::RequestCloseSaveDialogCallback MakeSaveDialogCloseHandler(BrowserWindow& window);
+
     // Prepara el receptor ejecutado en CEF; no lee controles ni estado Qt desde ese hilo.
     std::function<bool(const NavigationDecisionNotice&)> MakeNavigationDecisionHandler(
         BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager);
