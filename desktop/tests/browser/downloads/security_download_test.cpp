@@ -24,7 +24,9 @@ struct SecurityDownloadCase {
     const char* path;
     const char* suggestedName;
     DownloadTestTrigger trigger;
-    bool allowed;
+    // Sin motivo esperado, la descarga debe completarse; con motivo, debe bloquearse antes del diálogo.
+    std::optional<SecurityReason> blockReason;
+    DownloadControlConfig config{true, FilterMode::Denylist, {"exe"}};
 };
 
 // El hilo UI de CEF escribe estos datos; GoogleTest los consulta después de que Run confirme el cierre.
@@ -91,7 +93,7 @@ TEST_P(SecurityDownloadTest, AppliesSuggestedNamePolicyAndChecksFinalFile) {
     const PolicySnapshot policy(
         1, 20, "Download test policy",
         UrlFilteringConfig(false, FilterMode::Denylist, {}),
-        DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), timestamp, timestamp);
+        testCase.config, timestamp, timestamp);
     ASSERT_EQ(PolicyPublicationResult::Published, manager->PublishPolicy(*context, policy));
 
     const std::u8string utf8Destination = destination_.u8string();
@@ -138,7 +140,7 @@ TEST_P(SecurityDownloadTest, AppliesSuggestedNamePolicyAndChecksFinalFile) {
     std::error_code error;
     const bool finalFileExists = std::filesystem::exists(destination_, error);
     ASSERT_FALSE(error) << error.message();
-    if (testCase.allowed) {
+    if (!testCase.blockReason.has_value()) {
         ASSERT_TRUE(result.completed);
         EXPECT_FALSE(result.canceled);
         EXPECT_FALSE(result.interrupted);
@@ -165,7 +167,7 @@ TEST_P(SecurityDownloadTest, AppliesSuggestedNamePolicyAndChecksFinalFile) {
         EXPECT_GT(notice.operationId, 0U);
         EXPECT_GT(notice.browserId, 0);
         EXPECT_EQ(result.downloadId, notice.downloadId);
-        EXPECT_EQ(SecurityReason::ExtensionDenied, notice.decision.Reason());
+        EXPECT_EQ(*testCase.blockReason, notice.decision.Reason());
         ASSERT_TRUE(notice.context.has_value());
         EXPECT_EQ(*context, *notice.context);
         ASSERT_TRUE(notice.policyId.has_value());
@@ -179,16 +181,67 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         // El enlace termina en .exe, pero Content-Disposition sugiere un PDF que debe completarse.
         SecurityDownloadCase{"LinkAllowsPdfDespiteExeUrl", "/download/allowed.exe", "informe.pdf",
-            DownloadTestTrigger::Link, true},
+            DownloadTestTrigger::Link, std::nullopt},
         // La URL aparenta un PDF; el nombre programa.exe debe bloquearse antes de pedir destino.
         SecurityDownloadCase{"LinkBlocksExeDespitePdfUrl", "/download/blocked.pdf", "programa.exe",
-            DownloadTestTrigger::Link, false},
+            DownloadTestTrigger::Link, SecurityReason::ExtensionDenied},
         // StartDownload omite CanDownload, pero conserva la autorización y el archivo permitido completo.
         SecurityDownloadCase{"StartDownloadAllowsPdfDespiteExeUrl", "/download/allowed.exe", "informe.pdf",
-            DownloadTestTrigger::StartDownload, true},
+            DownloadTestTrigger::StartDownload, std::nullopt},
         // El nombre bloqueado tampoco puede continuar por la entrada StartDownload.
         SecurityDownloadCase{"StartDownloadBlocksExeDespitePdfUrl", "/download/blocked.pdf", "programa.exe",
-            DownloadTestTrigger::StartDownload, false}),
+            DownloadTestTrigger::StartDownload, SecurityReason::ExtensionDenied},
+        // Conserva la ñ de filename* y permite PDF en mayúsculas al compararlo con la regla pdf.
+        SecurityDownloadCase{"LinkAllowsUnicodeNameAndUppercaseExtension", "/download/unicode",
+            "informe-ni\xC3\xB1o.PDF", DownloadTestTrigger::Link, std::nullopt,
+            DownloadControlConfig(true, FilterMode::Allowlist, {"pdf"})},
+        // La comparación Unicode también debe relacionar ÉXE con la regla éxe sin alterar el nombre.
+        SecurityDownloadCase{"StartDownloadBlocksUnicodeExtensionIgnoringCase", "/download/unicode-extension.pdf",
+            "informe.\xC3\x89XE", DownloadTestTrigger::StartDownload, SecurityReason::ExtensionDenied,
+            DownloadControlConfig(true, FilterMode::Denylist, {"\xC3\xA9xe"})},
+        // En una doble extensión manda la última: informe.pdf.exe sigue siendo exe.
+        SecurityDownloadCase{"LinkBlocksLastExtensionInDoubleName", "/download/double.pdf", "informe.pdf.exe",
+            DownloadTestTrigger::Link, SecurityReason::ExtensionDenied},
+        // Con el control activo, un nombre sin punto no ofrece una extensión que se pueda autorizar.
+        SecurityDownloadCase{"LinkBlocksMissingExtension", "/download/no-extension", "informe",
+            DownloadTestTrigger::Link, SecurityReason::MissingExtension},
+        // Desactivar el control permite el nombre válido aunque no tenga extensión.
+        SecurityDownloadCase{"LinkAllowsMissingExtensionWithControlDisabled", "/download/no-extension", "informe",
+            DownloadTestTrigger::Link, std::nullopt,
+            DownloadControlConfig(false, FilterMode::Denylist, {"exe"})},
+        // CEF transforma .env en env antes del callback; sigue sin extensión y debe bloquearse.
+        SecurityDownloadCase{"LinkBlocksDotfileWithoutExtension", "/download/dotfile", "env",
+            DownloadTestTrigger::Link, SecurityReason::MissingExtension},
+        // El nombre env que entrega CEF puede continuar sin extensión cuando el control está desactivado.
+        SecurityDownloadCase{"LinkAllowsDotfileWithControlDisabled", "/download/dotfile", "env",
+            DownloadTestTrigger::Link, std::nullopt,
+            DownloadControlConfig(false, FilterMode::Denylist, {"exe"})},
+        // Una lista de denegación vacía permite las extensiones válidas.
+        SecurityDownloadCase{"LinkAllowsWithEmptyDenylist", "/download/allowed.exe", "informe.pdf",
+            DownloadTestTrigger::Link, std::nullopt,
+            DownloadControlConfig(true, FilterMode::Denylist, {})},
+        // Una lista de permitidos vacía tampoco autoriza descargas iniciadas con StartDownload.
+        SecurityDownloadCase{"StartDownloadBlocksWithEmptyAllowlist", "/download/allowed.exe", "informe.pdf",
+            DownloadTestTrigger::StartDownload, SecurityReason::ExtensionNotAllowed,
+            DownloadControlConfig(true, FilterMode::Allowlist, {})},
+        // La regla con punto inicial y mayúsculas debe autorizar el PDF sugerido por el servidor.
+        SecurityDownloadCase{"LinkAllowsListedExtensionWithDotAndCase", "/download/allowed.exe", "informe.pdf",
+            DownloadTestTrigger::Link, std::nullopt,
+            DownloadControlConfig(true, FilterMode::Allowlist, {".PDF"})},
+        // Una extensión ausente de la lista de permitidos se bloquea con su motivo específico.
+        SecurityDownloadCase{"LinkBlocksUnlistedExtension", "/download/blocked.pdf", "programa.exe",
+            DownloadTestTrigger::Link, SecurityReason::ExtensionNotAllowed,
+            DownloadControlConfig(true, FilterMode::Allowlist, {"pdf"})},
+        // Desactivar el control ignora incluso una regla que coincide con la extensión sugerida y la final.
+        SecurityDownloadCase{"StartDownloadIgnoresMatchingDenyRuleWithControlDisabled", "/download/allowed.exe",
+            "informe.pdf", DownloadTestTrigger::StartDownload, std::nullopt,
+            DownloadControlConfig(false, FilterMode::Denylist, {"pdf"})},
+        // Una redirección desde una URL .exe conserva el nombre PDF de la respuesta final permitida.
+        SecurityDownloadCase{"LinkAllowsFinalNameAfterRedirect", "/download/redirect.exe", "informe.pdf",
+            DownloadTestTrigger::Link, std::nullopt},
+        // La redirección inversa no permite ocultar el programa.exe de la respuesta final.
+        SecurityDownloadCase{"StartDownloadBlocksFinalNameAfterRedirect", "/download/redirect.pdf", "programa.exe",
+            DownloadTestTrigger::StartDownload, SecurityReason::ExtensionDenied}),
     SecurityDownloadTest::CaseName);
 
 // nullopt en blockReason distingue permisos y cancelaciones voluntarias de los bloqueos del evaluador.
