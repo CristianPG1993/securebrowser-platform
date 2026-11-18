@@ -310,6 +310,7 @@ if(SBP_BUILD_CEF_TESTS)
         tests/browser/security_navigation_test.cpp
         tests/browser/download_test_client.h
         tests/browser/download_test_client.cpp
+        tests/browser/security_download_test.cpp
         tests/browser/local_http_test_server.h
         tests/browser/local_http_test_server.cpp
         tests/browser/local_http_test_server_test.cpp
