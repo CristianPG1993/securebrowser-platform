@@ -3,7 +3,9 @@
 #include "ui/browser_window.h"
 
 #include <QAbstractButton>
+#include <QByteArray>
 #include <QEvent>
+#include <QFileDialog>
 #include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMetaMethod>
@@ -274,6 +276,107 @@ void BrowserWindowUi::CancelPageLeave() {
     // reject termina el diálogo como Quedarme; no destruye el objeto local de ConfirmPageLeave.
     if (page_leave_dialog_ != nullptr) {
         page_leave_dialog_->reject();
+    }
+}
+
+// Presenta el destino editable en Qt; el receptor comprobará después si permite continuar la descarga.
+void BrowserWindowUi::ShowDownloadSaveDialog(
+    std::uint64_t operationId,
+    const QString& suggestedName,
+    std::function<void(std::optional<std::string>)> onResult) {
+    if (!onResult) {
+        return;
+    }
+    if (download_dialogs_.find(operationId) != download_dialogs_.end()) {
+        // Una petición duplicada es un fallo de entrega, no una cancelación voluntaria del usuario.
+        onResult(std::string{});
+        return;
+    }
+
+    // La ventana posee el diálogo; open permite responder por señal sin ejecutar un bucle modal anidado.
+    auto* dialog = new QFileDialog(address_input_.window(), QStringLiteral("Guardar descarga"));
+    dialog->setAcceptMode(QFileDialog::AcceptSave);
+    dialog->setFileMode(QFileDialog::AnyFile);
+    dialog->setNameFilter(QStringLiteral("Todos los archivos (*)"));
+    dialog->selectFile(suggestedName);
+    download_dialogs_.emplace(operationId, dialog);
+
+    // Consulta la señal en tiempo de ejecución para evitar importar QDialog::staticMetaObject como dato.
+    // Así se conserva la carga diferida de Qt que necesita el arranque de los subprocesos CEF.
+    const QMetaObject* dialog_meta = dialog->metaObject();
+    const int finished_index = dialog_meta->indexOfSignal("finished(int)");
+    // Conserva una respuesta alternativa por si Qt rechaza la conexión después de mover onResult a la lambda.
+    const auto onConnectionFailure = onResult;
+    // finished se procesa en Qt; el contexto this desconecta la función si se destruyen los controles.
+    const auto connection = QMetaObject::connect(dialog, dialog_meta->method(finished_index), this,
+        [this, operationId, dialog, onResult = std::move(onResult)](int result) {
+            // Retira el registro antes de responder para consumir esta petición una sola vez.
+            const auto pending = download_dialogs_.find(operationId);
+            if (pending == download_dialogs_.end() || pending->second.data() != dialog) {
+                return;
+            }
+            // Elimina el diálogo de la lista de pendientes antes de procesar la respuesta.
+            download_dialogs_.erase(pending);
+
+            std::optional<std::string> path;
+            if (result == QDialog::Accepted) {
+                // Una confirmación sin ruta devuelve una cadena vacía: CEF la rechazará como destino inválido.
+                path = std::string{};
+                const QStringList files = dialog->selectedFiles();
+                if (files.size() == 1) {
+                    // QString guarda texto en UTF-16; toUtf8 lo convierte a los bytes UTF-8 que espera CEF.
+                    const QByteArray utf8Path = files.front().toUtf8();
+                    // constData apunta al inicio de los bytes y size indica cuántos hay, no cuántos caracteres.
+                    // static_cast convierte esa cantidad al tipo de tamaño std::size_t que espera el constructor.
+                    // std::string copia los bytes tal cual, sin otra conversión; path conserva su propia cadena.
+                    path = std::string(utf8Path.constData(), static_cast<std::size_t>(utf8Path.size()));
+                }
+            }
+
+            // La destrucción queda aplazada hasta salir de la señal; la respuesta solo transporta datos propios.
+            dialog->deleteLater();
+            onResult(std::move(path));
+        });
+
+    if (!connection) {
+        // No abre un diálogo sin respuesta: retira su registro y comunica un destino inválido a CEF.
+        download_dialogs_.erase(operationId);
+        dialog->deleteLater();
+        std::fputs("Qt download save dialog completion could not be connected.\n", stderr);
+        onConnectionFailure(std::string{});
+        return;
+    }
+
+    dialog->open();
+}
+
+// Cierra en Qt el diálogo de una solicitud retirada, sin afectar a otras operaciones.
+void BrowserWindowUi::CancelDownloadSaveDialog(std::uint64_t operationId) {
+    const auto pending = download_dialogs_.find(operationId);
+    if (pending == download_dialogs_.end()) {
+        return;
+    }
+
+    // Copia el puntero vigilado antes de reject, cuya señal finished puede retirar la entrada del mapa.
+    const QPointer<QFileDialog> dialog = pending->second;
+    if (!dialog) {
+        // El diálogo ya se destruyó; solo queda retirar su registro.
+        download_dialogs_.erase(pending);
+        return;
+    }
+
+    // finished retirará el registro, responderá con nullopt y programará la destrucción del diálogo.
+    // No se utiliza pending después de esta llamada porque su entrada puede haber sido eliminada.
+    dialog->reject();
+}
+
+// Solicita cerrar todos los diálogos pendientes desde el hilo Qt.
+void BrowserWindowUi::CancelDownloadSaveDialogs() {
+    // Copia las entradas y sus QPointer, sin duplicar los diálogos a los que apuntan.
+    // finished puede borrar entradas del mapa original al rechazar cada diálogo.
+    const auto dialogs = download_dialogs_;
+    for (const auto& entry : dialogs) {
+        CancelDownloadSaveDialog(entry.first);
     }
 }
 

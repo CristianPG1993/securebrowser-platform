@@ -7,14 +7,20 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QObject>
+#include <QPointer>
 #include <QPushButton>
 #include <QStringList>
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <cstdint>
 #include <functional>
+#include <map>
+#include <optional>
+#include <string>
 
 class QEvent;
+class QFileDialog;
 class QMessageBox;
 
 namespace sbp {
@@ -63,6 +69,19 @@ public:
 
     // Cierra la pregunta si CEF la ha retirado antes de recibir la respuesta del usuario.
     void CancelPageLeave();
+
+    // Abre Guardar como de forma asíncrona en Qt, con nombre editable y sin evaluar políticas.
+    // Responde con la ruta elegida en UTF-8 o nullopt si el usuario cancela.
+    void ShowDownloadSaveDialog(
+        std::uint64_t operationId,
+        const QString& suggestedName,
+        std::function<void(std::optional<std::string>)> onResult);
+
+    // Cierra el diálogo de una solicitud retirada; CEF descartará su respuesta tardía por operationId.
+    void CancelDownloadSaveDialog(std::uint64_t operationId);
+
+    // Cierra todos los diálogos pendientes antes de retirar los controles de la ventana.
+    void CancelDownloadSaveDialogs();
 
     // Guarda la función que recibirá el texto al pulsar Enter; instalarla no la ejecuta.
     void SetAddressSubmitHandler(std::function<void(const QString&)> on_address_submitted);
@@ -187,6 +206,10 @@ private:
 
     // Referencia no propietaria al diálogo local de ConfirmPageLeave; solo se utiliza en Qt.
     QMessageBox* page_leave_dialog_ = nullptr;
+
+    // Solo Qt accede al mapa; la ventana posee los diálogos y QPointer detecta su destrucción.
+    // Cada operación conserva su propio diálogo para permitir solicitudes de descarga independientes.
+    std::map<std::uint64_t, QPointer<QFileDialog>> download_dialogs_;
 };
 
 }  // namespace sbp
