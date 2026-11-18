@@ -297,42 +297,42 @@ if(SBP_BUILD_CEF_TESTS)
 
     # El bootstrap carga una DLL con RunConsoleMain; GoogleTest no aporta main en este target.
     add_library(sbp_cef_adapter_tests SHARED
-        tests/browser/browser_client_test.cpp
-        tests/browser/browser_security_config_test.cpp
-        tests/browser/startup_options_test.cpp
-        tests/browser/cef_adapter_test_app.h
-        tests/browser/cef_adapter_test_app.cpp
-        tests/browser/cef_adapter_test_entry_win.cpp
-        tests/browser/cef_url_adapter_test.cpp
-        tests/browser/security_request_handler_test.cpp
-        tests/browser/navigation_test_client.h
-        tests/browser/navigation_test_client.cpp
-        tests/browser/security_navigation_test.cpp
-        tests/browser/download_test_client.h
-        tests/browser/download_test_client.cpp
-        tests/browser/security_download_test.cpp
-        tests/browser/local_http_test_server.h
-        tests/browser/local_http_test_server.cpp
-        tests/browser/local_http_test_server_test.cpp
-        tests/browser/demo_policy_navigation_test.cpp
-        tests/browser/document_policy_test_client.h
-        tests/browser/document_policy_test_client.cpp
-        tests/browser/document_policy_change_test.cpp
-        tests/browser/history_policy_test_client.h
-        tests/browser/history_policy_test_client.cpp
-        tests/browser/history_policy_change_test.cpp
-        tests/browser/service_worker_policy_test_client.h
-        tests/browser/service_worker_policy_test_client.cpp
-        tests/browser/service_worker_policy_change_test.cpp
-        tests/browser/redirect_navigation_test_client.h
-        tests/browser/redirect_navigation_test_client.cpp
-        tests/browser/redirect_navigation_test.cpp
-        tests/browser/subframe_navigation_test_client.h
-        tests/browser/subframe_navigation_test_client.cpp
-        tests/browser/subframe_navigation_test.cpp
-        tests/browser/navigation_action_test_client.h
-        tests/browser/navigation_action_test_client.cpp
-        tests/browser/navigation_action_test.cpp
+        tests/browser/client/browser_client_test.cpp
+        tests/browser/configuration/browser_security_config_test.cpp
+        tests/browser/configuration/startup_options_test.cpp
+        tests/browser/bootstrap/cef_adapter_test_app.h
+        tests/browser/bootstrap/cef_adapter_test_app.cpp
+        tests/browser/bootstrap/cef_adapter_test_entry_win.cpp
+        tests/browser/navigation/cef_url_adapter_test.cpp
+        tests/browser/navigation/security_request_handler_test.cpp
+        tests/browser/navigation/navigation_test_client.h
+        tests/browser/navigation/navigation_test_client.cpp
+        tests/browser/navigation/security_navigation_test.cpp
+        tests/browser/downloads/download_test_client.h
+        tests/browser/downloads/download_test_client.cpp
+        tests/browser/downloads/security_download_test.cpp
+        tests/browser/support/local_http_test_server.h
+        tests/browser/support/local_http_test_server.cpp
+        tests/browser/support/local_http_test_server_test.cpp
+        tests/browser/policy_changes/demo_policy_navigation_test.cpp
+        tests/browser/policy_changes/document_policy_test_client.h
+        tests/browser/policy_changes/document_policy_test_client.cpp
+        tests/browser/policy_changes/document_policy_change_test.cpp
+        tests/browser/policy_changes/history_policy_test_client.h
+        tests/browser/policy_changes/history_policy_test_client.cpp
+        tests/browser/policy_changes/history_policy_change_test.cpp
+        tests/browser/policy_changes/service_worker_policy_test_client.h
+        tests/browser/policy_changes/service_worker_policy_test_client.cpp
+        tests/browser/policy_changes/service_worker_policy_change_test.cpp
+        tests/browser/navigation/redirect_navigation_test_client.h
+        tests/browser/navigation/redirect_navigation_test_client.cpp
+        tests/browser/navigation/redirect_navigation_test.cpp
+        tests/browser/navigation/subframe_navigation_test_client.h
+        tests/browser/navigation/subframe_navigation_test_client.cpp
+        tests/browser/navigation/subframe_navigation_test.cpp
+        tests/browser/navigation/navigation_action_test_client.h
+        tests/browser/navigation/navigation_action_test_client.cpp
+        tests/browser/navigation/navigation_action_test.cpp
         src/demo/demo_policy_source.h
         src/demo/demo_policy_source.cpp
         src/app/startup_options.h
@@ -354,6 +354,7 @@ if(SBP_BUILD_CEF_TESTS)
     )
     target_include_directories(sbp_cef_adapter_tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
         "${CEF_INCLUDE_PATH}"
     )
     target_compile_definitions(sbp_cef_adapter_tests PRIVATE NOMINMAX)

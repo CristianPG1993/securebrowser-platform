@@ -1,5 +1,5 @@
 #include "document_policy_test_client.h"
-#include "local_http_test_server.h"
+#include "browser/support/local_http_test_server.h"
 
 #include "demo/demo_policy_source.h"
 #include "include/cef_parser.h"
