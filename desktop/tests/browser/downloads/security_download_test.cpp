@@ -1,7 +1,9 @@
 #include "download_test_client.h"
 #include "browser/support/local_http_test_server.h"
 
+#include "include/base/cef_callback.h"
 #include "include/cef_file_util.h"
+#include "include/wrapper/cef_closure_task.h"
 
 #include <gtest/gtest.h>
 
@@ -396,5 +398,177 @@ INSTANTIATE_TEST_SUITE_P(
         DownloadDestinationCase{"StartDownloadUserCancelsDialog", nullptr,
             DownloadTestTrigger::StartDownload, std::nullopt}),
     DownloadDestinationTest::CaseName);
+
+// La política inicial permite informe.pdf al abrir el diálogo; la nueva decide sobre el destino elegido.
+struct DownloadPolicyChangeCase {
+    const char* name;
+    DownloadTestTrigger trigger;
+    const char* finalName;
+    DownloadControlConfig initialConfig;
+    DownloadControlConfig updatedConfig;
+    std::optional<SecurityReason> blockReason;
+};
+
+// Solo UI CEF modifica estas observaciones; Run sincroniza su lectura posterior desde GoogleTest.
+struct DownloadPolicyChangeObservations {
+    DownloadTestObservations download;
+    bool responseQueued = false;
+    std::optional<PolicyPublicationResult> publicationResult;
+};
+
+class DownloadPolicyChangeTest : public DownloadTestBase,
+                                 public ::testing::WithParamInterface<DownloadPolicyChangeCase> {
+public:
+    static std::string CaseName(const ::testing::TestParamInfo<DownloadPolicyChangeCase>& info);
+};
+
+std::string DownloadPolicyChangeTest::CaseName(
+    const ::testing::TestParamInfo<DownloadPolicyChangeCase>& info) {
+    return info.param.name;
+}
+
+// La confirmación del diálogo debe consultar la política nueva, conservando el contexto de la petición.
+TEST_P(DownloadPolicyChangeTest, UsesLatestPolicyWhenPendingDialogReturnsDestination) {
+    const auto& testCase = GetParam();
+    const auto manager = std::make_shared<PolicyManager>();
+    const auto context = manager->BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    const PolicySnapshot::Timestamp timestamp{};
+    const PolicySnapshot initialPolicy(
+        1, 20, "Initial download test policy",
+        UrlFilteringConfig(false, FilterMode::Denylist, {}),
+        testCase.initialConfig, timestamp, timestamp);
+    ASSERT_EQ(PolicyPublicationResult::Published, manager->PublishPolicy(*context, initialPolicy));
+    const PolicySnapshot updatedPolicy(
+        2, 20, "Updated download test policy",
+        UrlFilteringConfig(false, FilterMode::Denylist, {}),
+        testCase.updatedConfig, timestamp, timestamp);
+
+    destination_ = std::filesystem::path(temporaryDirectory_.ToWString())
+        / std::filesystem::path(CefString(testCase.finalName).ToWString());
+    const std::u8string utf8Destination = destination_.u8string();
+    const std::string destinationPath(utf8Destination.begin(), utf8Destination.end());
+    const auto observations = std::make_shared<DownloadPolicyChangeObservations>();
+
+    // Conserva la respuesta hasta otra tarea UI CEF, sin capturar el test ni usar esperas temporizadas.
+    SecurityDownloadHandler::RequestSaveDialogCallback onRequestSaveDialog =
+        [manager, context = *context, updatedPolicy, observations, destinationPath](
+            std::uint64_t operationId, std::string suggestedName,
+            SecurityDownloadHandler::SaveDialogResultCallback onResult) {
+            ++observations->download.destinationRequests;
+            observations->download.destinationOperationId = operationId;
+            observations->download.requestedName = std::move(suggestedName);
+
+            // BindOnce conserva los argumentos por valor; CEF exige que esta lambda no tenga capturas.
+            const bool queued = CefPostTask(TID_UI, base::BindOnce(
+                [](std::shared_ptr<PolicyManager> policyManager, SecurityContext originalContext,
+                   PolicySnapshot policy, std::shared_ptr<DownloadPolicyChangeObservations> state,
+                   std::string path, SecurityDownloadHandler::SaveDialogResultCallback reply) {
+                    state->publicationResult = policyManager->PublishPolicy(originalContext, std::move(policy));
+                    if (*state->publicationResult != PolicyPublicationResult::Published) {
+                        reply(std::nullopt);
+                        return;
+                    }
+                    reply(std::move(path));
+                }, manager, context, updatedPolicy, observations, destinationPath, onResult));
+            observations->responseQueued = queued;
+            if (!queued) {
+                onResult(std::nullopt);
+            }
+            return queued;
+        };
+    // El bloqueo debe conservar un único aviso con la política nueva y el contexto original.
+    SecurityDownloadHandler::DecisionCallback onDecision =
+        [observations](const DownloadDecisionNotice& notice) {
+            observations->download.notices.push_back(notice);
+            return true;
+        };
+    CefRefPtr<SecurityDownloadHandler> handler = new SecurityDownloadHandler(
+        manager, std::move(onRequestSaveDialog), {}, std::move(onDecision));
+    CefRefPtr<DownloadTestClient> client = new DownloadTestClient(
+        handler, server_->Origin() + "/download/page", server_->Origin() + "/download/allowed.exe",
+        testCase.trigger);
+    const auto result = client->Run();
+
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_TRUE(result.browserCreated);
+    ASSERT_TRUE(result.browserClosed);
+    EXPECT_FALSE(result.rejectedByCanDownload);
+    if (testCase.trigger == DownloadTestTrigger::StartDownload) {
+        EXPECT_EQ(0U, result.canDownloadCalls);
+    } else {
+        EXPECT_GT(result.canDownloadCalls, 0U);
+    }
+    EXPECT_EQ(1U, result.beforeDownloadCalls);
+    EXPECT_GT(result.downloadUpdateCalls, 0U);
+    ASSERT_TRUE(result.downloadId.has_value());
+    EXPECT_EQ("informe.pdf", result.suggestedName);
+    ASSERT_EQ(1U, observations->download.destinationRequests);
+    EXPECT_EQ("informe.pdf", observations->download.requestedName);
+    ASSERT_TRUE(observations->download.destinationOperationId.has_value());
+    EXPECT_GT(*observations->download.destinationOperationId, 0U);
+    ASSERT_TRUE(observations->responseQueued);
+    ASSERT_TRUE(observations->publicationResult.has_value());
+    ASSERT_EQ(PolicyPublicationResult::Published, *observations->publicationResult);
+    const auto state = manager->ReadState();
+    ASSERT_TRUE(state);
+    EXPECT_EQ(*context, state->context);
+    ASSERT_TRUE(state->policy);
+    EXPECT_EQ(2, state->policy->Id());
+
+    std::error_code error;
+    const bool finalFileExists = std::filesystem::exists(destination_, error);
+    ASSERT_FALSE(error) << error.message();
+    if (testCase.blockReason.has_value()) {
+        EXPECT_FALSE(result.completed);
+        EXPECT_TRUE(result.canceled);
+        EXPECT_FALSE(finalFileExists);
+        ASSERT_EQ(1U, observations->download.notices.size());
+        const auto& notice = observations->download.notices.front();
+        EXPECT_EQ(*observations->download.destinationOperationId, notice.operationId);
+        EXPECT_GT(notice.browserId, 0);
+        EXPECT_EQ(result.downloadId, notice.downloadId);
+        EXPECT_EQ(*testCase.blockReason, notice.decision.Reason());
+        ASSERT_TRUE(notice.context.has_value());
+        EXPECT_EQ(*context, *notice.context);
+        ASSERT_TRUE(notice.policyId.has_value());
+        EXPECT_EQ(2, *notice.policyId);
+    } else {
+        ASSERT_TRUE(result.completed);
+        EXPECT_FALSE(result.canceled);
+        EXPECT_FALSE(result.interrupted);
+        EXPECT_TRUE(observations->download.notices.empty());
+        ASSERT_TRUE(finalFileExists);
+        EXPECT_EQ(destination_, std::filesystem::path(CefString(result.fullPath).ToWString()));
+        std::ifstream file(destination_, std::ios::binary);
+        ASSERT_TRUE(file.is_open());
+        const std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const std::string expected = "SBP download fixture content.\n";
+        EXPECT_EQ(expected, content);
+        EXPECT_EQ(static_cast<std::int64_t>(expected.size()), result.receivedBytes);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PendingDialog,
+    DownloadPolicyChangeTest,
+    ::testing::Values(
+        // El PDF inicial estaba permitido; publicar una denegación de pdf debe bloquear el destino final.
+        DownloadPolicyChangeCase{"LinkBlocksDestinationAfterPolicyUpdate", DownloadTestTrigger::Link, "saved.pdf",
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"pdf"}), SecurityReason::ExtensionDenied},
+        // El destino txt estaba bloqueado; quitar esa regla debe permitirlo al confirmar el diálogo.
+        DownloadPolicyChangeCase{"LinkAllowsDestinationAfterPolicyUpdate", DownloadTestTrigger::Link, "saved.txt",
+            DownloadControlConfig(true, FilterMode::Denylist, {"txt"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), std::nullopt},
+        // StartDownload también debe utilizar la nueva denegación antes de entregar la continuación a CEF.
+        DownloadPolicyChangeCase{"StartDownloadBlocksDestinationAfterPolicyUpdate", DownloadTestTrigger::StartDownload,
+            "saved.pdf", DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"pdf"}), SecurityReason::ExtensionDenied},
+        // Omitir CanDownload tampoco impide aplicar una política nueva que autoriza el destino elegido.
+        DownloadPolicyChangeCase{"StartDownloadAllowsDestinationAfterPolicyUpdate", DownloadTestTrigger::StartDownload,
+            "saved.txt", DownloadControlConfig(true, FilterMode::Denylist, {"txt"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), std::nullopt}),
+    DownloadPolicyChangeTest::CaseName);
 
 }  // namespace sbp
