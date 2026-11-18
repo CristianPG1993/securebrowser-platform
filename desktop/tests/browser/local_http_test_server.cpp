@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <stdexcept>
 #include <string_view>
 
@@ -123,6 +124,11 @@ void LocalHttpTestServer::OnHttpRequest(CefRefPtr<CefServer> server, int connect
         && SendServiceWorkerFixture(server, connectionId, path)) {
         return;
     }
+    // Las rutas de descarga solo atienden GET; el auxiliar responde o deja continuar al tratamiento habitual.
+    if (request->GetMethod().ToString() == "GET"
+        && SendDownloadFixture(server, connectionId, path)) {
+        return;
+    }
     if (request->GetMethod().ToString() != "GET"
         || (path != "/page" && path != "/blocked" && !historyPage)) {
         server->SendHttp404Response(connectionId);
@@ -147,6 +153,60 @@ void LocalHttpTestServer::OnHttpRequest(CefRefPtr<CefServer> server, int connect
     const char html[] = "<!doctype html><title>SBP local HTTP test</title>"
                         "<link rel='icon' href='data:,'><p>Local navigation completed.</p>";
     server->SendHttp200Response(connectionId, "text/html; charset=utf-8", html, sizeof(html) - 1);
+}
+
+// Sirve archivos inertes con nombres controlados para observar el flujo real de descarga de CEF.
+bool LocalHttpTestServer::SendDownloadFixture(
+    CefRefPtr<CefServer> server, int connectionId, const std::string& path) {
+    if (path == "/download/page") {
+        // La prueba podrá activar este enlace desde el documento; no se cargan recursos externos.
+        const char html[] = "<!doctype html><meta charset='utf-8'><title>SBP download fixture</title>"
+            "<link rel='icon' href='data:,'>"
+            "<a id='download' href='/download/allowed.exe'>Download fixture</a>";
+        const CefServer::HeaderMap headers{{"Cache-Control", "no-store"}};
+        server->SendHttpResponse(connectionId, 200, "text/html; charset=utf-8",
+                                 sizeof(html) - 1, headers);
+        server->SendRawData(connectionId, html, sizeof(html) - 1);
+        server->CloseConnection(connectionId);
+        return true;
+    }
+
+    if (path == "/download/redirect.pdf" || path == "/download/redirect.exe") {
+        // El nombre de la respuesta final, también tras una redirección, debe gobernar la decisión.
+        const std::string location = path == "/download/redirect.pdf"
+            ? "/download/blocked.pdf" : "/download/allowed.exe";
+        const CefServer::HeaderMap headers{{"Cache-Control", "no-store"}, {"Location", location}};
+        server->SendHttpResponse(connectionId, 302, "text/plain", 0, headers);
+        server->CloseConnection(connectionId);
+        return true;
+    }
+
+    const std::map<std::string, std::string> dispositions{
+        // La extensión visible en la URL contradice deliberadamente el nombre sugerido por el servidor.
+        {"/download/allowed.exe", "attachment; filename=\"informe.pdf\""},
+        {"/download/blocked.pdf", "attachment; filename=\"programa.exe\""},
+        {"/download/double.pdf", "attachment; filename=\"informe.pdf.exe\""},
+        // Con el control activo se rechazan por ausencia de extensión; desactivado podrán permitirse.
+        {"/download/no-extension", "attachment; filename=\"informe\""},
+        {"/download/dotfile", "attachment; filename=\".env\""},
+        // filename* expresa UTF-8 mediante porcentajes para conservar Unicode en el nombre y la extensión.
+        {"/download/unicode", "attachment; filename=\"informe.pdf\"; filename*=UTF-8''informe-ni%C3%B1o.PDF"},
+        {"/download/unicode-extension.pdf", "attachment; filename=\"informe.bin\"; filename*=UTF-8''informe.%C3%89XE"}
+    };
+    const auto disposition = dispositions.find(path);
+    if (disposition == dispositions.end()) {
+        return false;
+    }
+
+    // El contenido fijo permite verificar los bytes del archivo permitido; nunca se ejecuta como programa.
+    const char payload[] = "SBP download fixture content.\n";
+    const CefServer::HeaderMap headers{
+        {"Cache-Control", "no-store"}, {"Content-Disposition", disposition->second}
+    };
+    server->SendHttpResponse(connectionId, 200, "application/octet-stream", sizeof(payload) - 1, headers);
+    server->SendRawData(connectionId, payload, sizeof(payload) - 1);
+    server->CloseConnection(connectionId);
+    return true;
 }
 
 bool LocalHttpTestServer::SendActionFixture(
