@@ -39,6 +39,7 @@ struct DownloadTestObservations {
     std::optional<std::uint64_t> destinationOperationId;
     std::string requestedName;
     std::vector<DownloadDecisionNotice> notices;
+    std::vector<std::uint64_t> closeRequests;
 };
 
 // El servidor y el destino se aíslan por caso; TearDown también se ejecuta tras una aserción fatal.
@@ -248,6 +249,9 @@ INSTANTIATE_TEST_SUITE_P(
             DownloadTestTrigger::StartDownload, SecurityReason::ExtensionDenied}),
     SecurityDownloadTest::CaseName);
 
+// Después de responder una vez, simula otra respuesta para la misma operación del diálogo.
+enum class DownloadDialogLateReply { None, Destination, Cancel };
+
 // nullopt en blockReason distingue permisos y cancelaciones voluntarias de los bloqueos del evaluador.
 // finalName == nullptr representa Cancelar en el diálogo; en los demás casos se devuelve una ruta absoluta.
 struct DownloadDestinationCase {
@@ -255,6 +259,7 @@ struct DownloadDestinationCase {
     const char* finalName;
     DownloadTestTrigger trigger;
     std::optional<SecurityReason> blockReason;
+    DownloadDialogLateReply lateReply = DownloadDialogLateReply::None;
 };
 
 class DownloadDestinationTest : public DownloadTestBase,
@@ -291,15 +296,32 @@ TEST_P(DownloadDestinationTest, RechecksChosenDestinationAndDistinguishesUserCan
     }
     const auto observations = std::make_shared<DownloadTestObservations>();
 
-    // Simula Guardar como o Cancelar; la respuesta real del handler vuelve a encolar CompleteSaveDialog en CEF.
+    // El segundo destino siempre es distinto del primero y no debe llegar a crearse.
+    const auto lateDestination = std::filesystem::path(temporaryDirectory_.ToWString()) / L"late.pdf";
+    const std::u8string utf8LateDestination = lateDestination.u8string();
+    std::vector<std::optional<std::string>> replies{selectedPath};
+    if (testCase.lateReply == DownloadDialogLateReply::Destination) {
+        replies.emplace_back(std::string(utf8LateDestination.begin(), utf8LateDestination.end()));
+    } else if (testCase.lateReply == DownloadDialogLateReply::Cancel) {
+        replies.emplace_back(std::nullopt);
+    }
+
+    // Cada respuesta encola su propia CompleteSaveDialog; las posteriores deben encontrar retirada la solicitud.
     SecurityDownloadHandler::RequestSaveDialogCallback onRequestSaveDialog =
-        [observations, selectedPath](std::uint64_t operationId, std::string suggestedName,
+        [observations, replies](std::uint64_t operationId, std::string suggestedName,
                                      SecurityDownloadHandler::SaveDialogResultCallback onResult) {
             ++observations->destinationRequests;
             observations->destinationOperationId = operationId;
             observations->requestedName = std::move(suggestedName);
-            onResult(selectedPath);
+            for (const auto& reply : replies) {
+                onResult(reply);
+            }
             return true;
+        };
+    // Una cancelación retira el diálogo una sola vez; una confirmación válida ya consume su solicitud.
+    SecurityDownloadHandler::RequestCloseSaveDialogCallback onRequestCloseSaveDialog =
+        [observations](std::uint64_t operationId) {
+            observations->closeRequests.push_back(operationId);
         };
     // Solo los bloqueos del destino definitivo deben llegar aquí; cancelar el diálogo no genera aviso.
     SecurityDownloadHandler::DecisionCallback onDecision =
@@ -308,7 +330,7 @@ TEST_P(DownloadDestinationTest, RechecksChosenDestinationAndDistinguishesUserCan
             return true;
         };
     CefRefPtr<SecurityDownloadHandler> handler = new SecurityDownloadHandler(
-        manager, std::move(onRequestSaveDialog), {}, std::move(onDecision));
+        manager, std::move(onRequestSaveDialog), std::move(onRequestCloseSaveDialog), std::move(onDecision));
     CefRefPtr<DownloadTestClient> client = new DownloadTestClient(
         handler, server_->Origin() + "/download/page", server_->Origin() + "/download/allowed.exe",
         testCase.trigger);
@@ -332,7 +354,15 @@ TEST_P(DownloadDestinationTest, RechecksChosenDestinationAndDistinguishesUserCan
     ASSERT_TRUE(observations->destinationOperationId.has_value());
     EXPECT_GT(*observations->destinationOperationId, 0U);
 
+    std::error_code lateDestinationError;
+    const bool lateFileExists = std::filesystem::exists(lateDestination, lateDestinationError);
+    ASSERT_FALSE(lateDestinationError) << lateDestinationError.message();
+    EXPECT_FALSE(lateFileExists);
     const bool shouldComplete = testCase.finalName != nullptr && !testCase.blockReason.has_value();
+    ASSERT_EQ(shouldComplete ? 0U : 1U, observations->closeRequests.size());
+    if (!shouldComplete) {
+        EXPECT_EQ(*observations->destinationOperationId, observations->closeRequests.front());
+    }
     if (shouldComplete) {
         ASSERT_TRUE(result.completed);
         EXPECT_FALSE(result.canceled);
@@ -398,7 +428,25 @@ INSTANTIATE_TEST_SUITE_P(
             DownloadTestTrigger::StartDownload, SecurityReason::InvalidFileName},
         // La cancelación voluntaria tampoco se convierte en bloqueo al comenzar con StartDownload.
         DownloadDestinationCase{"StartDownloadUserCancelsDialog", nullptr,
-            DownloadTestTrigger::StartDownload, std::nullopt}),
+            DownloadTestTrigger::StartDownload, std::nullopt},
+        // Cancelar retira la petición: una ruta recibida después no puede reanudarla ni crear late.pdf.
+        DownloadDestinationCase{"LinkIgnoresDestinationAfterCancellation", nullptr,
+            DownloadTestTrigger::Link, std::nullopt, DownloadDialogLateReply::Destination},
+        // La confirmación consume la petición; una cancelación posterior no debe cancelar la transferencia autorizada.
+        DownloadDestinationCase{"LinkIgnoresCancellationAfterConfirmation", "saved.pdf",
+            DownloadTestTrigger::Link, std::nullopt, DownloadDialogLateReply::Cancel},
+        // Una segunda confirmación con otro destino no puede modificar la ruta ya autorizada.
+        DownloadDestinationCase{"LinkIgnoresSecondDestinationAfterConfirmation", "saved.pdf",
+            DownloadTestTrigger::Link, std::nullopt, DownloadDialogLateReply::Destination},
+        // La respuesta tardía tampoco revive una cancelación cuando se utilizó StartDownload.
+        DownloadDestinationCase{"StartDownloadIgnoresDestinationAfterCancellation", nullptr,
+            DownloadTestTrigger::StartDownload, std::nullopt, DownloadDialogLateReply::Destination},
+        // StartDownload conserva la descarga autorizada aunque llegue una cancelación de diálogo repetida.
+        DownloadDestinationCase{"StartDownloadIgnoresCancellationAfterConfirmation", "saved.pdf",
+            DownloadTestTrigger::StartDownload, std::nullopt, DownloadDialogLateReply::Cancel},
+        // El destino de la primera respuesta también es definitivo con la entrada programática.
+        DownloadDestinationCase{"StartDownloadIgnoresSecondDestinationAfterConfirmation", "saved.pdf",
+            DownloadTestTrigger::StartDownload, std::nullopt, DownloadDialogLateReply::Destination}),
     DownloadDestinationTest::CaseName);
 
 // La política inicial permite informe.pdf al abrir el diálogo; la nueva decide sobre el destino elegido.
