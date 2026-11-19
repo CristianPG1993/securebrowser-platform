@@ -4,6 +4,7 @@
 
 #include <QAbstractButton>
 #include <QByteArray>
+#include <QDir>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFocusEvent>
@@ -330,8 +331,11 @@ void BrowserWindowUi::ShowDownloadSaveDialog(
                 path = std::string{};
                 const QStringList files = dialog->selectedFiles();
                 if (files.size() == 1) {
+                    // Qt devuelve separadores /; la operación de guardado de CEF usa el Shell de Windows.
+                    // Convierte solo los separadores al formato nativo, conservando carpeta, nombre y extensión.
+                    const QString nativePath = QDir::toNativeSeparators(files.front());
                     // QString guarda texto en UTF-16; toUtf8 lo convierte a los bytes UTF-8 que espera CEF.
-                    const QByteArray utf8Path = files.front().toUtf8();
+                    const QByteArray utf8Path = nativePath.toUtf8();
                     // constData apunta al inicio de los bytes y size indica cuántos hay, no cuántos caracteres.
                     // static_cast convierte esa cantidad al tipo de tamaño std::size_t que espera el constructor.
                     // std::string copia los bytes tal cual, sin otra conversión; path conserva su propia cadena.
