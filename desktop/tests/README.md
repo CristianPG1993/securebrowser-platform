@@ -14,6 +14,10 @@ documento y la copia portátil se recogen en el
 La [guía HTTP controlada](manual/url-filtering-demo/README.md) conserva el
 procedimiento para distinguir un bloqueo de un fallo de red.
 
+La [guía manual de Download Control y Qt](manual/download-control-demo/README.md)
+incluye un servidor local de archivos inertes para comprobar Guardar como,
+renombrado, cancelación, avisos y transferencias en curso con las políticas demo.
+
 ## Pruebas unitarias del Security Engine
 
 Estas pruebas requieren CMake 3.29 o posterior, MSVC 2022 x64 con el toolset

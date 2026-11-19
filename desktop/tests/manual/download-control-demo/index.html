@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>SecureBrowser — comprobación de descargas</title>
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    <h1>Comprobación manual de Download Control</h1>
+    <p>Todos los archivos contienen texto fijo de prueba. No son documentos PDF, programas ni instaladores reales.</p>
+    <p>Selecciona la política en el panel de Qt. El nombre lo proporciona Content-Disposition en la respuesta HTTP.</p>
+    <ul>
+        <li><a href="/download/allowed.exe">PDF permitido: informe.pdf, aunque la URL termina en .exe</a></li>
+        <li><a href="/download/blocked.pdf">EXE bloqueado: programa.exe, aunque la URL termina en .pdf</a></li>
+        <li><a href="/download/installer.pdf">MSI bloqueado: paquete.msi</a></li>
+        <li><a href="/download/unicode">Nombre Unicode permitido: informe-niño.PDF</a></li>
+        <li><a href="/download/slow.pdf">PDF lento: unos 30 segundos para observar la transferencia</a></li>
+        <li><a href="/download/interrupted.pdf">Fallo provocado: transferencia incompleta para comprobar el aviso de error</a></li>
+    </ul>
+    <p>Para comprobar el nombre definitivo, abre el PDF permitido y escribe programa.exe en Guardar como.</p>
+    <p>Para comprobar la cancelación voluntaria, abre de nuevo el PDF permitido y pulsa Cancelar.</p>
+</body>
+</html>
