@@ -167,6 +167,12 @@ int BrowserSession::Run(QApplication& qt_app) {
         CefRefPtr<SecurityDownloadHandler> download_handler = new SecurityDownloadHandler(
             policy_manager, MakeSaveDialogRequestHandler(window), MakeSaveDialogCloseHandler(window),
             MakeDownloadDecisionHandler(window, policy_manager), MakeDownloadResultHandler(window, policy_manager));
+
+        // Registra el receptor antes de crear el navegador y conserva la suscripción durante esta sesión.
+        // El gestor solo guarda una referencia débil; la cancelación se encolará en UI CEF.
+        auto context_retired_subscription = policy_manager->SubscribeToContextRetirement(
+            download_handler->MakeContextRetiredHandler());
+
         // Paso 5: browser_client es el cliente que entregamos a CEF para crear y manejar el navegador.
         // Recibe creación, carga, historial y cierre; entrega a CEF los handlers de navegación y descarga.
         // MakeCallbacks agrupa los avisos de navegación; MakeClientCallbacks añade creación y cierre.
@@ -206,6 +212,9 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Paso 13: exec procesa los eventos Qt hasta terminar la sesión; CEF mantiene su propio hilo UI.
         // Cuando exec retorna, ExitCode conserva un error previo o utiliza el resultado del bucle Qt.
         qt_exit_code = lifecycle_.ExitCode(qt_app.exec());
+
+        // Deja de aceptar avisos nuevos antes de retirar los controles; las tareas ya encoladas conservan sus datos.
+        context_retired_subscription.reset();
 
         // Retira el receptor del selector mientras los controles y el gestor todavía siguen vivos.
         window_ui.SetPolicySelectionHandler({});

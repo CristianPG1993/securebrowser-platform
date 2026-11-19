@@ -683,6 +683,7 @@ INSTANTIATE_TEST_SUITE_P(
 // Batería PendingContext / DownloadContextChangeTest: conservación del contexto original de la descarga.
 // Comprueba cierre, reinicio con los mismos IDs y cambio de instalación mientras el diálogo está pendiente.
 // Exige cancelación por InvalidContext y cierre del diálogo, aunque el contexto nuevo tenga una política válida.
+// La respuesta se retiene hasta la petición de cierre: retirar el contexto no debe esperar al usuario.
 // Reiniciar la misma instalación también crea otra generación de contexto.
 enum class DownloadContextChange { EndContext, RestartSameInstallation, SwitchInstallation };
 
@@ -695,10 +696,14 @@ struct DownloadContextChangeCase {
 // Las copias permiten comprobar el contexto nuevo sin trasladar la descarga a él.
 struct DownloadContextChangeObservations {
     DownloadTestObservations download;
-    bool responseQueued = false;
+    bool contextChangeQueued = false;
     bool contextEnded = false;
+    bool replySent = false;
+    bool closeRequestedBeforeReply = false;
+    SecurityDownloadHandler::SaveDialogResultCallback pendingReply;
     std::optional<SecurityContext> replacementContext;
     std::optional<PolicyPublicationResult> publicationResult;
+    std::vector<SecurityContext> retiredContexts;
     std::vector<std::uint64_t> closeRequests;
 };
 
@@ -713,7 +718,7 @@ std::string DownloadContextChangeTest::CaseName(
     return info.param.name;
 }
 
-// Una respuesta al diálogo no puede autorizar una descarga cuyo contexto original ya se retiró.
+// La retirada cancela sin respuesta del diálogo; la respuesta tardía tampoco puede autorizar otro contexto.
 TEST_P(DownloadContextChangeTest, CancelsOriginalDownloadWhenPendingDialogOutlivesContext) {
     const auto& testCase = GetParam();
     const auto manager = std::make_shared<PolicyManager>();
@@ -732,21 +737,21 @@ TEST_P(DownloadContextChangeTest, CancelsOriginalDownloadWhenPendingDialogOutliv
 
     // La tarea conserva la respuesta y retira el contexto después de que se haya solicitado el diálogo.
     SecurityDownloadHandler::RequestSaveDialogCallback onRequestSaveDialog =
-        [manager, context = *context, observations, destinationPath, change = testCase.change](
+        [manager, context = *context, observations, change = testCase.change](
             std::uint64_t operationId, std::string suggestedName,
             SecurityDownloadHandler::SaveDialogResultCallback onResult) {
             ++observations->download.destinationRequests;
             observations->download.destinationOperationId = operationId;
             observations->download.requestedName = std::move(suggestedName);
+            // Se responderá desde la petición de cierre, después de que el handler haya decidido cancelar.
+            observations->pendingReply = std::move(onResult);
 
             // BindOnce recibe los datos por valor; ningún callback conserva referencias al test.
             const bool queued = CefPostTask(TID_UI, base::BindOnce(
                 [](std::shared_ptr<PolicyManager> policyManager, SecurityContext originalContext,
-                   std::shared_ptr<DownloadContextChangeObservations> state, DownloadContextChange change,
-                   std::string path, SecurityDownloadHandler::SaveDialogResultCallback reply) {
+                   std::shared_ptr<DownloadContextChangeObservations> state, DownloadContextChange change) {
                     state->contextEnded = policyManager->EndContext(originalContext);
                     if (!state->contextEnded) {
-                        reply(std::nullopt);
                         return;
                     }
                     if (change != DownloadContextChange::EndContext) {
@@ -754,7 +759,6 @@ TEST_P(DownloadContextChangeTest, CancelsOriginalDownloadWhenPendingDialogOutliv
                         state->replacementContext = policyManager->BeginContext(
                             sameInstallation ? 10 : 11, sameInstallation ? 20 : 21);
                         if (!state->replacementContext.has_value()) {
-                            reply(std::nullopt);
                             return;
                         }
 
@@ -766,24 +770,23 @@ TEST_P(DownloadContextChangeTest, CancelsOriginalDownloadWhenPendingDialogOutliv
                             DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), timestamp, timestamp);
                         state->publicationResult = policyManager->PublishPolicy(
                             *state->replacementContext, replacementPolicy);
-                        if (*state->publicationResult != PolicyPublicationResult::Published) {
-                            reply(std::nullopt);
-                            return;
-                        }
                     }
-                    // Entrega un destino válido: debe rechazarse por el contexto, no por cancelar el diálogo.
-                    reply(std::move(path));
-                }, manager, context, observations, change, destinationPath, onResult));
-            observations->responseQueued = queued;
-            if (!queued) {
-                onResult(std::nullopt);
-            }
+                    // No entrega destino: la suscripción debe solicitar la cancelación por sí misma.
+                }, manager, context, observations, change));
+            observations->contextChangeQueued = queued;
             return queued;
         };
     // Registra la petición real de retirar el diálogo, identificada con la operación original.
     SecurityDownloadHandler::RequestCloseSaveDialogCallback onRequestCloseSaveDialog =
-        [observations](std::uint64_t operationId) {
+        [observations, destinationPath](std::uint64_t operationId) {
             observations->closeRequests.push_back(operationId);
+            observations->closeRequestedBeforeReply = !observations->replySent;
+            if (observations->pendingReply) {
+                auto reply = std::exchange(observations->pendingReply, {});
+                observations->replySent = true;
+                // Simula una respuesta tardía con ruta válida: la solicitud ya retirada debe ignorarla.
+                reply(destinationPath);
+            }
         };
     // El contexto nuevo no debe aparecer en el aviso de la descarga original ni causar avisos duplicados.
     SecurityDownloadHandler::DecisionCallback onDecision =
@@ -793,10 +796,17 @@ TEST_P(DownloadContextChangeTest, CancelsOriginalDownloadWhenPendingDialogOutliv
         };
     CefRefPtr<SecurityDownloadHandler> handler = new SecurityDownloadHandler(
         manager, std::move(onRequestSaveDialog), std::move(onRequestCloseSaveDialog), std::move(onDecision));
+    // Registra la entrega real antes de crear el navegador y conserva el receptor de producción.
+    auto contextRetiredSubscription = manager->SubscribeToContextRetirement(
+        [observations, onContextRetired = handler->MakeContextRetiredHandler()](const SecurityContext& retired) {
+            observations->retiredContexts.push_back(retired);
+            onContextRetired(retired);
+        });
     CefRefPtr<DownloadTestClient> client = new DownloadTestClient(
         handler, server_->Origin() + "/download/page", server_->Origin() + "/download/allowed.exe",
         testCase.trigger);
     const auto result = client->Run();
+    contextRetiredSubscription.reset();
 
     ASSERT_TRUE(result.error.empty()) << result.error;
     ASSERT_TRUE(result.browserCreated);
@@ -815,8 +825,13 @@ TEST_P(DownloadContextChangeTest, CancelsOriginalDownloadWhenPendingDialogOutliv
     EXPECT_EQ("informe.pdf", observations->download.requestedName);
     ASSERT_TRUE(observations->download.destinationOperationId.has_value());
     EXPECT_GT(*observations->download.destinationOperationId, 0U);
-    ASSERT_TRUE(observations->responseQueued);
+    ASSERT_TRUE(observations->contextChangeQueued);
     ASSERT_TRUE(observations->contextEnded);
+    ASSERT_EQ(1U, observations->retiredContexts.size());
+    EXPECT_EQ(*context, observations->retiredContexts.front());
+    EXPECT_TRUE(observations->closeRequestedBeforeReply);
+    EXPECT_TRUE(observations->replySent);
+    EXPECT_FALSE(observations->pendingReply);
     EXPECT_FALSE(manager->IsCurrentContext(*context));
     EXPECT_EQ(PolicyAvailability::InvalidContext, manager->ReadPolicy(*context).availability);
 

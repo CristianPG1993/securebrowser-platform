@@ -14,6 +14,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace sbp {
 
@@ -25,6 +26,14 @@ public:
 
     // Función sin argumentos que proporciona el instante monotónico actual.
     using NowFunction = std::function<Clock::time_point()>;
+
+    // Recibe el contexto que deja de estar vigente al cerrarlo o sustituirlo por otro.
+    // Se invocará fuera del mutex, en el hilo que realiza ese cambio; el receptor debe ser breve.
+    using ContextRetiredCallback = std::function<void(const SecurityContext&)>;
+
+    // Conservar esta suscripción mantiene activo el receptor; el gestor solo guardará una referencia débil.
+    // Liberarla impide entregas nuevas, pero no interrumpe una notificación que ya tomó su copia.
+    using ContextRetiredSubscription = std::shared_ptr<const ContextRetiredCallback>;
 
     // La composición fija la vigencia al construir el gestor; no cambia al publicar otra política.
     enum class Validity {
@@ -73,6 +82,11 @@ public:
     // Un cierre tardío de otro contexto no modifica el actual ni reinicia las generaciones.
     [[nodiscard]] bool EndContext(const SecurityContext& context);
 
+    // Registra un receptor no vacío para las retiradas posteriores de contexto.
+    // No avisa por cambios de política ni caducidad; el receptor encolará su trabajo en el hilo adecuado.
+    // Debe conservarse la suscripción antes de iniciar las operaciones que necesiten cancelación.
+    [[nodiscard]] ContextRetiredSubscription SubscribeToContextRetirement(ContextRetiredCallback callback);
+
     // Recibe una política propia y el contexto que originó su consulta.
     // Valida fuera del mutex y comprueba de nuevo el contexto antes de publicar el estado completo.
     // Un rechazo conserva el estado anterior y no renueva su vigencia.
@@ -95,6 +109,15 @@ public:
         const PolicySnapshot& policy, std::int64_t expectedCompanyId) const;
 
 private:
+    // Copia los receptores activos y elimina referencias caducadas antes de retirar el contexto.
+    // El llamador debe mantener stateMutex_; las funciones copiadas se ejecutarán después de liberarlo.
+    [[nodiscard]] std::vector<ContextRetiredSubscription> CollectContextRetiredCallbacks();
+
+    // Entrega el contexto retirado fuera del mutex y contiene las excepciones de cada receptor.
+    // Una entrega no puede modificar el contexto comunicado ni impedir las restantes notificaciones.
+    static void NotifyContextRetired(
+        const SecurityContext& context, const std::vector<ContextRetiredSubscription>& callbacks) noexcept;
+
     // Comprueba identificadores positivos y correspondencia de la compañía.
     [[nodiscard]] static PolicyValidationError ValidateIdentity(
         const PolicySnapshot& policy, std::int64_t expectedCompanyId) noexcept;
@@ -126,8 +149,11 @@ private:
     // Es una opción inmutable de este gestor, no una excepción por URL ni una renovación automática.
     const Validity validity_ = Validity::FifteenMinutes;
 
-    // Protege la obtención y sustitución del estado y la asignación de generaciones.
+    // Protege el estado, la asignación de generaciones y el registro de receptores de retirada.
     mutable std::mutex stateMutex_;
+
+    // No conserva a los receptores cuando quien se suscribió deja de necesitar las notificaciones.
+    std::vector<std::weak_ptr<const ContextRetiredCallback>> contextRetiredCallbacks_;
 
     // Empieza en cero; las generaciones publicadas serán positivas y no se reutilizarán.
     std::uint64_t lastGeneration_ = 0;

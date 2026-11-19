@@ -61,6 +61,11 @@ public:
     SecurityDownloadHandler(const SecurityDownloadHandler&) = delete;
     SecurityDownloadHandler& operator=(const SecurityDownloadHandler&) = delete;
 
+    // Construye el receptor que encolará en UI CEF la cancelación de las descargas del contexto retirado.
+    // La función conserva el handler; la sesión mantendrá la suscripción fuera de este objeto.
+    // Crear el receptor no lo registra ni cancela todavía ninguna descarga.
+    [[nodiscard]] PolicyManager::ContextRetiredCallback MakeContextRetiredHandler();
+
     // CEF lo llama en su hilo UI antes de descargas iniciadas por una acción del usuario.
     // true permite continuar con las comprobaciones posteriores; false cancela la descarga.
     // Solo comprueba contexto y política: no recibe el nombre ni autoriza el destino final.
@@ -156,6 +161,10 @@ private:
     // Retira su continuación pendiente y marca el seguimiento como CancelRequested.
     // Usa el callback de cancelación si está disponible; conserva el seguimiento hasta el estado final.
     void CancelDownload(DownloadKey key);
+
+    // Atiende la retirada en UI CEF sin esperar otra actualización nativa de progreso.
+    // Cancela pendientes y activas del contexto recibido, sin afectar a las de un contexto posterior.
+    void CancelContextDownloads(const SecurityContext& context);
 
     // Libera la continuación y solicita Cancel en otra tarea UI CEF, fuera de OnDownloadUpdated.
     // El destructor de la continuación puede cancelar de forma síncrona y actualizar observadores nativos.

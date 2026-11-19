@@ -34,6 +34,17 @@ SecurityDownloadHandler::SecurityDownloadHandler(std::shared_ptr<PolicyManager> 
     }
 }
 
+// Prepara el receptor para cualquier hilo; solo la tarea encolada accede a las descargas en UI CEF.
+PolicyManager::ContextRetiredCallback SecurityDownloadHandler::MakeContextRetiredHandler() {
+    // La función conserva el handler; BindOnce copiará el contexto para usarlo después de este aviso.
+    return [handler = CefRefPtr<SecurityDownloadHandler>(this)](const SecurityContext& context) {
+        if (!CefPostTask(TID_UI, base::BindOnce(&SecurityDownloadHandler::CancelContextDownloads,
+                                              handler, context))) {
+            std::fputs("CEF context retirement cancellation could not be posted to the UI thread.\n", stderr);
+        }
+    };
+}
+
 // Aplica la comprobación inicial de autorización y política antes de evaluar el nombre.
 bool SecurityDownloadHandler::CanDownload(CefRefPtr<CefBrowser> browser,
                                         const CefString& /*url*/,
@@ -311,6 +322,29 @@ void SecurityDownloadHandler::CancelDownload(DownloadKey key) {
     // Usa el ID copiado, sin acceder a entradas que CEF haya podido retirar durante la cancelación.
     if (pendingOperationId.has_value() && onRequestCloseSaveDialog_) {
         onRequestCloseSaveDialog_(*pendingOperationId);
+    }
+}
+
+// Atiende el contexto retirado sin esperar más progreso y sin cancelar descargas de otra generación.
+void SecurityDownloadHandler::CancelContextDownloads(const SecurityContext& context) {
+    CEF_REQUIRE_UI_THREAD();
+
+    // Reúne primero las claves para no recorrer los mapas mientras se solicita la cancelación.
+    std::set<DownloadKey> keys;
+    for (const auto& entry : pendingDownloads_) {
+        if (entry.second.context == context) {
+            keys.insert(entry.first);
+        }
+    }
+    for (const auto& entry : trackedDownloads_) {
+        if (entry.second.context.has_value() && *entry.second.context == context) {
+            keys.insert(entry.first);
+        }
+    }
+
+    // La misma descarga solo aparece una vez; BlockDownload evita repetir un bloqueo ya solicitado.
+    for (const DownloadKey& key : keys) {
+        BlockDownload(key, SecurityReason::InvalidContext, nullptr);
     }
 }
 
