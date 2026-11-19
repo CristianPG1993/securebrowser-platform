@@ -111,6 +111,16 @@ El servidor puede recibir una desconexión o terminar de enviar datos antes de
 detectar el cierre. Eso no sustituye la comprobación del destino ni del cierre
 de CEF. No se exige ausencia absoluta de bytes temporales de Chromium.
 
+## Copia extraída del ZIP
+
+Con el servidor manual iniciado desde el repositorio, abrir `Iniciar-demo.cmd`
+en la copia extraída fuera de `build`. Comprobar el nombre de la carpeta para
+utilizar el paquete recién generado. El lanzador selecciona Libre; cambiar a
+Restrictiva y abrir `http://localhost:8767/` para repetir las comprobaciones HTTP.
+Esta dirección permite usar el lanzador sin añadir el mapeo de `downloads.test`.
+Python y la página de pruebas permanecen en el equipo de desarrollo; el ZIP no
+los necesita para ejecutar la aplicación.
+
 ## Evidencia
 
 Anotar configuración, política, acción, nombre elegido y resultado observado.
@@ -186,3 +196,42 @@ Restrictiva, el usuario confirmó los cuatro casos en ambas configuraciones:
 - EXE mediante `blob:`: aviso de extensión bloqueada, sin diálogo ni archivo final.
 - PDF mediante `data:`: guardado, contenido fijo correcto y aviso de finalización.
 - EXE mediante `data:`: aviso de extensión bloqueada, sin diálogo ni archivo final.
+
+### Paquete portátil comprobado
+
+El 19 de noviembre de 2026 se generó el paquete sobre la revisión `b9d5b47`:
+
+`SecureBrowser-demo-Release-20261119-125031-3c3e9f46.zip`
+
+Se conserva localmente en `desktop/build/packages/`. Su SHA-256 es:
+
+```text
+C4A6E0862F8F21AD02B32C85B8EF157EDA1462F1C03E62CD9F27B8BCC24F5707
+```
+
+Se verificaron tamaño y SHA-256 de los 310 archivos del manifiesto dentro del
+ZIP y en la copia extraída del Escritorio, fuera del repositorio. El ZIP contiene
+además el propio manifiesto, y conserva los 242 archivos requeridos por el
+inventario Release. El EXE y la DLL coinciden con la compilación Release validada.
+
+La comprobación se realizó en el equipo de desarrollo Windows 11, abriendo
+`Iniciar-demo.cmd` en la copia del paquete del 19 de noviembre. Con el servidor
+de desarrollo activo, se utilizó `http://localhost:8767/`:
+
+| Paso | Resultado confirmado |
+| --- | --- |
+| Arranque mediante el lanzador | Modo demostración con la política Libre. |
+| PDF permitido bajo Restrictiva | Guardado con el texto fijo y aviso de descarga completada. |
+| EXE sugerido bajo Restrictiva | Aviso de extensión bloqueada, sin diálogo ni archivo final. |
+| PDF renombrado a `zip-renombrado.exe` | Bloqueo del nombre definitivo y ausencia del archivo final. |
+| Cancelación voluntaria tras recargar | Diálogo cerrado, sin archivo nuevo ni aviso nuevo de bloqueo o error. |
+| Respuesta incompleta | Aviso de error de descarga. |
+| Recarga tras el error | Retirada del aviso anterior. |
+| Cierre mediante la X | Bucle Qt con código 0 y apagado de CEF completado. |
+
+El registro `desktop-1795093212144-27400.log`, bajo
+`%LOCALAPPDATA%\SecureBrowser\Logs`, confirma Release, arranque en Libre,
+cambio a Restrictiva y cierre normal. Los resultados del diálogo y de los avisos
+fueron comprobados por el usuario. Esta pasada no sustituye una validación en
+una máquina limpia ni repite en el ZIP los casos de `blob:` y `data:` registrados
+anteriormente para Debug y Release.

@@ -1,6 +1,7 @@
-# Distribución autónoma de URL Filtering
+# Distribución autónoma de navegación y descargas
 
-La entrega portátil de [#131](https://github.com/CristianPG1993/securebrowser-platform/issues/131)
+La entrega portátil de [#131](https://github.com/CristianPG1993/securebrowser-platform/issues/131),
+ampliada con Download Control en [#119](https://github.com/CristianPG1993/securebrowser-platform/issues/119),
 utiliza el ejecutable Release y el motor de seguridad existente. El lanzador
 activa expresamente `--demo-url-filtering --demo-policy=free`; la selección
 posterior se realiza desde la ventana. El modo normal conserva el bloqueo
@@ -57,16 +58,22 @@ Si ese permiso no se puede preparar, muestra un error y termina.
 3. Cerrar otras instancias y abrir el lanzador desde la copia extraída.
 4. Seguir `LEEME-demo.txt`: destino permitido, retirada del documento al cambiar
    la política, bloqueo de Atrás/Adelante, destino permitido bajo Restrictiva y
-   vuelta a Libre. Cerrar mediante la X.
-5. Conservar los informes automatizados y los logs de
+   vuelta a Libre.
+5. Seguir la [guía de descargas controladas](../tests/manual/download-control-demo/README.md):
+   guardado permitido, nombre sugerido y definitivo bloqueados, cancelación
+   voluntaria y avisos de resultado. Cerrar mediante la X.
+6. Conservar los informes automatizados y los logs de
    `%LOCALAPPDATA%\SecureBrowser\Logs` junto con el identificador del paquete.
 
-La [validación registrada](../docs/url-filtering-demo-validation.md) identifica
-el ZIP comprobado, sus hashes y el alcance de la comprobación Windows. La
+La [validación de navegación](../docs/url-filtering-demo-validation.md) identifica
+el ZIP anterior y sus comprobaciones. La [validación de descargas](../tests/manual/download-control-demo/README.md#paquete-portátil-comprobado)
+registra el ZIP del 19 de noviembre, sus hashes y el alcance de esa pasada Windows. La
 [prueba HTTP controlada](../tests/manual/url-filtering-demo/README.md) y la
 regresión automatizada distinguen una cancelación real de un fallo de red.
 
-El paquete no necesita backend ni Python para ejecutarse. No incorpora
-Download Control ni adquisición de políticas mediante REST. Las identidades
+El paquete no necesita backend ni Python para ejecutarse. Incluye Download
+Control con las políticas locales Libre y Restrictiva; no incorpora adquisición
+de políticas mediante REST. El servidor Python de las pruebas manuales se utiliza
+solo en desarrollo y no se distribuye con la aplicación. Las identidades
 son de demostración y sus políticas no caducan; el modo normal mantiene la
 vigencia de 15 minutos y no utiliza estas políticas como fallback.
