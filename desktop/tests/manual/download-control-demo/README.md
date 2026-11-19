@@ -2,8 +2,7 @@
 
 Procedimiento para el EXE real y las políticas locales de la tarea #119.
 Complementa las pruebas automatizadas con la interacción del diálogo y los
-avisos de Qt. Las comprobaciones realizadas en Debug se recogen al final;
-la validación de Release con los últimos avisos sigue pendiente.
+avisos de Qt. Las comprobaciones realizadas en Debug y Release se recogen al final.
 
 La herramienta utiliza Python solo en el equipo de desarrollo. No forma parte
 del runtime ni es una dependencia del ZIP de demostración. Todos los archivos
@@ -109,7 +108,46 @@ El 19 de noviembre de 2026, el usuario confirmó durante este recorrido:
   mensaje de error con la respuesta incompleta y retirada del aviso al recargar.
 
 La corrección de separadores nativos está en `8717f4c`. Un archivo permitido
-de prueba se comprobó con 29 bytes y el texto esperado. La validación anterior
-de la batería automática consta de 196 casos por configuración; no se presenta
-como una repetición de la regresión después de añadir estos avisos.
-Quedan pendientes Release y la regresión de la revisión final.
+de prueba se comprobó con 29 bytes y el texto esperado.
+
+### Avisos comprobados en Release
+
+El 19 de noviembre de 2026, sobre el código de `017e086`, el usuario confirmó:
+
+- PDF permitido: archivo guardado y mensaje «Descarga completada».
+- Respuesta incompleta: mensaje de error de descarga.
+- Recarga de página: retirada del mensaje anterior.
+- Cancelación voluntaria: sin archivo nuevo ni aviso de error.
+
+Esta pasada de Release acredita esos cuatro casos; el recorrido ampliado de
+Unicode, reglas y cierre durante transferencia está registrado arriba en Debug.
+
+### Regresión automática después de los avisos
+
+El usuario compiló y ejecutó la batería existente sobre `017e086` en ambos modos.
+Los XML locales registran el 19 de noviembre de 2026:
+
+| Configuración | Casos | Fallos | Errores |
+| --- | ---: | ---: | ---: |
+| Debug | 196 | 0 | 0 |
+| Release | 196 | 0 | 0 |
+
+Informes: `desktop/build/cef-adapter/Debug/cef-adapter-results.xml` y
+`desktop/build/cef-adapter/Release/cef-adapter-results.xml`. Los binarios y los
+XML permanecen en `build/`; no se incorporan al repositorio.
+
+### Regresión tras conectar la retirada del contexto
+
+El 19 de noviembre de 2026 se compiló la aplicación, el núcleo de seguridad y
+la batería CEF con la suscripción a la retirada del contexto. El usuario confirmó
+los 448 registros de CTest superados en Debug y Release: 447 casos del núcleo y
+una entrada que ejecuta los 196 casos de CEF. Los XML de CEF de ambas
+configuraciones registran cero fallos y cero errores.
+
+Se adaptaron los seis casos existentes de `PendingContext`, sin añadir casos.
+Registran el aviso de retirada del contexto y retienen la respuesta del diálogo
+hasta que el handler solicita cerrarlo. Después entregan una ruta válida como
+respuesta tardía y comprueban cancelación, un único aviso de `InvalidContext`
+y ausencia del archivo final. Esta comprobación cubre las solicitudes con
+diálogo pendiente; no acredita por sí sola la retirada durante una transferencia
+ya autorizada.
