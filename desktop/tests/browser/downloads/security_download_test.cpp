@@ -23,6 +23,10 @@
 
 namespace sbp {
 
+// Batería SuggestedName / SecurityDownloadTest: autorización del nombre sugerido por el servidor.
+// Comprueba Content-Disposition frente a URLs engañosas y redirecciones, Unicode, mayúsculas,
+// doble extensión, ausencia de extensión y reglas activadas o desactivadas en ambos modos de lista.
+// Exige el archivo completo si se permite y un único aviso sin diálogo ni archivo final si se bloquea.
 struct SecurityDownloadCase {
     const char* name;
     const char* path;
@@ -249,6 +253,9 @@ INSTANTIATE_TEST_SUITE_P(
             DownloadTestTrigger::StartDownload, SecurityReason::ExtensionDenied}),
     SecurityDownloadTest::CaseName);
 
+// Batería FinalDestination / DownloadDestinationTest: autorización del destino elegido y respuesta única.
+// Comprueba renombrados permitidos o bloqueados, nombres Windows inválidos y cancelación voluntaria.
+// Las respuestas posteriores no deben reactivar, cancelar ni cambiar el destino ya resuelto.
 // Después de responder una vez, simula otra respuesta para la misma operación del diálogo.
 enum class DownloadDialogLateReply { None, Destination, Cancel };
 
@@ -449,6 +456,9 @@ INSTANTIATE_TEST_SUITE_P(
             DownloadTestTrigger::StartDownload, std::nullopt, DownloadDialogLateReply::Destination}),
     DownloadDestinationTest::CaseName);
 
+// Batería PendingDialog / DownloadPolicyChangeTest: política y vigencia al confirmar el destino.
+// Comprueba que se utilicen las reglas nuevas publicadas mientras se esperaba la respuesta del diálogo.
+// Cubre el instante anterior a la caducidad, el límite exacto de 15 minutos y la vigencia ilimitada.
 // La política inicial permite informe.pdf al abrir el diálogo; la nueva decide sobre el destino elegido.
 struct DownloadPolicyChangeCase {
     const char* name;
@@ -670,6 +680,9 @@ INSTANTIATE_TEST_SUITE_P(
             std::chrono::hours{24}, PolicyManager::Validity::Unlimited}),
     DownloadPolicyChangeTest::CaseName);
 
+// Batería PendingContext / DownloadContextChangeTest: conservación del contexto original de la descarga.
+// Comprueba cierre, reinicio con los mismos IDs y cambio de instalación mientras el diálogo está pendiente.
+// Exige cancelación por InvalidContext y cierre del diálogo, aunque el contexto nuevo tenga una política válida.
 // Reiniciar la misma instalación también crea otra generación de contexto.
 enum class DownloadContextChange { EndContext, RestartSameInstallation, SwitchInstallation };
 
@@ -869,5 +882,151 @@ INSTANTIATE_TEST_SUITE_P(
         DownloadContextChangeCase{"StartDownloadBlocksAfterInstallationChanges", DownloadTestTrigger::StartDownload,
             DownloadContextChange::SwitchInstallation}),
     DownloadContextChangeTest::CaseName);
+
+// Batería InitialAvailability / DownloadAvailabilityTest: disponibilidad antes de solicitar un destino.
+// Comprueba enlaces sin contexto, sin política publicada o con política caducada desde CanDownload.
+// Comprueba también que StartDownload rechace políticas ausentes o caducadas desde OnBeforeDownload.
+// Ningún caso debe abrir el diálogo ni crear un archivo final; el aviso debe conservar el motivo correcto.
+struct DownloadAvailabilityCase {
+    const char* name;
+    DownloadTestTrigger trigger;
+    PolicyAvailability availability;
+    SecurityReason blockReason;
+};
+
+class DownloadAvailabilityTest : public DownloadTestBase,
+                                 public ::testing::WithParamInterface<DownloadAvailabilityCase> {
+public:
+    static std::string CaseName(const ::testing::TestParamInfo<DownloadAvailabilityCase>& info);
+};
+
+std::string DownloadAvailabilityTest::CaseName(
+    const ::testing::TestParamInfo<DownloadAvailabilityCase>& info) {
+    return info.param.name;
+}
+
+// Una descarga no puede llegar al diálogo sin contexto y política vigentes, tampoco mediante StartDownload.
+TEST_P(DownloadAvailabilityTest, BlocksBeforeRequestingDestinationWhenPolicyIsUnavailable) {
+    const auto& testCase = GetParam();
+    const auto clockSeconds = std::make_shared<std::atomic<std::int64_t>>(0);
+    // Simula la caducidad antes de iniciar CEF, sin esperas reales ni cambios de hora del sistema.
+    const auto manager = std::make_shared<PolicyManager>([clockSeconds] {
+        return PolicyManager::Clock::time_point{std::chrono::duration_cast<PolicyManager::Clock::duration>(
+            std::chrono::seconds{clockSeconds->load()})};
+    });
+    std::optional<SecurityContext> context;
+    if (testCase.availability != PolicyAvailability::InvalidContext) {
+        context = manager->BeginContext(10, 20);
+        ASSERT_TRUE(context.has_value());
+    }
+    if (testCase.availability == PolicyAvailability::Expired) {
+        const PolicySnapshot::Timestamp timestamp{};
+        const PolicySnapshot policy(
+            1, 20, "Expired initial download policy",
+            UrlFilteringConfig(false, FilterMode::Denylist, {}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), timestamp, timestamp);
+        ASSERT_EQ(PolicyPublicationResult::Published, manager->PublishPolicy(*context, policy));
+        clockSeconds->store(900);
+    }
+    if (context.has_value()) {
+        ASSERT_EQ(testCase.availability, manager->ReadPolicy(*context).availability);
+    } else {
+        ASSERT_FALSE(manager->ReadState());
+    }
+
+    const std::u8string utf8Destination = destination_.u8string();
+    const std::string destinationPath(utf8Destination.begin(), utf8Destination.end());
+    const auto observations = std::make_shared<DownloadTestObservations>();
+
+    // Responde con un destino propio si se pidiera por error; el test exige que no se solicite ningún diálogo.
+    SecurityDownloadHandler::RequestSaveDialogCallback onRequestSaveDialog =
+        [observations, destinationPath](std::uint64_t operationId, std::string suggestedName,
+                                       SecurityDownloadHandler::SaveDialogResultCallback onResult) {
+            ++observations->destinationRequests;
+            observations->destinationOperationId = operationId;
+            observations->requestedName = std::move(suggestedName);
+            onResult(destinationPath);
+            return true;
+        };
+    // Conserva un único aviso con el motivo concreto, sin acceder al test desde el hilo UI de CEF.
+    SecurityDownloadHandler::DecisionCallback onDecision =
+        [observations](const DownloadDecisionNotice& notice) {
+            observations->notices.push_back(notice);
+            return true;
+        };
+    CefRefPtr<SecurityDownloadHandler> handler = new SecurityDownloadHandler(
+        manager, std::move(onRequestSaveDialog), {}, std::move(onDecision));
+    CefRefPtr<DownloadTestClient> client = new DownloadTestClient(
+        handler, server_->Origin() + "/download/page", server_->Origin() + "/download/allowed.exe",
+        testCase.trigger);
+    const auto result = client->Run();
+
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_TRUE(result.browserCreated);
+    ASSERT_TRUE(result.browserClosed);
+    EXPECT_FALSE(result.completed);
+    EXPECT_EQ(0U, observations->destinationRequests);
+    EXPECT_FALSE(observations->destinationOperationId.has_value());
+    ASSERT_EQ(1U, observations->notices.size());
+    const auto& notice = observations->notices.front();
+    EXPECT_GT(notice.operationId, 0U);
+    EXPECT_GT(notice.browserId, 0);
+    EXPECT_EQ(testCase.blockReason, notice.decision.Reason());
+
+    if (testCase.trigger == DownloadTestTrigger::Link) {
+        EXPECT_GT(result.canDownloadCalls, 0U);
+        EXPECT_TRUE(result.rejectedByCanDownload);
+        EXPECT_EQ(0U, result.beforeDownloadCalls);
+        // CanDownload no recibe un ID nativo; no inventamos un estado IsCanceled antes de existir la descarga.
+        EXPECT_FALSE(notice.downloadId.has_value());
+    } else {
+        EXPECT_EQ(0U, result.canDownloadCalls);
+        EXPECT_FALSE(result.rejectedByCanDownload);
+        EXPECT_EQ(1U, result.beforeDownloadCalls);
+        EXPECT_GT(result.downloadUpdateCalls, 0U);
+        EXPECT_TRUE(result.canceled);
+        ASSERT_TRUE(result.downloadId.has_value());
+        EXPECT_EQ(result.downloadId, notice.downloadId);
+    }
+    if (context.has_value()) {
+        ASSERT_TRUE(notice.context.has_value());
+        EXPECT_EQ(*context, *notice.context);
+    } else {
+        EXPECT_FALSE(notice.context.has_value());
+    }
+    if (testCase.availability == PolicyAvailability::Expired) {
+        ASSERT_TRUE(notice.policyId.has_value());
+        EXPECT_EQ(1, *notice.policyId);
+    } else {
+        EXPECT_FALSE(notice.policyId.has_value());
+    }
+
+    std::error_code error;
+    const bool destinationDirectoryEmpty = std::filesystem::is_empty(
+        std::filesystem::path(temporaryDirectory_.ToWString()), error);
+    ASSERT_FALSE(error) << error.message();
+    EXPECT_TRUE(destinationDirectoryEmpty);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    InitialAvailability,
+    DownloadAvailabilityTest,
+    ::testing::Values(
+        // Sin sesión o instalación activa, el enlace debe rechazarse ya en CanDownload.
+        DownloadAvailabilityCase{"LinkBlocksWithoutContext", DownloadTestTrigger::Link,
+            PolicyAvailability::InvalidContext, SecurityReason::InvalidContext},
+        // Un contexto creado todavía no permite descargar hasta recibir una política válida.
+        DownloadAvailabilityCase{"LinkBlocksWithoutPublishedPolicy", DownloadTestTrigger::Link,
+            PolicyAvailability::Unavailable, SecurityReason::PolicyUnavailable},
+        // Si la política ya caducó antes de iniciar la petición, no se llega a solicitar un destino.
+        DownloadAvailabilityCase{"LinkBlocksInitiallyExpiredPolicy", DownloadTestTrigger::Link,
+            PolicyAvailability::Expired, SecurityReason::PolicyExpired},
+        // StartDownload omite CanDownload, pero OnBeforeDownload debe bloquear la ausencia de política.
+        DownloadAvailabilityCase{"StartDownloadBlocksWithoutPublishedPolicy", DownloadTestTrigger::StartDownload,
+            PolicyAvailability::Unavailable, SecurityReason::PolicyUnavailable},
+        // La entrada programática tampoco puede utilizar una política que ya estaba caducada.
+        DownloadAvailabilityCase{"StartDownloadBlocksInitiallyExpiredPolicy", DownloadTestTrigger::StartDownload,
+            PolicyAvailability::Expired, SecurityReason::PolicyExpired}),
+    DownloadAvailabilityTest::CaseName);
 
 }  // namespace sbp
