@@ -68,6 +68,31 @@ Chromium no considera fuerte ese validador y puede aceptar el contenido corto.
 El error puede detectarse mientras el diálogo todavía está pendiente; en ese
 caso debe cerrarse y mostrarse el resultado.
 
+## Descargas blob: y data:
+
+La página genera el mismo texto inerte en memoria y lo ofrece mediante cuatro
+enlaces con atributo `download`. El nombre sugerido procede de ese atributo;
+estos archivos no tienen una respuesta HTTP ni un `Content-Disposition`.
+Mantener abierta la página mientras se resuelve el diálogo y usar destinos nuevos.
+
+Con la política Restrictiva, comprobar en Debug y Release:
+
+| Enlace | Nombre sugerido | Resultado esperado |
+| --- | --- | --- |
+| Blob — nombre PDF | `blob-permitido.pdf` | Guardado con el texto fijo y aviso de descarga completada. |
+| Blob — nombre EXE | `blob-bloqueado.exe` | Aviso de extensión bloqueada, sin diálogo ni archivo final. |
+| Data — nombre PDF | `data-permitido.pdf` | Guardado con el texto fijo y aviso de descarga completada. |
+| Data — nombre EXE | `data-bloqueado.exe` | Aviso de extensión bloqueada, sin diálogo ni archivo final. |
+
+Esta comprobación cubre las descargas mediante esos enlaces desde la página
+HTTP local. No acredita navegación a documentos `blob:` o `data:`, que se
+evalúa por separado mediante URL Filtering, ni descargas desde otros orígenes.
+
+La vía `CefBrowserHost::StartDownload` se comprueba en la batería CEF de Debug y
+Release mediante `DownloadTestTrigger::StartDownload`. Omite `CanDownload`, pero
+mantiene las comprobaciones de nombre y destino en `OnBeforeDownload` y al
+resolver el diálogo. La página manual no invoca ese método nativo.
+
 ## Transferencia en curso y cierre
 
 La descarga lenta envía el mismo texto repetido en bloques durante unos
@@ -151,3 +176,13 @@ respuesta tardía y comprueban cancelación, un único aviso de `InvalidContext`
 y ausencia del archivo final. Esta comprobación cubre las solicitudes con
 diálogo pendiente; no acredita por sí sola la retirada durante una transferencia
 ya autorizada.
+
+### Descargas blob: y data: comprobadas en Debug y Release
+
+El 19 de noviembre de 2026, con la página manual ampliada y la política
+Restrictiva, el usuario confirmó los cuatro casos en ambas configuraciones:
+
+- PDF mediante `blob:`: guardado, contenido fijo correcto y aviso de finalización.
+- EXE mediante `blob:`: aviso de extensión bloqueada, sin diálogo ni archivo final.
+- PDF mediante `data:`: guardado, contenido fijo correcto y aviso de finalización.
+- EXE mediante `data:`: aviso de extensión bloqueada, sin diálogo ni archivo final.
