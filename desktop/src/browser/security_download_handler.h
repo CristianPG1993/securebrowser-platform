@@ -148,6 +148,11 @@ private:
     // Usa el callback de cancelación si está disponible; conserva el seguimiento hasta el estado final.
     void CancelDownload(DownloadKey key);
 
+    // Libera la continuación y solicita Cancel en otra tarea UI CEF, fuera de OnDownloadUpdated.
+    // El destructor de la continuación puede cancelar de forma síncrona y actualizar observadores nativos.
+    static void QueueCallbackCancellation(CefRefPtr<CefBeforeDownloadCallback> pendingCallback,
+                                          CefRefPtr<CefDownloadItemCallback> cancelCallback);
+
     // Prepara el aviso antes de cancelar, conservando el ID y el contexto originales aunque CEF retire el registro.
     // Solo comunica el primer bloqueo de una operación; una cancelación ya solicitada no genera otro aviso.
     // state corresponde a la evaluación aplicada; no se atribuirá la política de otro contexto al bloqueo.

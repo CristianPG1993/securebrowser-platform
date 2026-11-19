@@ -183,7 +183,8 @@ void SecurityDownloadHandler::OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
             pendingDownloads_.erase(pending);
         }
         trackedDownloads_.erase(key);
-        pendingCallback = nullptr;
+        // Incluso con estado final, liberar una continuación pendiente puede volver a notificar a Chromium.
+        QueueCallbackCancellation(std::move(pendingCallback), nullptr);
 
         // CEF puede cancelar antes de que Qt responda; solicita retirar también el diálogo de ese ID.
         // Los registros ya se eliminaron, por lo que la respuesta del cierre no podrá continuar la descarga.
@@ -280,16 +281,34 @@ void SecurityDownloadHandler::CancelDownload(DownloadKey key) {
         cancelCallback = tracked->second.cancelCallback;
     }
 
-    // El estado ya está preparado si liberar la continuación provoca nuevas notificaciones de CEF.
-    pendingCallback = nullptr;
-    if (cancelCallback) {
-        cancelCallback->Cancel();
-    }
+    // Retirar los registros es inmediato; ejecutar la cancelación debe esperar a salir del callback nativo.
+    QueueCallbackCancellation(std::move(pendingCallback), std::move(cancelCallback));
 
     // El receptor encolará el cierre en Qt; su respuesta tardía ya no encontrará la solicitud pendiente.
     // Usa el ID copiado, sin acceder a entradas que CEF haya podido retirar durante la cancelación.
     if (pendingOperationId.has_value() && onRequestCloseSaveDialog_) {
         onRequestCloseSaveDialog_(*pendingOperationId);
+    }
+}
+
+// Conserva los callbacks hasta otra tarea del mismo hilo; no retiene CefDownloadItem ni el navegador.
+void SecurityDownloadHandler::QueueCallbackCancellation(
+    CefRefPtr<CefBeforeDownloadCallback> pendingCallback,
+    CefRefPtr<CefDownloadItemCallback> cancelCallback) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!pendingCallback && !cancelCallback) {
+        return;
+    }
+
+    // Destruir la continuación dentro de OnDownloadUpdated causaría una actualización nativa anidada.
+    if (!CefPostTask(TID_UI, base::BindOnce(
+            [](CefRefPtr<CefBeforeDownloadCallback> pending, CefRefPtr<CefDownloadItemCallback> cancel) {
+                pending = nullptr;
+                if (cancel) {
+                    cancel->Cancel();
+                }
+            }, std::move(pendingCallback), std::move(cancelCallback)))) {
+        std::fputs("CEF download cancellation could not be posted to the UI thread.\n", stderr);
     }
 }
 
