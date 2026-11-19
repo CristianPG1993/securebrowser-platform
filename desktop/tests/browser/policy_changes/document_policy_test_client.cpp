@@ -1,5 +1,6 @@
 #include "document_policy_test_client.h"
 
+#include "browser/security_download_handler.h"
 #include "browser/security_request_handler.h"
 #include "demo/demo_policy_source.h"
 #include "include/base/cef_callback.h"
@@ -40,7 +41,9 @@ DocumentPolicyTestClient::DocumentPolicyTestClient(
             std::abort();
         }
     };
-    client_ = new BrowserClient(std::move(callbacks), handler);
+    // Completa las dependencias del cliente compartiendo el mismo gestor; estas pruebas no solicitan destinos Qt.
+    CefRefPtr<SecurityDownloadHandler> download_handler = new SecurityDownloadHandler(manager_);
+    client_ = new BrowserClient(std::move(callbacks), handler, download_handler);
 }
 
 DocumentPolicyTestResult DocumentPolicyTestClient::Run() {

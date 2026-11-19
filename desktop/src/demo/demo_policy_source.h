@@ -16,10 +16,10 @@ public:
     static constexpr std::int64_t DeviceId = 1;
     static constexpr std::int64_t CompanyId = 1;
 
-    // Construye «Navegación libre», con filtrado de dominios desactivado.
+    // Construye «Navegación libre», con filtrado de dominios y control de extensiones desactivados.
     [[nodiscard]] static PolicySnapshot CreateFreePolicy();
 
-    // Construye la política restrictiva con filtrado activo y reglas DENYLIST explícitas.
+    // Construye la política restrictiva con filtrado de dominios activo y DENYLIST de descargas exe y msi.
     [[nodiscard]] static PolicySnapshot CreateRestrictedPolicy();
 };
 

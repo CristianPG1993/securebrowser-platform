@@ -7,14 +7,20 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QObject>
+#include <QPointer>
 #include <QPushButton>
 #include <QStringList>
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <cstdint>
 #include <functional>
+#include <map>
+#include <optional>
+#include <string>
 
 class QEvent;
+class QFileDialog;
 class QMessageBox;
 
 namespace sbp {
@@ -52,6 +58,14 @@ public:
     // La sesión prepara el motivo; la interfaz no evalúa políticas ni decide permisos.
     void ShowNavigationBlock(const QString& message);
 
+    // Muestra en Qt un aviso de descarga bloqueada con el texto preparado por la sesión.
+    // Solo presenta el motivo; no evalúa reglas ni ofrece reanudar la descarga cancelada.
+    void ShowDownloadBlock(const QString& message);
+
+    // Resultado no modal, independiente del panel de bloqueos; no decide permisos ni reintenta la descarga.
+    void ShowDownloadResult(const QString& message);
+    void ClearDownloadResult();
+
     // Retira el aviso cuando la sesión determina que ya no corresponde al estado mostrado.
     void ClearNavigationBlock();
 
@@ -63,6 +77,19 @@ public:
 
     // Cierra la pregunta si CEF la ha retirado antes de recibir la respuesta del usuario.
     void CancelPageLeave();
+
+    // Abre Guardar como de forma asíncrona en Qt, con nombre editable y sin evaluar políticas.
+    // Responde con la ruta elegida en UTF-8 o nullopt si el usuario cancela.
+    void ShowDownloadSaveDialog(
+        std::uint64_t operationId,
+        const QString& suggestedName,
+        std::function<void(std::optional<std::string>)> onResult);
+
+    // Cierra el diálogo de una solicitud retirada; CEF descartará su respuesta tardía por operationId.
+    void CancelDownloadSaveDialog(std::uint64_t operationId);
+
+    // Cierra todos los diálogos pendientes antes de retirar los controles de la ventana.
+    void CancelDownloadSaveDialogs();
 
     // Guarda la función que recibirá el texto al pulsar Enter; instalarla no la ejecuta.
     void SetAddressSubmitHandler(std::function<void(const QString&)> on_address_submitted);
@@ -100,6 +127,9 @@ private:
     void ConfigureNavigationBlockPanel();
     // Conecta «Ir a inicio» con RequestHome, igual que el botón de la barra.
     void ConnectBlockHomeButton();
+
+    // Prepara un mensaje de resultado que no sustituye los avisos de navegación o descarga bloqueadas.
+    void ConfigureDownloadResultPanel();
 
     // Conecta la elección del usuario con una solicitud a la sesión.
     void ConnectPolicySelector();
@@ -167,6 +197,9 @@ private:
     QLabel block_message_;
     QPushButton block_home_button_;
 
+    // Último resultado operativo; solo se modifica desde Qt y se limpia al solicitar un destino nuevo.
+    QLabel download_result_message_;
+
     // Recibe un índice de presentación; la sesión decide qué snapshot construir y publicar.
     std::function<void(int)> on_policy_selected_;
 
@@ -187,6 +220,10 @@ private:
 
     // Referencia no propietaria al diálogo local de ConfirmPageLeave; solo se utiliza en Qt.
     QMessageBox* page_leave_dialog_ = nullptr;
+
+    // Solo Qt accede al mapa; la ventana posee los diálogos y QPointer detecta su destrucción.
+    // Cada operación conserva su propio diálogo para permitir solicitudes de descarga independientes.
+    std::map<std::uint64_t, QPointer<QFileDialog>> download_dialogs_;
 };
 
 }  // namespace sbp

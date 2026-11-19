@@ -1,5 +1,6 @@
 #pragma once
 
+#include "browser/security_download_handler.h"
 #include "browser/security_request_handler.h"
 
 #include "include/cef_client.h"
@@ -46,8 +47,10 @@ class BrowserClient final : public CefClient,
                             public CefLoadHandler,
                             public CefJSDialogHandler {
 public:
-    // Conserva los avisos y el handler de seguridad como dependencias separadas.
-    BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<SecurityRequestHandler> requestHandler);
+    // Conserva los avisos y los handlers de navegación y descarga como dependencias separadas.
+    BrowserClient(BrowserClientCallbacks callbacks,
+                  CefRefPtr<SecurityRequestHandler> requestHandler,
+                  CefRefPtr<SecurityDownloadHandler> downloadHandler);
 
     // Compartimos referencias al cliente, sin copiar el objeto ni su contador.
     BrowserClient(const BrowserClient&) = delete;
@@ -67,6 +70,9 @@ public:
 
     // CEF obtiene el handler de seguridad recibido al construir el cliente.
     CefRefPtr<CefRequestHandler> GetRequestHandler() override;
+
+    // CEF obtiene el handler que comprueba las descargas y coordina la selección del destino con Qt.
+    CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;
 
     // Recibe una copia de los parámetros preparados por Qt y solicita la creación asíncrona.
     // Este método y el estado del cliente pertenecen al hilo UI de CEF.
@@ -171,6 +177,9 @@ private:
 
     // Mantiene vivo el handler recibido; CEF obtendrá referencias al mismo objeto.
     const CefRefPtr<SecurityRequestHandler> request_handler_;
+
+    // Mantiene vivo el handler de descargas; CEF comparte este objeto mediante GetDownloadHandler.
+    const CefRefPtr<SecurityDownloadHandler> download_handler_;
 
     // Solo se lee o modifica en el hilo UI de CEF. -1 significa que no hay navegador registrado.
     // Guardamos un identificador, sin mantener una referencia circular navegador -> cliente -> navegador.

@@ -62,6 +62,12 @@ private:
     [[nodiscard]] static bool SendActionFixture(
         CefRefPtr<CefServer> server, int connectionId, const std::string& path, const std::string& method);
 
+    // Página de origen y adjuntos HTTP de prueba con nombres sugeridos independientes de la URL.
+    // Content-Disposition permitirá comprobar el nombre entregado realmente por CEF.
+    // Devuelve false si la ruta no pertenece a estos casos, para conservar el resto de escenarios del servidor.
+    [[nodiscard]] static bool SendDownloadFixture(
+        CefRefPtr<CefServer> server, int connectionId, const std::string& path);
+
     bool startRequested_ = false;
     std::promise<bool> created_;
     std::promise<void> destroyed_;

@@ -28,7 +28,8 @@ PolicySnapshot DemoPolicySource::CreateRestrictedPolicy() {
         UrlFilteringConfig(true, FilterMode::Denylist, {
             "facebook.com", "instagram.com", "tiktok.com", "x.com",
             "youtube.com", "twitch.tv", "netflix.com"}),
-        DownloadControlConfig(false, FilterMode::Denylist, {}),
+        // La demo aplica estas reglas tanto al nombre sugerido como al elegido en Guardar como.
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe", "msi"}),
         timestamp, timestamp);
 }
 

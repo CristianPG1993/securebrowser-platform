@@ -15,11 +15,18 @@
 
 namespace sbp {
 
-// Conserva las dependencias y rechaza un cliente que carezca de handler de seguridad.
-BrowserClient::BrowserClient(BrowserClientCallbacks callbacks, CefRefPtr<SecurityRequestHandler> requestHandler)
-    : callbacks_(std::move(callbacks)), request_handler_(std::move(requestHandler)) {
+// Conserva las dependencias y exige los handlers de seguridad de navegación y descarga.
+BrowserClient::BrowserClient(BrowserClientCallbacks callbacks,
+                             CefRefPtr<SecurityRequestHandler> requestHandler,
+                             CefRefPtr<SecurityDownloadHandler> downloadHandler)
+    : callbacks_(std::move(callbacks)),
+      request_handler_(std::move(requestHandler)),
+      download_handler_(std::move(downloadHandler)) {
     if (!request_handler_) {
         throw std::invalid_argument("BrowserClient requires a request handler.");
+    }
+    if (!download_handler_) {
+        throw std::invalid_argument("BrowserClient requires a download handler.");
     }
 }
 
@@ -52,6 +59,11 @@ CefRefPtr<CefJSDialogHandler> BrowserClient::GetJSDialogHandler() {
 // Comparte con CEF el mismo handler, manteniéndolo vivo mediante su contador de referencias.
 CefRefPtr<CefRequestHandler> BrowserClient::GetRequestHandler() {
     return request_handler_;
+}
+
+// Comparte con CEF el handler de descargas recibido, sin crear otra instancia.
+CefRefPtr<CefDownloadHandler> BrowserClient::GetDownloadHandler() {
+    return download_handler_;
 }
 
 void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
@@ -501,6 +513,10 @@ void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
 
 bool BrowserClient::DoClose(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
+    // CEF ya ha superado la confirmación de salida; cancela pendientes y activas antes del cierre nativo.
+    // Retirar las solicitudes pendientes impide que una respuesta tardía de Qt autorice su continuación.
+    download_handler_->CancelAll();
+
     // Alloy envía por defecto WM_CLOSE a la ventana raíz Qt, cuyo cierre seguimos reteniendo.
     // Publicamos también WM_CLOSE para la hija CEF. Al procesarlo, CEF ya habrá marcado su cierre
     // como aceptado y su manejador nativo podrá destruirla sin destruir el anfitrión Qt.

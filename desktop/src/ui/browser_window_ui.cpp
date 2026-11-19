@@ -3,7 +3,10 @@
 #include "ui/browser_window.h"
 
 #include <QAbstractButton>
+#include <QByteArray>
+#include <QDir>
 #include <QEvent>
+#include <QFileDialog>
 #include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMetaMethod>
@@ -35,7 +38,8 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
       block_panel_(&window),
       block_layout_(&block_panel_),
       block_message_(&block_panel_),
-      block_home_button_(&block_panel_) {
+      block_home_button_(&block_panel_),
+      download_result_message_(&window) {
     // Aquí se configura el aspecto inicial de la ventana y la distribución de sus controles.
     window.setWindowTitle("SecureBrowser");
     window.resize(1024, 768);
@@ -94,10 +98,12 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     navigation_layout_.addWidget(&address_input_, 1);
     ConfigureStatusPanel();
     ConfigureNavigationBlockPanel();
+    ConfigureDownloadResultPanel();
     // El navegador ocupa el espacio restante y el panel queda debajo, sin superponer contenido.
     window_layout_.addLayout(&navigation_layout_);
     window_layout_.addWidget(&browser_host_, 1);
     window_layout_.addWidget(&block_panel_);
+    window_layout_.addWidget(&download_result_message_);
     window_layout_.addWidget(&status_panel_);
 }
 
@@ -157,6 +163,25 @@ void BrowserWindowUi::ConfigureNavigationBlockPanel() {
     block_panel_.hide();
 }
 
+void BrowserWindowUi::ConfigureDownloadResultPanel() {
+    download_result_message_.setObjectName("download_result_message");
+    download_result_message_.setAccessibleName(QStringLiteral("Resultado de la descarga"));
+    download_result_message_.setTextFormat(Qt::PlainText);
+    download_result_message_.setWordWrap(true);
+    download_result_message_.setMargin(8);
+    download_result_message_.hide();
+}
+
+void BrowserWindowUi::ShowDownloadResult(const QString& message) {
+    download_result_message_.setText(message);
+    download_result_message_.show();
+}
+
+void BrowserWindowUi::ClearDownloadResult() {
+    download_result_message_.clear();
+    download_result_message_.hide();
+}
+
 void BrowserWindowUi::ShowNavigationBlock(const QString& message) {
     // La sesión solo llama desde Qt, después de recibir el aviso de bloqueo aplicado por CEF.
     block_message_.setText(message);
@@ -167,6 +192,13 @@ void BrowserWindowUi::ClearNavigationBlock() {
     // Retirar el aviso no cambia la política ni inicia una navegación.
     block_message_.clear();
     block_panel_.hide();
+}
+
+void BrowserWindowUi::ShowDownloadBlock(const QString& message) {
+    // La sesión solo llama desde Qt, después de recibir el aviso de bloqueo de descarga aplicado por CEF.
+    ClearDownloadResult();
+    block_message_.setText(message);
+    block_panel_.show();
 }
 
 void BrowserWindowUi::SetPolicyName(const QString& policy_name) {
@@ -274,6 +306,112 @@ void BrowserWindowUi::CancelPageLeave() {
     // reject termina el diálogo como Quedarme; no destruye el objeto local de ConfirmPageLeave.
     if (page_leave_dialog_ != nullptr) {
         page_leave_dialog_->reject();
+    }
+}
+
+// Presenta el destino editable en Qt; el receptor comprobará después si permite continuar la descarga.
+void BrowserWindowUi::ShowDownloadSaveDialog(
+    std::uint64_t operationId,
+    const QString& suggestedName,
+    std::function<void(std::optional<std::string>)> onResult) {
+    if (!onResult) {
+        return;
+    }
+    if (download_dialogs_.find(operationId) != download_dialogs_.end()) {
+        // Una petición duplicada es un fallo de entrega, no una cancelación voluntaria del usuario.
+        onResult(std::string{});
+        return;
+    }
+
+    // Una solicitud nueva retira el resultado anterior; Cancelar no se presenta como un fallo.
+    ClearDownloadResult();
+    // La ventana posee el diálogo; open permite responder por señal sin ejecutar un bucle modal anidado.
+    auto* dialog = new QFileDialog(address_input_.window(), QStringLiteral("Guardar descarga"));
+    dialog->setAcceptMode(QFileDialog::AcceptSave);
+    dialog->setFileMode(QFileDialog::AnyFile);
+    dialog->setNameFilter(QStringLiteral("Todos los archivos (*)"));
+    dialog->selectFile(suggestedName);
+    download_dialogs_.emplace(operationId, dialog);
+
+    // Consulta la señal en tiempo de ejecución para evitar importar QDialog::staticMetaObject como dato.
+    // Así se conserva la carga diferida de Qt que necesita el arranque de los subprocesos CEF.
+    const QMetaObject* dialog_meta = dialog->metaObject();
+    const int finished_index = dialog_meta->indexOfSignal("finished(int)");
+    // Conserva una respuesta alternativa por si Qt rechaza la conexión después de mover onResult a la lambda.
+    const auto onConnectionFailure = onResult;
+    // finished se procesa en Qt; el contexto this desconecta la función si se destruyen los controles.
+    const auto connection = QMetaObject::connect(dialog, dialog_meta->method(finished_index), this,
+        [this, operationId, dialog, onResult = std::move(onResult)](int result) {
+            // Retira el registro antes de responder para consumir esta petición una sola vez.
+            const auto pending = download_dialogs_.find(operationId);
+            if (pending == download_dialogs_.end() || pending->second.data() != dialog) {
+                return;
+            }
+            // Elimina el diálogo de la lista de pendientes antes de procesar la respuesta.
+            download_dialogs_.erase(pending);
+
+            std::optional<std::string> path;
+            if (result == QDialog::Accepted) {
+                // Una confirmación sin ruta devuelve una cadena vacía: CEF la rechazará como destino inválido.
+                path = std::string{};
+                const QStringList files = dialog->selectedFiles();
+                if (files.size() == 1) {
+                    // Qt devuelve separadores /; la operación de guardado de CEF usa el Shell de Windows.
+                    // Convierte solo los separadores al formato nativo, conservando carpeta, nombre y extensión.
+                    const QString nativePath = QDir::toNativeSeparators(files.front());
+                    // QString guarda texto en UTF-16; toUtf8 lo convierte a los bytes UTF-8 que espera CEF.
+                    const QByteArray utf8Path = nativePath.toUtf8();
+                    // constData apunta al inicio de los bytes y size indica cuántos hay, no cuántos caracteres.
+                    // static_cast convierte esa cantidad al tipo de tamaño std::size_t que espera el constructor.
+                    // std::string copia los bytes tal cual, sin otra conversión; path conserva su propia cadena.
+                    path = std::string(utf8Path.constData(), static_cast<std::size_t>(utf8Path.size()));
+                }
+            }
+
+            // La destrucción queda aplazada hasta salir de la señal; la respuesta solo transporta datos propios.
+            dialog->deleteLater();
+            onResult(std::move(path));
+        });
+
+    if (!connection) {
+        // No abre un diálogo sin respuesta: retira su registro y comunica un destino inválido a CEF.
+        download_dialogs_.erase(operationId);
+        dialog->deleteLater();
+        std::fputs("Qt download save dialog completion could not be connected.\n", stderr);
+        onConnectionFailure(std::string{});
+        return;
+    }
+
+    dialog->open();
+}
+
+// Cierra en Qt el diálogo de una solicitud retirada, sin afectar a otras operaciones.
+void BrowserWindowUi::CancelDownloadSaveDialog(std::uint64_t operationId) {
+    const auto pending = download_dialogs_.find(operationId);
+    if (pending == download_dialogs_.end()) {
+        return;
+    }
+
+    // Copia el puntero vigilado antes de reject, cuya señal finished puede retirar la entrada del mapa.
+    const QPointer<QFileDialog> dialog = pending->second;
+    if (!dialog) {
+        // El diálogo ya se destruyó; solo queda retirar su registro.
+        download_dialogs_.erase(pending);
+        return;
+    }
+
+    // finished retirará el registro, responderá con nullopt y programará la destrucción del diálogo.
+    // No se utiliza pending después de esta llamada porque su entrada puede haber sido eliminada.
+    dialog->reject();
+}
+
+// Solicita cerrar todos los diálogos pendientes desde el hilo Qt.
+void BrowserWindowUi::CancelDownloadSaveDialogs() {
+    // Copia las entradas y sus QPointer, sin duplicar los diálogos a los que apuntan.
+    // finished puede borrar entradas del mapa original al rechazar cada diálogo.
+    const auto dialogs = download_dialogs_;
+    for (const auto& entry : dialogs) {
+        CancelDownloadSaveDialog(entry.first);
     }
 }
 

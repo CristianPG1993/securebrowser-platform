@@ -1,5 +1,5 @@
 #include "local_http_test_server.h"
-#include "navigation_test_client.h"
+#include "browser/navigation/navigation_test_client.h"
 
 #include "include/cef_parser.h"
 

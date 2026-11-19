@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>SecureBrowser — comprobación de descargas</title>
+    <link rel="icon" href="data:,">
+</head>
+<body>
+    <h1>Comprobación manual de Download Control</h1>
+    <p>Todos los archivos contienen texto fijo de prueba. No son documentos PDF, programas ni instaladores reales.</p>
+    <p>Selecciona la política en el panel de Qt.</p>
+    <h2>Descargas HTTP</h2>
+    <p>En estos enlaces, el nombre lo proporciona Content-Disposition en la respuesta HTTP.</p>
+    <ul>
+        <li><a href="/download/allowed.exe">PDF permitido: informe.pdf, aunque la URL termina en .exe</a></li>
+        <li><a href="/download/blocked.pdf">EXE bloqueado: programa.exe, aunque la URL termina en .pdf</a></li>
+        <li><a href="/download/installer.pdf">MSI bloqueado: paquete.msi</a></li>
+        <li><a href="/download/unicode">Nombre Unicode permitido: informe-niño.PDF</a></li>
+        <li><a href="/download/slow.pdf">PDF lento: unos 30 segundos para observar la transferencia</a></li>
+        <li><a href="/download/interrupted.pdf">Fallo provocado: transferencia incompleta para comprobar el aviso de error</a></li>
+    </ul>
+    <p>Para comprobar el nombre definitivo, abre el PDF permitido y escribe programa.exe en Guardar como.</p>
+    <p>Para comprobar la cancelación voluntaria, abre de nuevo el PDF permitido y pulsa Cancelar.</p>
+
+    <h2>Descargas generadas con blob: y data:</h2>
+    <p>Estos enlaces utilizan el mismo texto inerte, generado en la página, sin pedir otro archivo al servidor.
+        El nombre se propone mediante el atributo download del enlace.</p>
+    <ul>
+        <li><a id="blob-pdf" download="blob-permitido.pdf">Blob — nombre PDF: blob-permitido.pdf</a></li>
+        <li><a id="blob-exe" download="blob-bloqueado.exe">Blob — nombre EXE: blob-bloqueado.exe</a></li>
+        <li><a id="data-pdf" download="data-permitido.pdf">Data — nombre PDF: data-permitido.pdf</a></li>
+        <li><a id="data-exe" download="data-bloqueado.exe">Data — nombre EXE: data-bloqueado.exe</a></li>
+    </ul>
+    <p>Con Restrictiva, comprobar si los PDF permiten guardar y los EXE se bloquean antes del diálogo.
+        Si un esquema se rechaza antes de iniciar la descarga, registrar el aviso observado.</p>
+
+    <script>
+        // El contenido coincide con el de las descargas HTTP; las extensiones solo sirven para evaluar las reglas.
+        const payload = "SBP manual download fixture.\n";
+
+        // Ambos nombres comparten la URL del objeto en memoria, conservada mientras la página siga abierta.
+        const blobUrl = URL.createObjectURL(new Blob([payload], { type: "application/octet-stream" }));
+        document.getElementById("blob-pdf").href = blobUrl;
+        document.getElementById("blob-exe").href = blobUrl;
+
+        // data: lleva el contenido codificado en la propia URL, sin una petición HTTP adicional.
+        const dataUrl = "data:application/octet-stream;charset=utf-8," + encodeURIComponent(payload);
+        document.getElementById("data-pdf").href = dataUrl;
+        document.getElementById("data-exe").href = dataUrl;
+    </script>
+</body>
+</html>

@@ -17,6 +17,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <utility>
 
 namespace sbp {
 
@@ -161,14 +162,25 @@ int BrowserSession::Run(QApplication& qt_app) {
         // El receptor copia el aviso desde CEF y lo encola para presentarlo únicamente en Qt.
         CefRefPtr<SecurityRequestHandler> security_handler = new SecurityRequestHandler(
             policy_manager, MakeNavigationDecisionHandler(window, policy_manager));
+        // El handler comparte el gestor y recibe los puentes de diálogo, cierre y aviso de bloqueo hacia Qt.
+        // Todavía no se abre ningún diálogo; CEF invocará esta función al solicitar un destino permitido.
+        CefRefPtr<SecurityDownloadHandler> download_handler = new SecurityDownloadHandler(
+            policy_manager, MakeSaveDialogRequestHandler(window), MakeSaveDialogCloseHandler(window),
+            MakeDownloadDecisionHandler(window, policy_manager), MakeDownloadResultHandler(window, policy_manager));
+
+        // Registra el receptor antes de crear el navegador y conserva la suscripción durante esta sesión.
+        // El gestor solo guarda una referencia débil; la cancelación se encolará en UI CEF.
+        auto context_retired_subscription = policy_manager->SubscribeToContextRetirement(
+            download_handler->MakeContextRetiredHandler());
+
         // Paso 5: browser_client es el cliente que entregamos a CEF para crear y manejar el navegador.
-        // Recibe creación, carga, historial y cierre; GetRequestHandler entrega security_handler a CEF.
+        // Recibe creación, carga, historial y cierre; entrega a CEF los handlers de navegación y descarga.
         // MakeCallbacks agrupa los avisos de navegación; MakeClientCallbacks añade creación y cierre.
         // El constructor guarda esas funciones: sus avisos se ejecutarán después; aún no creamos el navegador CEF.
         CefRefPtr<BrowserClient> browser_client(new BrowserClient(
             lifecycle_.MakeClientCallbacks(
                 window, navigation.MakeCallbacks(window, window_ui_, lifecycle_.CloseRequested())),
-            security_handler));
+            security_handler, download_handler));
 
         std::fputs("CEF browser client prepared.\n", stderr);
 
@@ -201,8 +213,13 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Cuando exec retorna, ExitCode conserva un error previo o utiliza el resultado del bucle Qt.
         qt_exit_code = lifecycle_.ExitCode(qt_app.exec());
 
+        // Deja de aceptar avisos nuevos antes de retirar los controles; las tareas ya encoladas conservan sus datos.
+        context_retired_subscription.reset();
+
         // Retira el receptor del selector mientras los controles y el gestor todavía siguen vivos.
         window_ui.SetPolicySelectionHandler({});
+        // Resuelve los diálogos pendientes antes de retirar los controles y sus conexiones de respuesta.
+        window_ui.CancelDownloadSaveDialogs();
 
         // Paso 14: Liberamos la función de creación y limpiamos los datos del anfitrión, aún con los widgets vivos.
         lifecycle_.Detach();
@@ -219,7 +236,62 @@ int BrowserSession::Run(QApplication& qt_app) {
     return qt_exit_code;
 }
 
-std::function<bool(const NavigationDecisionNotice&)> BrowserSession::MakeNavigationDecisionHandler(
+// Prepara el puente CEF -> Qt sin abrir el diálogo durante la composición de la sesión.
+SecurityDownloadHandler::RequestSaveDialogCallback BrowserSession::MakeSaveDialogRequestHandler(
+    BrowserWindow& window) {
+    // CEF invocará esta función; solo se accede a la ventana como receptor de la tarea encolada.
+    return [this, &window](std::uint64_t operationId, std::string suggestedName,
+                           SecurityDownloadHandler::SaveDialogResultCallback onResult) {
+        if (!onResult) {
+            return false;
+        }
+
+        // La tarea conserva sus datos y la respuesta; solo en el hilo Qt consulta el cierre y los controles.
+        const bool queued = QMetaObject::invokeMethod(&window,
+            [this, operationId, suggestedName = std::move(suggestedName), onResult = std::move(onResult)]() mutable {
+                if (lifecycle_.CloseRequested()) {
+                    onResult(std::nullopt);
+                    return;
+                }
+                if (window_ui_ == nullptr) {
+                    // La ausencia de controles impide entregar la petición; una ruta vacía se rechazará como destino.
+                    onResult(std::string{});
+                    return;
+                }
+                window_ui_->ShowDownloadSaveDialog(
+                    operationId, QString::fromUtf8(suggestedName.c_str()), std::move(onResult));
+            }, Qt::QueuedConnection);
+
+        // false hará que OnBeforeDownload retire la solicitud al no poder entregarla a Qt.
+        if (!queued) {
+            std::fputs("CEF save dialog request could not be queued to Qt.\n", stderr);
+        }
+        return queued;
+    };
+}
+
+// Prepara el aviso CEF -> Qt para retirar el diálogo de una solicitud cuyo destino ya no está pendiente.
+SecurityDownloadHandler::RequestCloseSaveDialogCallback BrowserSession::MakeSaveDialogCloseHandler(BrowserWindow& window) {
+    // CEF ejecutará esta lambda con el ID de operación; aquí no se consultan ni modifican controles Qt.
+    return [this, &window](std::uint64_t operationId) {
+        // La lambda interior se encola en el hilo principal de Qt, conservando una copia del ID.
+        const bool queued = QMetaObject::invokeMethod(&window, [this, operationId] {
+            // Los controles pueden haberse retirado antes de atender el aviso; solo se utilizan si siguen disponibles.
+            if (window_ui_ != nullptr) {
+                // Cierra únicamente el diálogo de esta operación; su respuesta tardía será descartada por CEF.
+                window_ui_->CancelDownloadSaveDialog(operationId);
+            }
+        }, Qt::QueuedConnection);
+
+        // La solicitud ya se retiró en CEF; registra si no se pudo entregar a Qt el cierre de su diálogo.
+        if (!queued) {
+            std::fputs("CEF save dialog close request could not be queued to Qt.\n", stderr);
+        }
+    };
+}
+
+// Prepara el receptor del bloqueo sin consultar controles Qt desde el hilo de CEF.
+SecurityRequestHandler::DecisionCallback BrowserSession::MakeNavigationDecisionHandler(
     BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager) {
     // CEF ejecuta este receptor; window vive hasta la confirmación de cierre y manager se conserva por valor.
     return [this, &window, manager](const NavigationDecisionNotice& notice) {
@@ -234,6 +306,43 @@ std::function<bool(const NavigationDecisionNotice&)> BrowserSession::MakeNavigat
                 return;
             }
             OnNavigationDecision(notice, *manager);
+        }, Qt::QueuedConnection);
+    };
+}
+
+// Prepara el receptor del bloqueo sin consultar controles Qt desde el hilo de CEF.
+SecurityDownloadHandler::DecisionCallback BrowserSession::MakeDownloadDecisionHandler(
+    BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager) {
+    // CEF entrega el aviso; conserva el gestor y utiliza la ventana solo como destino de la tarea Qt.
+    return [this, &window, manager](const DownloadDecisionNotice& notice) {
+        if (!manager) {
+            return false;
+        }
+        std::fprintf(stderr, "CEF download blocked; operation_id: %llu; reason: %d.\n",
+                     static_cast<unsigned long long>(notice.operationId),
+                     static_cast<int>(notice.decision.Reason()));
+        const auto observed_state = manager->ReadState();
+        // La tarea posee sus copias; una publicación o retirada posterior descarta la presentación obsoleta.
+        return QMetaObject::invokeMethod(&window, [this, manager, notice, observed_state] {
+            if (manager->ReadState() != observed_state) {
+                return;
+            }
+            OnDownloadDecision(notice, *manager);
+        }, Qt::QueuedConnection);
+    };
+}
+
+// El resultado pertenece al contexto, no al snapshot que estaba activo antes de terminar la transferencia.
+SecurityDownloadHandler::ResultCallback BrowserSession::MakeDownloadResultHandler(
+    BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager) {
+    // CEF entrega una copia propia; solo la tarea interior consulta el cierre y los controles de Qt.
+    return [this, &window, manager](const DownloadResultNotice& notice) {
+        if (!manager) {
+            return false;
+        }
+        // Cambiar las reglas no invalida el resultado de una transferencia ya autorizada en este contexto.
+        return QMetaObject::invokeMethod(&window, [this, manager, notice] {
+            OnDownloadResult(notice, *manager);
         }, Qt::QueuedConnection);
     };
 }
@@ -275,6 +384,79 @@ void BrowserSession::OnNavigationDecision(const NavigationDecisionNotice& notice
                  static_cast<unsigned long long>(notice.operationId));
 }
 
+// Presenta solo avisos de descarga que todavía corresponden al contexto y a la política de esta ventana.
+void BrowserSession::OnDownloadDecision(const DownloadDecisionNotice& notice, const PolicyManager& manager) {
+    if (lifecycle_.CloseRequested() || window_ui_ == nullptr || notice.operationId == 0
+        || notice.decision.Action() != SecurityAction::Block) {
+        return;
+    }
+
+    const auto state = manager.ReadState();
+    if (notice.context.has_value()) {
+        if (!state || state->context != *notice.context) {
+            return;
+        }
+    } else if (state) {
+        return;
+    }
+    if (notice.policyId.has_value()) {
+        if (!state || !state->policy || state->policy->Id() != *notice.policyId) {
+            return;
+        }
+    } else if (state && state->policy) {
+        return;
+    }
+
+    // Una renovación mientras el aviso esperaba en Qt puede haber resuelto el motivo de caducidad.
+    if (notice.decision.Reason() == SecurityReason::PolicyExpired && state
+        && manager.ReadPolicy(state->context).availability != PolicyAvailability::Expired) {
+        return;
+    }
+
+    // Los IDs se asignan al iniciar cada descarga: una operación anterior puede bloquearse después de otra.
+    // No se filtran por el contador de navegación; el handler evita duplicados al marcar CancelRequested.
+    const QString policy_name = state && state->policy
+        ? QString::fromUtf8(state->policy->Name().c_str()) : QString{};
+    window_ui_->ShowDownloadBlock(DownloadBlockMessage(notice, policy_name));
+    std::fprintf(stderr, "Qt download block notice shown; operation_id: %llu.\n",
+                 static_cast<unsigned long long>(notice.operationId));
+}
+
+// Un resultado antiguo no se presenta en otra sesión ni durante el cierre de la ventana.
+void BrowserSession::OnDownloadResult(const DownloadResultNotice& notice, const PolicyManager& manager) {
+    if (lifecycle_.CloseRequested() || window_ui_ == nullptr || notice.operationId == 0
+        || !notice.context.has_value() || !manager.IsCurrentContext(*notice.context)) {
+        return;
+    }
+    window_ui_->ShowDownloadResult(DownloadResultMessage(notice.outcome));
+}
+
+// Traduce categorías operativas sin mostrar códigos nativos, rutas ni decisiones de política.
+QString BrowserSession::DownloadResultMessage(DownloadOutcome outcome) {
+    switch (outcome) {
+    case DownloadOutcome::Completed:
+        return QStringLiteral("Descarga completada.");
+    case DownloadOutcome::DialogFailed:
+        return QStringLiteral("No se pudo abrir el diálogo para elegir el destino de la descarga.");
+    case DownloadOutcome::DestinationFailed:
+        return QStringLiteral("No se pudo utilizar el destino seleccionado para la descarga.");
+    case DownloadOutcome::FileFailed:
+        return QStringLiteral("No se pudo guardar el archivo en el destino seleccionado.");
+    case DownloadOutcome::FileAccessDenied:
+        return QStringLiteral("No se pudo guardar el archivo: acceso denegado al destino.");
+    case DownloadOutcome::FileNoSpace:
+        return QStringLiteral("No hay espacio suficiente para guardar la descarga.");
+    case DownloadOutcome::FileBlocked:
+        return QStringLiteral("El sistema impidió guardar el archivo descargado.");
+    case DownloadOutcome::NetworkFailed:
+        return QStringLiteral("La descarga se interrumpió por un error de red.");
+    case DownloadOutcome::ServerFailed:
+        return QStringLiteral("El servidor no pudo completar la descarga.");
+    default:
+        return QStringLiteral("No se pudo completar la descarga.");
+    }
+}
+
 QString BrowserSession::NavigationBlockMessage(const NavigationDecisionNotice& notice, const QString& policy_name) {
     QString reason;
     switch (notice.decision.Reason()) {
@@ -314,6 +496,44 @@ QString BrowserSession::NavigationBlockMessage(const NavigationDecisionNotice& n
     QString message = notice.mainFrame
         ? QStringLiteral("Navegación bloqueada. %1").arg(reason)
         : QStringLiteral("Contenido de la página bloqueado. %1").arg(reason);
+    if (!policy_name.isEmpty()) {
+        message += QStringLiteral("\nPolítica: %1").arg(policy_name);
+    }
+    return message;
+}
+// Convierte el motivo aplicado en un mensaje de texto plano; no vuelve a evaluar la descarga.
+QString BrowserSession::DownloadBlockMessage(const DownloadDecisionNotice& notice, const QString& policy_name) {
+    QString reason;
+    switch (notice.decision.Reason()) {
+    case SecurityReason::InvalidContext:
+        reason = QStringLiteral("No hay un contexto de seguridad válido para esta descarga.");
+        break;
+    case SecurityReason::InstallationUnauthorized:
+        reason = QStringLiteral("La instalación no está autorizada para descargar.");
+        break;
+    case SecurityReason::PolicyUnavailable:
+        reason = QStringLiteral("No hay una política disponible. Es necesario cargar una política válida.");
+        break;
+    case SecurityReason::PolicyExpired:
+        reason = QStringLiteral("La política ha caducado tras 15 minutos. Es necesario volver a cargarla.");
+        break;
+    case SecurityReason::InvalidFileName:
+        reason = QStringLiteral("El nombre del archivo no es válido para guardarlo en Windows.");
+        break;
+    case SecurityReason::MissingExtension:
+        reason = QStringLiteral("El archivo no tiene una extensión y el control de descargas está activado.");
+        break;
+    case SecurityReason::ExtensionDenied:
+        reason = QStringLiteral("La extensión del archivo está bloqueada por la política.");
+        break;
+    case SecurityReason::ExtensionNotAllowed:
+        reason = QStringLiteral("La extensión del archivo no está en la lista de extensiones permitidas.");
+        break;
+    default:
+        reason = QStringLiteral("La descarga no supera las comprobaciones de seguridad.");
+        break;
+    }
+    QString message = QStringLiteral("Descarga bloqueada. %1").arg(reason);
     if (!policy_name.isEmpty()) {
         message += QStringLiteral("\nPolítica: %1").arg(policy_name);
     }

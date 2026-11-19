@@ -3,6 +3,7 @@
 #include <unicode/ucasemap.h>
 #include <unicode/uchar.h>
 
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -11,6 +12,7 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace sbp {
 
@@ -37,11 +39,17 @@ std::optional<SecurityContext> PolicyManager::BeginContext(
     // Reserva el nuevo estado fuera del mutex. La generación cero es provisional y no se publica.
     auto candidate = std::make_shared<State>(State{SecurityContext(0, deviceId, companyId)});
     std::shared_ptr<const State> replacement = candidate;
+    std::vector<ContextRetiredSubscription> callbacks;
 
     {
         const std::lock_guard<std::mutex> lock(stateMutex_);
         if (lastGeneration_ == (std::numeric_limits<std::uint64_t>::max)()) {
             return std::nullopt;
+        }
+
+        // Solo hay retirada si ya existía un contexto; reúne los receptores antes de sustituirlo.
+        if (state_) {
+            callbacks = CollectContextRetiredCallbacks();
         }
 
         // Asigna la generación y sustituye el estado como una sola operación protegida.
@@ -51,6 +59,10 @@ std::optional<SecurityContext> PolicyManager::BeginContext(
     }
 
     // replacement retiene el estado anterior y lo libera fuera del mutex si ya no hay lectores.
+    if (replacement) {
+        // Comunica el origen retirado, aunque otro hilo haya iniciado ya un contexto posterior.
+        NotifyContextRetired(replacement->context, callbacks);
+    }
     // candidate conserva este contexto aunque otro hilo publique uno posterior antes del retorno.
     return candidate->context;
 }
@@ -62,20 +74,83 @@ bool PolicyManager::IsCurrentContext(const SecurityContext& context) const {
     return state_ && state_->context == context;
 }
 
-// Retira solo el contexto solicitado y libera su estado fuera del mutex.
+// Retira solo el contexto solicitado y comunica su cierre fuera del mutex.
 bool PolicyManager::EndContext(const SecurityContext& context) {
     std::shared_ptr<const State> previous;
+    std::vector<ContextRetiredSubscription> callbacks;
     {
         const std::lock_guard<std::mutex> lock(stateMutex_);
         if (!state_ || !(state_->context == context)) {
             return false;
         }
 
+        // Prepara los receptores antes de retirar el estado; todavía no ejecuta sus funciones.
+        callbacks = CollectContextRetiredCallbacks();
         // previous estaba vacío: el intercambio deja state_ vacío y conserva el estado retirado.
         state_.swap(previous);
     }
 
+    // El contexto ya no está vigente y el mutex está libre cuando se avisa a sus receptores.
+    NotifyContextRetired(previous->context, callbacks);
     return true;
+}
+
+// Registra el receptor sin ejecutarlo; quien llama conserva la suscripción para mantenerlo activo.
+PolicyManager::ContextRetiredSubscription PolicyManager::SubscribeToContextRetirement(
+    ContextRetiredCallback callback) {
+    if (!callback) {
+        throw std::invalid_argument("PolicyManager requires a context retirement callback.");
+    }
+
+    // La función se comparte sin modificarla; el gestor no será propietario de su vida útil.
+    auto subscription = std::make_shared<const ContextRetiredCallback>(std::move(callback));
+    {
+        const std::lock_guard<std::mutex> lock(stateMutex_);
+        // Solo elimina referencias débiles caducadas, sin llamar a ninguna función bajo el mutex.
+        std::erase_if(contextRetiredCallbacks_, [](const auto& receiver) {
+            return receiver.expired();
+        });
+        contextRetiredCallbacks_.emplace_back(subscription);
+    }
+
+    return subscription;
+}
+
+// El llamador mantiene stateMutex_; aquí solo se preparan las funciones, sin ejecutarlas.
+std::vector<PolicyManager::ContextRetiredSubscription> PolicyManager::CollectContextRetiredCallbacks() {
+    std::vector<ContextRetiredSubscription> callbacks;
+    // Reserva antes de tomar referencias fuertes para no ampliar el vector mientras se reúnen.
+    callbacks.reserve(contextRetiredCallbacks_.size());
+
+    auto receiver = contextRetiredCallbacks_.begin();
+    while (receiver != contextRetiredCallbacks_.end()) {
+        // lock obtiene una referencia fuerte solo si todavía existe una suscripción activa.
+        auto callback = receiver->lock();
+        if (callback) {
+            // La copia reunida mantendrá viva la función hasta terminar esta notificación.
+            callbacks.push_back(std::move(callback));
+            ++receiver;
+        } else {
+            // erase devuelve el siguiente elemento; no se incrementa un iterador ya invalidado.
+            receiver = contextRetiredCallbacks_.erase(receiver);
+        }
+    }
+
+    return callbacks;
+}
+
+// El llamador ya liberó stateMutex_; los receptores pueden consultar el gestor y encolar su trabajo.
+void PolicyManager::NotifyContextRetired(
+    const SecurityContext& context, const std::vector<ContextRetiredSubscription>& callbacks) noexcept {
+    for (const auto& callback : callbacks) {
+        try {
+            // Ejecuta la función registrada y le entrega el contexto que dejó de estar vigente.
+            (*callback)(context);
+        } catch (...) {
+            // Un receptor que falla no impide los demás avisos ni expone mensajes de excepciones ajenas.
+            std::fputs("Policy context retirement receiver failed.\n", stderr);
+        }
+    }
 }
 
 // Valida el conjunto y publica política, contexto y vigencia en un único estado inmutable.

@@ -1,4 +1,4 @@
-SECUREBROWSER — DEMOSTRACIÓN DE FILTRADO DE NAVEGACIÓN
+SECUREBROWSER — DEMOSTRACIÓN DE FILTRADO DE NAVEGACIÓN Y DESCARGAS
 
 Requisitos
 Windows de 64 bits. La comprobación manual de esta versión se realiza en
@@ -27,9 +27,12 @@ Comprobación del filtrado
    La navegación vuelve a estar permitida.
 
 Políticas incluidas
-Libre: filtrado de URL desactivado.
+Libre: filtrado de URL y control de extensiones de descarga desactivados.
 Restrictiva: lista de denegación para facebook.com, instagram.com,
 tiktok.com, x.com, youtube.com, twitch.tv y netflix.com, con sus subdominios.
+También activa el control de descargas y bloquea las extensiones exe y msi.
+El nombre sugerido bloqueado impide abrir Guardar como. Si se elige un nombre
+definitivo bloqueado en el diálogo, la descarga también se cancela con un aviso.
 El botón de inicio solicita https://example.com/ mediante el mismo filtro.
 
 Alcance
@@ -37,7 +40,10 @@ Las políticas y las identidades de esta demostración son locales y no
 representan una sesión autenticada del backend. La demo utiliza políticas
 sin caducidad. El modo conectado conserva su vigencia de 15 minutos y no
 obtiene automáticamente estas políticas locales.
-El control de descargas no forma parte de esta entrega.
+En ambos modos se valida el nombre del archivo y se exige una política válida.
+Cancelar Guardar como termina la solicitud sin mostrar un bloqueo de política.
+La ventana muestra un aviso no modal cuando la descarga se completa o falla.
+Una cancelación voluntaria no se presenta como un error.
 
 Diagnóstico y cierre
 Los registros se conservan en %LOCALAPPDATA%\SecureBrowser\Logs.

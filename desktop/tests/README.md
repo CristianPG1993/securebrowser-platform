@@ -14,6 +14,10 @@ documento y la copia portátil se recogen en el
 La [guía HTTP controlada](manual/url-filtering-demo/README.md) conserva el
 procedimiento para distinguir un bloqueo de un fallo de red.
 
+La [guía manual de Download Control y Qt](manual/download-control-demo/README.md)
+incluye un servidor local de archivos inertes para comprobar Guardar como,
+renombrado, cancelación, avisos y transferencias en curso con las políticas demo.
+
 ## Pruebas unitarias del Security Engine
 
 Estas pruebas requieren CMake 3.29 o posterior, MSVC 2022 x64 con el toolset
@@ -338,6 +342,24 @@ Requiere las mismas dependencias preparadas del núcleo y el SDK CEF, incluidos
 `Debug/bootstrapc.exe` y `Release/bootstrapc.exe`. No requiere Qt.
 `SBP_BUILD_CEF_TESTS` está desactivada por defecto y exige `BUILD_TESTING=ON`.
 
+Las fuentes de `tests/browser/` se agrupan por funcionalidad:
+
+| Carpeta | Contenido |
+| --- | --- |
+| [bootstrap](browser/bootstrap/) | Aplicación CEF de pruebas y entrada del ejecutable. |
+| [configuration](browser/configuration/) | Opciones de arranque y configuración de seguridad de CEF. |
+| [client](browser/client/) | Contratos y vida de los handlers compartidos por `BrowserClient`. |
+| [navigation](browser/navigation/) | Adaptador de URL, navegación, acciones, redirecciones y subframes. |
+| [policy_changes](browser/policy_changes/) | Cambios de política con documentos, historial, service workers y demo. |
+| [downloads](browser/downloads/) | Cliente y casos de descarga con callbacks reales de CEF. |
+| [support](browser/support/) | Servidor HTTP local compartido y sus pruebas. |
+
+Los clientes auxiliares se conservan junto a los casos de su funcionalidad.
+Los includes compartidos utilizan rutas como `browser/support/local_http_test_server.h`,
+resueltas mediante la raíz `tests` del target. El lanzador
+[run_cef_adapter_tests.cmake](browser/run_cef_adapter_tests.cmake) permanece en la raíz;
+se conservan el mismo target, los nombres de los casos y los comandos de ejecución.
+
 Configurar una carpeta independiente:
 
 ```powershell
@@ -357,17 +379,17 @@ ctest --test-dir desktop/build/cef-tests -C Release -R "^sbp_cef_adapter_tests$"
 ```
 
 CTest registra una batería llamada `sbp_cef_adapter_tests`, que ejecuta los
-24 casos parametrizados de [cef_url_adapter_test.cpp](browser/cef_url_adapter_test.cpp),
-dos casos de [security_request_handler_test.cpp](browser/security_request_handler_test.cpp)
-y dos de [browser_security_config_test.cpp](browser/browser_security_config_test.cpp)
-y tres casos de [browser_client_test.cpp](browser/browser_client_test.cpp),
-además de diez casos de [security_navigation_test.cpp](browser/security_navigation_test.cpp)
-y quince casos de [local_http_test_server_test.cpp](browser/local_http_test_server_test.cpp)
-y ocho de [history_policy_change_test.cpp](browser/history_policy_change_test.cpp)
-y dos de [service_worker_policy_change_test.cpp](browser/service_worker_policy_change_test.cpp)
-y quince de [redirect_navigation_test.cpp](browser/redirect_navigation_test.cpp)
-y diecinueve de [subframe_navigation_test.cpp](browser/subframe_navigation_test.cpp)
-y dieciséis de [navigation_action_test.cpp](browser/navigation_action_test.cpp)
+24 casos parametrizados de [cef_url_adapter_test.cpp](browser/navigation/cef_url_adapter_test.cpp),
+dos casos de [security_request_handler_test.cpp](browser/navigation/security_request_handler_test.cpp)
+y dos de [browser_security_config_test.cpp](browser/configuration/browser_security_config_test.cpp)
+y tres casos de [browser_client_test.cpp](browser/client/browser_client_test.cpp),
+además de diez casos de [security_navigation_test.cpp](browser/navigation/security_navigation_test.cpp)
+y quince casos de [local_http_test_server_test.cpp](browser/support/local_http_test_server_test.cpp)
+y ocho de [history_policy_change_test.cpp](browser/policy_changes/history_policy_change_test.cpp)
+y dos de [service_worker_policy_change_test.cpp](browser/policy_changes/service_worker_policy_change_test.cpp)
+y quince de [redirect_navigation_test.cpp](browser/navigation/redirect_navigation_test.cpp)
+y diecinueve de [subframe_navigation_test.cpp](browser/navigation/subframe_navigation_test.cpp)
+y dieciséis de [navigation_action_test.cpp](browser/navigation/navigation_action_test.cpp)
 en una sola sesión de CEF. El resumen de CTest muestra una prueba; GoogleTest
 informa de los 116 casos, validados en Debug y Release tras incorporar el aviso
 de decisión y el bloque representativo de cierre.
@@ -376,7 +398,7 @@ El XML se conserva en
 Los 275 casos del núcleo mantienen sus comandos y carpeta independientes.
 
 El bootstrap de consola carga la DLL de pruebas y llama a
-[cef_adapter_test_entry_win.cpp](browser/cef_adapter_test_entry_win.cpp).
+[cef_adapter_test_entry_win.cpp](browser/bootstrap/cef_adapter_test_entry_win.cpp).
 Se inicializa CEF con sandbox, sin crear QApplication. Los casos del adaptador
 y de propiedad de referencias no crean un navegador. Los casos de navegación
 crean un navegador nativo oculto por caso y esperan su cierre antes de continuar.
@@ -461,7 +483,7 @@ historial, caché y service workers de #117.
 
 ### Primera prueba con servidor HTTP local
 
-Se ha preparado [LocalHttpTestServer](browser/local_http_test_server.h), basado
+Se ha preparado [LocalHttpTestServer](browser/support/local_http_test_server.h), basado
 en `CefServer`, para escuchar únicamente en `127.0.0.1`. La
 [implementación fijada de CEF](https://github.com/chromiumembedded/cef/blob/4fa4ab516dacf6c49fc7e6e70d2b7ebce29fa35f/libcef/browser/server_impl.cc)
 permite solicitar el puerto cero y consultar después el puerto asignado mediante
@@ -486,7 +508,7 @@ las redirecciones siguen pendientes.
 ### Dominios y peticiones recibidas
 
 La batería incorpora 14 casos parametrizados adicionales para el servidor local.
-[CefAdapterTestApp](browser/cef_adapter_test_app.h) configura únicamente el
+[CefAdapterTestApp](browser/bootstrap/cef_adapter_test_app.h) configura únicamente el
 ejecutable de pruebas: `host-resolver-rules` dirige `*.sbp.test` a `127.0.0.1`
 y `no-proxy-server` evita enviar esos dominios al proxy del equipo. Esta
 [resolución controlada de Chromium](https://github.com/chromium/chromium/blob/156.0.8078.48/net/dns/mapped_host_resolver.h)
@@ -578,7 +600,7 @@ del bloque de service workers se describe a continuación.
 ### Navegación servida por un service worker tras actualizar la política
 
 Se han preparado dos casos en
-[service_worker_policy_change_test.cpp](browser/service_worker_policy_change_test.cpp).
+[service_worker_policy_change_test.cpp](browser/policy_changes/service_worker_policy_change_test.cpp).
 Cada caso utiliza el servidor local con un puerto asignado por el sistema y
 `http://localhost`, admitido como origen potencialmente confiable por la
 [especificación de contextos seguros](https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy).
@@ -593,7 +615,7 @@ escenario de la caché HTTP. Al atender una navegación al destino, el worker
 recupera esa entrada y transforma su título con una marca que el servidor
 no entrega directamente.
 
-[ServiceWorkerPolicyTestClient](browser/service_worker_policy_test_client.h)
+[ServiceWorkerPolicyTestClient](browser/policy_changes/service_worker_policy_test_client.h)
 publica después otra política en el mismo contexto y solicita la navegación.
 El control mantiene permitido `localhost` y exige callback real, HTTP 200,
 documento controlado por el worker y la marca de la respuesta de Cache Storage.
@@ -631,7 +653,7 @@ sin modificar los permisos de navegación ni las comprobaciones de la caché.
 ### Cadenas de redirección HTTP
 
 Se han preparado 15 casos en
-[redirect_navigation_test.cpp](browser/redirect_navigation_test.cpp): los códigos
+[redirect_navigation_test.cpp](browser/navigation/redirect_navigation_test.cpp): los códigos
 `301`, `302`, `303`, `307` y `308`, combinados con permiso completo, bloqueo del
 dominio intermedio y bloqueo del destino final. Todos utilizan navegación GET
 del frame principal y el servidor de loopback, sin contenido externo.
@@ -647,7 +669,7 @@ las dos rutas de redirección y la del documento final:
 | Denegar el intermedio | 1 | 0 | 0 |
 | Denegar el destino final | 1 | 1 | 0 |
 
-[RedirectNavigationTestClient](browser/redirect_navigation_test_client.h)
+[RedirectNavigationTestClient](browser/navigation/redirect_navigation_test_client.h)
 delega `OnBeforeBrowse` en el handler de producción y devuelve su decisión real.
 El resultado esperado no cancela por sí mismo las peticiones. El cliente observa
 también `GetResourceRequestHandler`, `OnBeforeResourceLoad`, `OnResourceRedirect`
@@ -692,7 +714,7 @@ POST, TLS o cambios de política entre saltos.
 ### Navegación de subframes
 
 Se han preparado 18 casos en
-[subframe_navigation_test.cpp](browser/subframe_navigation_test.cpp): cuatro
+[subframe_navigation_test.cpp](browser/navigation/subframe_navigation_test.cpp): cuatro
 navegaciones HTTP directas con permisos y bloqueos en denylist y allowlist,
 diez cadenas de dos redirecciones para `301`, `302`, `303`, `307` y `308`, y
 cuatro controles de `about:blank` y `about:srcdoc` con ambos modos.
