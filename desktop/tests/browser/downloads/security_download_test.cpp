@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -407,6 +409,9 @@ struct DownloadPolicyChangeCase {
     DownloadControlConfig initialConfig;
     DownloadControlConfig updatedConfig;
     std::optional<SecurityReason> blockReason;
+    // El reloj avanza después de publicar la política y antes de responder al diálogo.
+    std::chrono::seconds elapsedBeforeReply{0};
+    PolicyManager::Validity validity = PolicyManager::Validity::FifteenMinutes;
 };
 
 // Solo UI CEF modifica estas observaciones; Run sincroniza su lectura posterior desde GoogleTest.
@@ -427,10 +432,16 @@ std::string DownloadPolicyChangeTest::CaseName(
     return info.param.name;
 }
 
-// La confirmación del diálogo debe consultar la política nueva, conservando el contexto de la petición.
+// La confirmación consulta la política nueva y su vigencia, conservando el contexto de la petición.
 TEST_P(DownloadPolicyChangeTest, UsesLatestPolicyWhenPendingDialogReturnsDestination) {
     const auto& testCase = GetParam();
-    const auto manager = std::make_shared<PolicyManager>();
+    // El contador es compartido y atómico porque el gestor puede consultar el reloj desde distintos hilos.
+    const auto clockSeconds = std::make_shared<std::atomic<std::int64_t>>(0);
+    // Devuelve un instante monotónico simulado; la vigencia no depende del tiempo real que tarde CEF.
+    const auto manager = std::make_shared<PolicyManager>([clockSeconds] {
+        return PolicyManager::Clock::time_point{std::chrono::duration_cast<PolicyManager::Clock::duration>(
+            std::chrono::seconds{clockSeconds->load()})};
+    }, testCase.validity);
     const auto context = manager->BeginContext(10, 20);
     ASSERT_TRUE(context.has_value());
     const PolicySnapshot::Timestamp timestamp{};
@@ -452,7 +463,8 @@ TEST_P(DownloadPolicyChangeTest, UsesLatestPolicyWhenPendingDialogReturnsDestina
 
     // Conserva la respuesta hasta otra tarea UI CEF, sin capturar el test ni usar esperas temporizadas.
     SecurityDownloadHandler::RequestSaveDialogCallback onRequestSaveDialog =
-        [manager, context = *context, updatedPolicy, observations, destinationPath](
+        [manager, context = *context, updatedPolicy, observations, destinationPath, clockSeconds,
+         elapsedBeforeReply = testCase.elapsedBeforeReply](
             std::uint64_t operationId, std::string suggestedName,
             SecurityDownloadHandler::SaveDialogResultCallback onResult) {
             ++observations->download.destinationRequests;
@@ -463,14 +475,18 @@ TEST_P(DownloadPolicyChangeTest, UsesLatestPolicyWhenPendingDialogReturnsDestina
             const bool queued = CefPostTask(TID_UI, base::BindOnce(
                 [](std::shared_ptr<PolicyManager> policyManager, SecurityContext originalContext,
                    PolicySnapshot policy, std::shared_ptr<DownloadPolicyChangeObservations> state,
-                   std::string path, SecurityDownloadHandler::SaveDialogResultCallback reply) {
+                   std::string path, SecurityDownloadHandler::SaveDialogResultCallback reply,
+                   std::shared_ptr<std::atomic<std::int64_t>> elapsedSeconds, std::chrono::seconds elapsed) {
                     state->publicationResult = policyManager->PublishPolicy(originalContext, std::move(policy));
                     if (*state->publicationResult != PolicyPublicationResult::Published) {
                         reply(std::nullopt);
                         return;
                     }
+                    // La política se validó en el instante cero; avanzar el reloj no renueva su vigencia.
+                    elapsedSeconds->store(elapsed.count());
                     reply(std::move(path));
-                }, manager, context, updatedPolicy, observations, destinationPath, onResult));
+                }, manager, context, updatedPolicy, observations, destinationPath, onResult,
+                   clockSeconds, elapsedBeforeReply));
             observations->responseQueued = queued;
             if (!queued) {
                 onResult(std::nullopt);
@@ -515,6 +531,11 @@ TEST_P(DownloadPolicyChangeTest, UsesLatestPolicyWhenPendingDialogReturnsDestina
     EXPECT_EQ(*context, state->context);
     ASSERT_TRUE(state->policy);
     EXPECT_EQ(2, state->policy->Id());
+    ASSERT_TRUE(state->validatedAt.has_value());
+    EXPECT_EQ(PolicyManager::Clock::time_point{}, *state->validatedAt);
+    const auto expectedAvailability = testCase.blockReason == SecurityReason::PolicyExpired
+        ? PolicyAvailability::Expired : PolicyAvailability::Available;
+    EXPECT_EQ(expectedAvailability, manager->ReadPolicy(*context).availability);
 
     std::error_code error;
     const bool finalFileExists = std::filesystem::exists(destination_, error);
@@ -568,7 +589,37 @@ INSTANTIATE_TEST_SUITE_P(
         // Omitir CanDownload tampoco impide aplicar una política nueva que autoriza el destino elegido.
         DownloadPolicyChangeCase{"StartDownloadAllowsDestinationAfterPolicyUpdate", DownloadTestTrigger::StartDownload,
             "saved.txt", DownloadControlConfig(true, FilterMode::Denylist, {"txt"}),
-            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), std::nullopt}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), std::nullopt},
+        // Un segundo antes del límite, el PDF elegido todavía puede autorizarse.
+        DownloadPolicyChangeCase{"LinkAllowsBeforePolicyExpiry", DownloadTestTrigger::Link, "saved.pdf",
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), std::nullopt,
+            std::chrono::seconds{899}},
+        // Al alcanzar exactamente 15 minutos, confirmar el diálogo debe cancelar por PolicyExpired.
+        DownloadPolicyChangeCase{"LinkBlocksAtPolicyExpiry", DownloadTestTrigger::Link, "saved.pdf",
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), SecurityReason::PolicyExpired,
+            std::chrono::minutes{15}},
+        // La vigencia ilimitada utilizada por la demo permite confirmar incluso un día después.
+        DownloadPolicyChangeCase{"LinkAllowsUnlimitedPolicyAfterOneDay", DownloadTestTrigger::Link, "saved.pdf",
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), std::nullopt,
+            std::chrono::hours{24}, PolicyManager::Validity::Unlimited},
+        // StartDownload conserva la autorización justo antes de que termine el plazo.
+        DownloadPolicyChangeCase{"StartDownloadAllowsBeforePolicyExpiry", DownloadTestTrigger::StartDownload,
+            "saved.pdf", DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), std::nullopt,
+            std::chrono::seconds{899}},
+        // Omitir CanDownload tampoco permite confirmar una política que acaba de caducar.
+        DownloadPolicyChangeCase{"StartDownloadBlocksAtPolicyExpiry", DownloadTestTrigger::StartDownload,
+            "saved.pdf", DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), SecurityReason::PolicyExpired,
+            std::chrono::minutes{15}},
+        // La excepción explícita de vigencia ilimitada también se mantiene con StartDownload.
+        DownloadPolicyChangeCase{"StartDownloadAllowsUnlimitedPolicyAfterOneDay", DownloadTestTrigger::StartDownload,
+            "saved.pdf", DownloadControlConfig(true, FilterMode::Denylist, {"exe"}),
+            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), std::nullopt,
+            std::chrono::hours{24}, PolicyManager::Validity::Unlimited}),
     DownloadPolicyChangeTest::CaseName);
 
 }  // namespace sbp
