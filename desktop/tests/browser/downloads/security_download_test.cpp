@@ -622,4 +622,204 @@ INSTANTIATE_TEST_SUITE_P(
             std::chrono::hours{24}, PolicyManager::Validity::Unlimited}),
     DownloadPolicyChangeTest::CaseName);
 
+// Reiniciar la misma instalación también crea otra generación de contexto.
+enum class DownloadContextChange { EndContext, RestartSameInstallation, SwitchInstallation };
+
+struct DownloadContextChangeCase {
+    const char* name;
+    DownloadTestTrigger trigger;
+    DownloadContextChange change;
+};
+
+// Las copias permiten comprobar el contexto nuevo sin trasladar la descarga a él.
+struct DownloadContextChangeObservations {
+    DownloadTestObservations download;
+    bool responseQueued = false;
+    bool contextEnded = false;
+    std::optional<SecurityContext> replacementContext;
+    std::optional<PolicyPublicationResult> publicationResult;
+    std::vector<std::uint64_t> closeRequests;
+};
+
+class DownloadContextChangeTest : public DownloadTestBase,
+                                  public ::testing::WithParamInterface<DownloadContextChangeCase> {
+public:
+    static std::string CaseName(const ::testing::TestParamInfo<DownloadContextChangeCase>& info);
+};
+
+std::string DownloadContextChangeTest::CaseName(
+    const ::testing::TestParamInfo<DownloadContextChangeCase>& info) {
+    return info.param.name;
+}
+
+// Una respuesta al diálogo no puede autorizar una descarga cuyo contexto original ya se retiró.
+TEST_P(DownloadContextChangeTest, CancelsOriginalDownloadWhenPendingDialogOutlivesContext) {
+    const auto& testCase = GetParam();
+    const auto manager = std::make_shared<PolicyManager>();
+    const auto context = manager->BeginContext(10, 20);
+    ASSERT_TRUE(context.has_value());
+    const PolicySnapshot::Timestamp timestamp{};
+    const PolicySnapshot policy(
+        1, 20, "Original download context policy",
+        UrlFilteringConfig(false, FilterMode::Denylist, {}),
+        DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), timestamp, timestamp);
+    ASSERT_EQ(PolicyPublicationResult::Published, manager->PublishPolicy(*context, policy));
+
+    const std::u8string utf8Destination = destination_.u8string();
+    const std::string destinationPath(utf8Destination.begin(), utf8Destination.end());
+    const auto observations = std::make_shared<DownloadContextChangeObservations>();
+
+    // La tarea conserva la respuesta y retira el contexto después de que se haya solicitado el diálogo.
+    SecurityDownloadHandler::RequestSaveDialogCallback onRequestSaveDialog =
+        [manager, context = *context, observations, destinationPath, change = testCase.change](
+            std::uint64_t operationId, std::string suggestedName,
+            SecurityDownloadHandler::SaveDialogResultCallback onResult) {
+            ++observations->download.destinationRequests;
+            observations->download.destinationOperationId = operationId;
+            observations->download.requestedName = std::move(suggestedName);
+
+            // BindOnce recibe los datos por valor; ningún callback conserva referencias al test.
+            const bool queued = CefPostTask(TID_UI, base::BindOnce(
+                [](std::shared_ptr<PolicyManager> policyManager, SecurityContext originalContext,
+                   std::shared_ptr<DownloadContextChangeObservations> state, DownloadContextChange change,
+                   std::string path, SecurityDownloadHandler::SaveDialogResultCallback reply) {
+                    state->contextEnded = policyManager->EndContext(originalContext);
+                    if (!state->contextEnded) {
+                        reply(std::nullopt);
+                        return;
+                    }
+                    if (change != DownloadContextChange::EndContext) {
+                        const bool sameInstallation = change == DownloadContextChange::RestartSameInstallation;
+                        state->replacementContext = policyManager->BeginContext(
+                            sameInstallation ? 10 : 11, sameInstallation ? 20 : 21);
+                        if (!state->replacementContext.has_value()) {
+                            reply(std::nullopt);
+                            return;
+                        }
+
+                        // El contexto nuevo tiene una política válida que permitiría el PDF, pero no su origen antiguo.
+                        const PolicySnapshot::Timestamp timestamp{};
+                        const PolicySnapshot replacementPolicy(
+                            2, state->replacementContext->CompanyId(), "Replacement download context policy",
+                            UrlFilteringConfig(false, FilterMode::Denylist, {}),
+                            DownloadControlConfig(true, FilterMode::Denylist, {"exe"}), timestamp, timestamp);
+                        state->publicationResult = policyManager->PublishPolicy(
+                            *state->replacementContext, replacementPolicy);
+                        if (*state->publicationResult != PolicyPublicationResult::Published) {
+                            reply(std::nullopt);
+                            return;
+                        }
+                    }
+                    // Entrega un destino válido: debe rechazarse por el contexto, no por cancelar el diálogo.
+                    reply(std::move(path));
+                }, manager, context, observations, change, destinationPath, onResult));
+            observations->responseQueued = queued;
+            if (!queued) {
+                onResult(std::nullopt);
+            }
+            return queued;
+        };
+    // Registra la petición real de retirar el diálogo, identificada con la operación original.
+    SecurityDownloadHandler::RequestCloseSaveDialogCallback onRequestCloseSaveDialog =
+        [observations](std::uint64_t operationId) {
+            observations->closeRequests.push_back(operationId);
+        };
+    // El contexto nuevo no debe aparecer en el aviso de la descarga original ni causar avisos duplicados.
+    SecurityDownloadHandler::DecisionCallback onDecision =
+        [observations](const DownloadDecisionNotice& notice) {
+            observations->download.notices.push_back(notice);
+            return true;
+        };
+    CefRefPtr<SecurityDownloadHandler> handler = new SecurityDownloadHandler(
+        manager, std::move(onRequestSaveDialog), std::move(onRequestCloseSaveDialog), std::move(onDecision));
+    CefRefPtr<DownloadTestClient> client = new DownloadTestClient(
+        handler, server_->Origin() + "/download/page", server_->Origin() + "/download/allowed.exe",
+        testCase.trigger);
+    const auto result = client->Run();
+
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_TRUE(result.browserCreated);
+    ASSERT_TRUE(result.browserClosed);
+    EXPECT_FALSE(result.rejectedByCanDownload);
+    if (testCase.trigger == DownloadTestTrigger::StartDownload) {
+        EXPECT_EQ(0U, result.canDownloadCalls);
+    } else {
+        EXPECT_GT(result.canDownloadCalls, 0U);
+    }
+    EXPECT_EQ(1U, result.beforeDownloadCalls);
+    EXPECT_GT(result.downloadUpdateCalls, 0U);
+    ASSERT_TRUE(result.downloadId.has_value());
+    EXPECT_EQ("informe.pdf", result.suggestedName);
+    ASSERT_EQ(1U, observations->download.destinationRequests);
+    EXPECT_EQ("informe.pdf", observations->download.requestedName);
+    ASSERT_TRUE(observations->download.destinationOperationId.has_value());
+    EXPECT_GT(*observations->download.destinationOperationId, 0U);
+    ASSERT_TRUE(observations->responseQueued);
+    ASSERT_TRUE(observations->contextEnded);
+    EXPECT_FALSE(manager->IsCurrentContext(*context));
+    EXPECT_EQ(PolicyAvailability::InvalidContext, manager->ReadPolicy(*context).availability);
+
+    const auto state = manager->ReadState();
+    if (testCase.change == DownloadContextChange::EndContext) {
+        EXPECT_FALSE(state);
+        EXPECT_FALSE(observations->replacementContext.has_value());
+        EXPECT_FALSE(observations->publicationResult.has_value());
+    } else {
+        ASSERT_TRUE(observations->replacementContext.has_value());
+        EXPECT_NE(*context, *observations->replacementContext);
+        ASSERT_TRUE(observations->publicationResult.has_value());
+        EXPECT_EQ(PolicyPublicationResult::Published, *observations->publicationResult);
+        ASSERT_TRUE(state);
+        EXPECT_EQ(*observations->replacementContext, state->context);
+        const bool sameInstallation = testCase.change == DownloadContextChange::RestartSameInstallation;
+        EXPECT_EQ(sameInstallation ? 10 : 11, state->context.DeviceId());
+        EXPECT_EQ(sameInstallation ? 20 : 21, state->context.CompanyId());
+        ASSERT_TRUE(state->policy);
+        EXPECT_EQ(2, state->policy->Id());
+        EXPECT_EQ(PolicyAvailability::Available, manager->ReadPolicy(state->context).availability);
+    }
+
+    EXPECT_FALSE(result.completed);
+    EXPECT_TRUE(result.canceled);
+    std::error_code error;
+    const bool finalFileExists = std::filesystem::exists(destination_, error);
+    ASSERT_FALSE(error) << error.message();
+    EXPECT_FALSE(finalFileExists);
+    ASSERT_EQ(1U, observations->closeRequests.size());
+    EXPECT_EQ(*observations->download.destinationOperationId, observations->closeRequests.front());
+    ASSERT_EQ(1U, observations->download.notices.size());
+    const auto& notice = observations->download.notices.front();
+    EXPECT_EQ(*observations->download.destinationOperationId, notice.operationId);
+    EXPECT_GT(notice.browserId, 0);
+    EXPECT_EQ(result.downloadId, notice.downloadId);
+    EXPECT_EQ(SecurityReason::InvalidContext, notice.decision.Reason());
+    ASSERT_TRUE(notice.context.has_value());
+    EXPECT_EQ(*context, *notice.context);
+    EXPECT_FALSE(notice.policyId.has_value());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PendingContext,
+    DownloadContextChangeTest,
+    ::testing::Values(
+        // Cerrar el contexto durante el diálogo impide continuar la descarga del enlace.
+        DownloadContextChangeCase{"LinkBlocksAfterContextEnds", DownloadTestTrigger::Link,
+            DownloadContextChange::EndContext},
+        // Los mismos IDs con otra generación no recuperan el permiso de la petición anterior.
+        DownloadContextChangeCase{"LinkBlocksAfterSameInstallationRestarts", DownloadTestTrigger::Link,
+            DownloadContextChange::RestartSameInstallation},
+        // Una política válida de otra instalación tampoco puede autorizar el destino pendiente.
+        DownloadContextChangeCase{"LinkBlocksAfterInstallationChanges", DownloadTestTrigger::Link,
+            DownloadContextChange::SwitchInstallation},
+        // StartDownload debe conservar la guarda de origen cuando se cierra el contexto.
+        DownloadContextChangeCase{"StartDownloadBlocksAfterContextEnds", DownloadTestTrigger::StartDownload,
+            DownloadContextChange::EndContext},
+        // El reinicio de la misma instalación también invalida una solicitud iniciada por StartDownload.
+        DownloadContextChangeCase{"StartDownloadBlocksAfterSameInstallationRestarts", DownloadTestTrigger::StartDownload,
+            DownloadContextChange::RestartSameInstallation},
+        // Cambiar de instalación no traslada la descarga programática a la nueva política.
+        DownloadContextChangeCase{"StartDownloadBlocksAfterInstallationChanges", DownloadTestTrigger::StartDownload,
+            DownloadContextChange::SwitchInstallation}),
+    DownloadContextChangeTest::CaseName);
+
 }  // namespace sbp
