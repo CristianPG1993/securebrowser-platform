@@ -38,7 +38,8 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
       block_panel_(&window),
       block_layout_(&block_panel_),
       block_message_(&block_panel_),
-      block_home_button_(&block_panel_) {
+      block_home_button_(&block_panel_),
+      download_result_message_(&window) {
     // Aquí se configura el aspecto inicial de la ventana y la distribución de sus controles.
     window.setWindowTitle("SecureBrowser");
     window.resize(1024, 768);
@@ -97,10 +98,12 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     navigation_layout_.addWidget(&address_input_, 1);
     ConfigureStatusPanel();
     ConfigureNavigationBlockPanel();
+    ConfigureDownloadResultPanel();
     // El navegador ocupa el espacio restante y el panel queda debajo, sin superponer contenido.
     window_layout_.addLayout(&navigation_layout_);
     window_layout_.addWidget(&browser_host_, 1);
     window_layout_.addWidget(&block_panel_);
+    window_layout_.addWidget(&download_result_message_);
     window_layout_.addWidget(&status_panel_);
 }
 
@@ -160,6 +163,25 @@ void BrowserWindowUi::ConfigureNavigationBlockPanel() {
     block_panel_.hide();
 }
 
+void BrowserWindowUi::ConfigureDownloadResultPanel() {
+    download_result_message_.setObjectName("download_result_message");
+    download_result_message_.setAccessibleName(QStringLiteral("Resultado de la descarga"));
+    download_result_message_.setTextFormat(Qt::PlainText);
+    download_result_message_.setWordWrap(true);
+    download_result_message_.setMargin(8);
+    download_result_message_.hide();
+}
+
+void BrowserWindowUi::ShowDownloadResult(const QString& message) {
+    download_result_message_.setText(message);
+    download_result_message_.show();
+}
+
+void BrowserWindowUi::ClearDownloadResult() {
+    download_result_message_.clear();
+    download_result_message_.hide();
+}
+
 void BrowserWindowUi::ShowNavigationBlock(const QString& message) {
     // La sesión solo llama desde Qt, después de recibir el aviso de bloqueo aplicado por CEF.
     block_message_.setText(message);
@@ -174,6 +196,7 @@ void BrowserWindowUi::ClearNavigationBlock() {
 
 void BrowserWindowUi::ShowDownloadBlock(const QString& message) {
     // La sesión solo llama desde Qt, después de recibir el aviso de bloqueo de descarga aplicado por CEF.
+    ClearDownloadResult();
     block_message_.setText(message);
     block_panel_.show();
 }
@@ -300,6 +323,8 @@ void BrowserWindowUi::ShowDownloadSaveDialog(
         return;
     }
 
+    // Una solicitud nueva retira el resultado anterior; Cancelar no se presenta como un fallo.
+    ClearDownloadResult();
     // La ventana posee el diálogo; open permite responder por señal sin ejecutar un bucle modal anidado.
     auto* dialog = new QFileDialog(address_input_.window(), QStringLiteral("Guardar descarga"));
     dialog->setAcceptMode(QFileDialog::AcceptSave);

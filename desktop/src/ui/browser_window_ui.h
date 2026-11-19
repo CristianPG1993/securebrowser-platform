@@ -62,6 +62,10 @@ public:
     // Solo presenta el motivo; no evalúa reglas ni ofrece reanudar la descarga cancelada.
     void ShowDownloadBlock(const QString& message);
 
+    // Resultado no modal, independiente del panel de bloqueos; no decide permisos ni reintenta la descarga.
+    void ShowDownloadResult(const QString& message);
+    void ClearDownloadResult();
+
     // Retira el aviso cuando la sesión determina que ya no corresponde al estado mostrado.
     void ClearNavigationBlock();
 
@@ -123,6 +127,9 @@ private:
     void ConfigureNavigationBlockPanel();
     // Conecta «Ir a inicio» con RequestHome, igual que el botón de la barra.
     void ConnectBlockHomeButton();
+
+    // Prepara un mensaje de resultado que no sustituye los avisos de navegación o descarga bloqueadas.
+    void ConfigureDownloadResultPanel();
 
     // Conecta la elección del usuario con una solicitud a la sesión.
     void ConnectPolicySelector();
@@ -189,6 +196,9 @@ private:
     QHBoxLayout block_layout_;
     QLabel block_message_;
     QPushButton block_home_button_;
+
+    // Último resultado operativo; solo se modifica desde Qt y se limpia al solicitar un destino nuevo.
+    QLabel download_result_message_;
 
     // Recibe un índice de presentación; la sesión decide qué snapshot construir y publicar.
     std::function<void(int)> on_policy_selected_;

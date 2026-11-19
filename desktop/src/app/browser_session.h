@@ -75,6 +75,10 @@ private:
     SecurityDownloadHandler::DecisionCallback MakeDownloadDecisionHandler(
         BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager);
 
+    // Encola resultados operativos para Qt sin ligarlos a una versión concreta de la política.
+    SecurityDownloadHandler::ResultCallback MakeDownloadResultHandler(
+        BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager);
+
     // Descarta avisos obsoletos y presenta el bloqueo en Qt, sin reevaluar permisos de navegación.
     void OnNavigationDecision(const NavigationDecisionNotice& notice, const PolicyManager& manager);
 
@@ -86,6 +90,10 @@ private:
 
     // Traduce los motivos de descarga a texto, sin incluir rutas locales ni nombres recibidos de CEF.
     static QString DownloadBlockMessage(const DownloadDecisionNotice& notice, const QString& policy_name);
+
+    // Presenta el resultado solo si aún pertenece al contexto actual y la ventana sigue abierta.
+    void OnDownloadResult(const DownloadResultNotice& notice, const PolicyManager& manager);
+    static QString DownloadResultMessage(DownloadOutcome outcome);
 
     // Copia de los argumentos validados: modo de ejecución y selección inicial de política.
     // La política publicada se consulta en PolicyManager; el modo queda fijado durante toda la sesión.

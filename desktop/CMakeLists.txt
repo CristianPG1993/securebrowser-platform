@@ -348,6 +348,7 @@ if(SBP_BUILD_CEF_TESTS)
         src/browser/security_download_handler.h
         src/browser/security_download_handler.cpp
         src/browser/download_decision_notice.h
+        src/browser/download_result_notice.h
         src/browser/security_request_handler.h
         src/browser/navigation_decision_notice.h
         src/browser/security_request_handler.cpp
@@ -428,6 +429,7 @@ add_library(SecureBrowser SHARED
     src/browser/security_download_handler.cpp
     src/browser/security_download_handler.h
     src/browser/download_decision_notice.h
+    src/browser/download_result_notice.h
     src/browser/security_request_handler.cpp
     src/browser/security_request_handler.h
     src/browser/navigation_decision_notice.h

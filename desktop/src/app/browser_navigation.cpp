@@ -227,6 +227,8 @@ std::function<void()> BrowserNavigation::MakeMainDocumentStartedHandler(
                 return;
             }
             window_ui->ClearNavigationBlock();
+            // Una página nueva o recargada retira también el resultado de la descarga anterior.
+            window_ui->ClearDownloadResult();
         }, Qt::QueuedConnection);
         if (!queued) {
             std::fputs("CEF main document notification could not be queued to Qt.\n", stderr);

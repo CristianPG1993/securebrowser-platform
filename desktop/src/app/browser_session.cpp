@@ -166,7 +166,7 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Todavía no se abre ningún diálogo; CEF invocará esta función al solicitar un destino permitido.
         CefRefPtr<SecurityDownloadHandler> download_handler = new SecurityDownloadHandler(
             policy_manager, MakeSaveDialogRequestHandler(window), MakeSaveDialogCloseHandler(window),
-            MakeDownloadDecisionHandler(window, policy_manager));
+            MakeDownloadDecisionHandler(window, policy_manager), MakeDownloadResultHandler(window, policy_manager));
         // Paso 5: browser_client es el cliente que entregamos a CEF para crear y manejar el navegador.
         // Recibe creación, carga, historial y cierre; entrega a CEF los handlers de navegación y descarga.
         // MakeCallbacks agrupa los avisos de navegación; MakeClientCallbacks añade creación y cierre.
@@ -323,6 +323,21 @@ SecurityDownloadHandler::DecisionCallback BrowserSession::MakeDownloadDecisionHa
     };
 }
 
+// El resultado pertenece al contexto, no al snapshot que estaba activo antes de terminar la transferencia.
+SecurityDownloadHandler::ResultCallback BrowserSession::MakeDownloadResultHandler(
+    BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager) {
+    // CEF entrega una copia propia; solo la tarea interior consulta el cierre y los controles de Qt.
+    return [this, &window, manager](const DownloadResultNotice& notice) {
+        if (!manager) {
+            return false;
+        }
+        // Cambiar las reglas no invalida el resultado de una transferencia ya autorizada en este contexto.
+        return QMetaObject::invokeMethod(&window, [this, manager, notice] {
+            OnDownloadResult(notice, *manager);
+        }, Qt::QueuedConnection);
+    };
+}
+
 void BrowserSession::OnNavigationDecision(const NavigationDecisionNotice& notice, const PolicyManager& manager) {
     if (lifecycle_.CloseRequested() || window_ui_ == nullptr
         || notice.operationId <= last_notice_operation_id_
@@ -396,6 +411,41 @@ void BrowserSession::OnDownloadDecision(const DownloadDecisionNotice& notice, co
     window_ui_->ShowDownloadBlock(DownloadBlockMessage(notice, policy_name));
     std::fprintf(stderr, "Qt download block notice shown; operation_id: %llu.\n",
                  static_cast<unsigned long long>(notice.operationId));
+}
+
+// Un resultado antiguo no se presenta en otra sesión ni durante el cierre de la ventana.
+void BrowserSession::OnDownloadResult(const DownloadResultNotice& notice, const PolicyManager& manager) {
+    if (lifecycle_.CloseRequested() || window_ui_ == nullptr || notice.operationId == 0
+        || !notice.context.has_value() || !manager.IsCurrentContext(*notice.context)) {
+        return;
+    }
+    window_ui_->ShowDownloadResult(DownloadResultMessage(notice.outcome));
+}
+
+// Traduce categorías operativas sin mostrar códigos nativos, rutas ni decisiones de política.
+QString BrowserSession::DownloadResultMessage(DownloadOutcome outcome) {
+    switch (outcome) {
+    case DownloadOutcome::Completed:
+        return QStringLiteral("Descarga completada.");
+    case DownloadOutcome::DialogFailed:
+        return QStringLiteral("No se pudo abrir el diálogo para elegir el destino de la descarga.");
+    case DownloadOutcome::DestinationFailed:
+        return QStringLiteral("No se pudo utilizar el destino seleccionado para la descarga.");
+    case DownloadOutcome::FileFailed:
+        return QStringLiteral("No se pudo guardar el archivo en el destino seleccionado.");
+    case DownloadOutcome::FileAccessDenied:
+        return QStringLiteral("No se pudo guardar el archivo: acceso denegado al destino.");
+    case DownloadOutcome::FileNoSpace:
+        return QStringLiteral("No hay espacio suficiente para guardar la descarga.");
+    case DownloadOutcome::FileBlocked:
+        return QStringLiteral("El sistema impidió guardar el archivo descargado.");
+    case DownloadOutcome::NetworkFailed:
+        return QStringLiteral("La descarga se interrumpió por un error de red.");
+    case DownloadOutcome::ServerFailed:
+        return QStringLiteral("El servidor no pudo completar la descarga.");
+    default:
+        return QStringLiteral("No se pudo completar la descarga.");
+    }
 }
 
 QString BrowserSession::NavigationBlockMessage(const NavigationDecisionNotice& notice, const QString& policy_name) {

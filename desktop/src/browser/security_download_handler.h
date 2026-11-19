@@ -1,6 +1,7 @@
 #pragma once
 
 #include "browser/download_decision_notice.h"
+#include "browser/download_result_notice.h"
 #include "security/download_policy.h"
 #include "security/policy_manager.h"
 #include "security/security_context.h"
@@ -41,6 +42,10 @@ public:
     // true confirma la aceptación del aviso, sin autorizar ni reanudar la descarga bloqueada.
     using DecisionCallback = std::function<bool(const DownloadDecisionNotice&)>;
 
+    // Recibe en UI CEF una finalización o fallo; el receptor copia el aviso y lo encola para Qt.
+    // No se utiliza para bloqueos de política ni cancelaciones voluntarias.
+    using ResultCallback = std::function<bool(const DownloadResultNotice&)>;
+
     // Comparte el gestor existente y lo mantiene vivo mientras el handler lo utiliza.
     // Consultará la política vigente, sin conservar una copia fija de sus reglas.
     // El receptor encolará las peticiones de guardado para Qt desde el hilo UI de CEF.
@@ -49,7 +54,8 @@ public:
         std::shared_ptr<PolicyManager> policyManager,
         RequestSaveDialogCallback onRequestSaveDialog = {},
         RequestCloseSaveDialogCallback onRequestCloseSaveDialog = {},
-        DecisionCallback onDecision = {});
+        DecisionCallback onDecision = {},
+        ResultCallback onDownloadResult = {});
 
     // Las referencias CefRefPtr comparten el handler; el objeto no se copia.
     SecurityDownloadHandler(const SecurityDownloadHandler&) = delete;
@@ -132,6 +138,9 @@ private:
 
         // Empieza sin autorización; se actualizará al continuar o solicitar la cancelación.
         DownloadPhase phase = DownloadPhase::AwaitingAuthorization;
+
+        // Evita repetir el resultado cuando CEF comunica varias actualizaciones del mismo fallo.
+        bool resultReported = false;
     };
 
     // Asigna un identificador nuevo desde el hilo UI de CEF, sin reutilizar los anteriores.
@@ -158,6 +167,17 @@ private:
     // state corresponde a la evaluación aplicada; no se atribuirá la política de otro contexto al bloqueo.
     void BlockDownload(DownloadKey key, SecurityReason reason,
                        const std::shared_ptr<const PolicyManager::State>& state);
+
+    // Copia y consume el resultado antes de cancelar o retirar entradas; nunca publica otro contexto.
+    [[nodiscard]] std::optional<DownloadResultNotice> TakeResultNotice(DownloadKey key, DownloadOutcome outcome);
+    // Cancela por un fallo operativo y entrega su resultado una sola vez, sin emitir un bloqueo de política.
+    void FailDownload(DownloadKey key, DownloadOutcome outcome);
+    // Atiende interrupciones recibidas antes o después de elegir destino, manteniendo silencioso Cancelar.
+    void HandleInterruptedDownload(DownloadKey key, cef_download_interrupt_reason_t reason);
+    // La entrega no modifica la descarga; una excepción del receptor no atraviesa los callbacks de CEF.
+    void NotifyResult(const DownloadResultNotice& notice);
+    // Traduce códigos nativos a categorías propias; Qt no necesita depender de CefDownloadItem.
+    [[nodiscard]] static DownloadOutcome InterruptionOutcome(cef_download_interrupt_reason_t reason);
 
     // Extrae el nombre de una ruta absoluta UTF-8 sin acceder al disco ni modificar el destino.
     // Devuelve nullopt si la ruta no puede interpretarse, no es absoluta o no contiene un nombre.
@@ -187,6 +207,9 @@ private:
 
     // Se fija al construir el handler y recibe solo bloqueos; cancelar voluntariamente no genera este aviso.
     const DecisionCallback onDecision_;
+
+    // Opcional para los clientes sin UI; no conserva widgets ni callbacks nativos de descarga.
+    const ResultCallback onDownloadResult_;
 
     // Reutiliza el evaluador puro para los nombres sugerido y definitivo, sin duplicar sus reglas.
     DownloadPolicy downloadPolicy_;

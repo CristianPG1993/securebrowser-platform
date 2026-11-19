@@ -22,11 +22,13 @@ std::uint64_t SecurityDownloadHandler::lastOperationId_ = 0;
 SecurityDownloadHandler::SecurityDownloadHandler(std::shared_ptr<PolicyManager> policyManager,
                                                  RequestSaveDialogCallback onRequestSaveDialog,
                                                  RequestCloseSaveDialogCallback onRequestCloseSaveDialog,
-                                                 DecisionCallback onDecision)
+                                                 DecisionCallback onDecision,
+                                                 ResultCallback onDownloadResult)
     : policyManager_(std::move(policyManager)),
       onRequestSaveDialog_(std::move(onRequestSaveDialog)),
       onRequestCloseSaveDialog_(std::move(onRequestCloseSaveDialog)),
-      onDecision_(std::move(onDecision)) {
+      onDecision_(std::move(onDecision)),
+      onDownloadResult_(std::move(onDownloadResult)) {
     if (!policyManager_) {
         throw std::invalid_argument("SecurityDownloadHandler requires a policy manager.");
     }
@@ -105,10 +107,18 @@ bool SecurityDownloadHandler::OnBeforeDownload(CefRefPtr<CefBrowser> browser,
         return true;
     }
 
+    // Un reintento automático puede figurar en progreso y conservar el motivo del fallo anterior.
+    // El MVP cancela las interrupciones: comunica ese motivo antes de que Cancel lo sustituya.
+    const auto interruptionReason = downloadItem->GetInterruptReason();
+    if (downloadItem->IsInterrupted() || interruptionReason != CEF_DOWNLOAD_INTERRUPT_REASON_NONE) {
+        HandleInterruptedDownload(key, interruptionReason);
+        return true;
+    }
+
     // No sustituye el origen de una descarga observada antes ni abre otro diálogo para la misma solicitud.
     if (tracked->phase != DownloadPhase::AwaitingAuthorization ||
         pendingDownloads_.find(key) != pendingDownloads_.end() ||
-        downloadItem->IsComplete() || downloadItem->IsCanceled() || downloadItem->IsInterrupted()) {
+        downloadItem->IsComplete() || downloadItem->IsCanceled()) {
         CancelDownload(key);
         return true;
     }
@@ -131,7 +141,7 @@ bool SecurityDownloadHandler::OnBeforeDownload(CefRefPtr<CefBrowser> browser,
 
     // Sin receptor no se puede elegir un destino; este fallo de entrega no es un bloqueo de política.
     if (!onRequestSaveDialog_) {
-        CancelDownload(key);
+        FailDownload(key, DownloadOutcome::DialogFailed);
         return true;
     }
 
@@ -151,7 +161,7 @@ bool SecurityDownloadHandler::OnBeforeDownload(CefRefPtr<CefBrowser> browser,
 
     // La entrega no autoriza la descarga: CompleteSaveDialog comprobará el nombre definitivo y el contexto.
     if (!onRequestSaveDialog_(operationId, fileName, std::move(onResult))) {
-        CancelDownload(key);
+        FailDownload(key, DownloadOutcome::DialogFailed);
     }
     return true;
 }
@@ -172,6 +182,9 @@ void SecurityDownloadHandler::OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
 
     const DownloadKey key{browser->GetIdentifier(), downloadItem->GetId()};
     if (downloadItem->IsComplete() || downloadItem->IsCanceled()) {
+        // Copia el resultado antes de retirar el seguimiento; una repetición terminal no encontrará la operación.
+        const auto result = downloadItem->IsComplete()
+            ? TakeResultNotice(key, DownloadOutcome::Completed) : std::nullopt;
         // Retira ambos registros antes de liberar una posible continuación pendiente.
         // Una respuesta posterior de Qt ya no encontrará la solicitud original.
         CefRefPtr<CefBeforeDownloadCallback> pendingCallback;
@@ -191,6 +204,9 @@ void SecurityDownloadHandler::OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
         if (pendingOperationId.has_value() && onRequestCloseSaveDialog_) {
             onRequestCloseSaveDialog_(*pendingOperationId);
         }
+        if (result.has_value()) {
+            NotifyResult(*result);
+        }
         return;
     }
 
@@ -208,9 +224,16 @@ void SecurityDownloadHandler::OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
         tracked->cancelCallback = callback;
     }
 
-    // Una cancelación ya solicitada o una interrupción no producen otro aviso de bloqueo.
-    if (tracked->phase == DownloadPhase::CancelRequested || downloadItem->IsInterrupted()) {
+    // Los bloqueos y cancelaciones solicitados por nosotros no se convierten después en fallos operativos.
+    if (tracked->phase == DownloadPhase::CancelRequested) {
         CancelDownload(key);
+        return;
+    }
+
+    // AutoResume puede ocultar el estado IsInterrupted antes de notificar a los observadores de CEF.
+    const auto interruptionReason = downloadItem->GetInterruptReason();
+    if (downloadItem->IsInterrupted() || interruptionReason != CEF_DOWNLOAD_INTERRUPT_REASON_NONE) {
+        HandleInterruptedDownload(key, interruptionReason);
         return;
     }
 
@@ -351,6 +374,102 @@ void SecurityDownloadHandler::BlockDownload(
     NotifyBlocked(notice);
 }
 
+// Consume el resultado antes de entregar callbacks externos, conservando su origen y evitando duplicados.
+std::optional<DownloadResultNotice> SecurityDownloadHandler::TakeResultNotice(
+    DownloadKey key, DownloadOutcome outcome) {
+    CEF_REQUIRE_UI_THREAD();
+    const auto tracked = trackedDownloads_.find(key);
+    if (tracked == trackedDownloads_.end() || tracked->second.resultReported
+        || tracked->second.phase == DownloadPhase::CancelRequested
+        || !tracked->second.context.has_value()
+        || !policyManager_->IsCurrentContext(*tracked->second.context)) {
+        return std::nullopt;
+    }
+    if (outcome == DownloadOutcome::Completed && tracked->second.phase != DownloadPhase::Authorized) {
+        return std::nullopt;
+    }
+    tracked->second.resultReported = true;
+    return DownloadResultNotice{tracked->second.operationId, key.first, key.second,
+                                tracked->second.context, outcome};
+}
+
+// Cancelar puede provocar otras actualizaciones; el resultado ya está marcado y sus datos son independientes.
+void SecurityDownloadHandler::FailDownload(DownloadKey key, DownloadOutcome outcome) {
+    CEF_REQUIRE_UI_THREAD();
+    const auto result = TakeResultNotice(key, outcome);
+    CancelDownload(key);
+    if (result.has_value()) {
+        NotifyResult(*result);
+    }
+}
+
+// CEF puede comunicar el fallo en distintos callbacks; todos utilizan la misma distinción de resultados.
+void SecurityDownloadHandler::HandleInterruptedDownload(
+    DownloadKey key, cef_download_interrupt_reason_t reason) {
+    CEF_REQUIRE_UI_THREAD();
+    if (reason == CEF_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED
+        || reason == CEF_DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN) {
+        CancelDownload(key);
+    } else {
+        FailDownload(key, InterruptionOutcome(reason));
+    }
+}
+
+// Solo comunica el resultado; no llama a Continue ni interpreta un fallo de entrega como permiso.
+void SecurityDownloadHandler::NotifyResult(const DownloadResultNotice& notice) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!onDownloadResult_) {
+        return;
+    }
+    try {
+        if (!onDownloadResult_(notice)) {
+            std::fputs("CEF download result could not be delivered to Qt.\n", stderr);
+        }
+    } catch (...) {
+        std::fputs("CEF download result receiver failed.\n", stderr);
+    }
+}
+
+// Las categorías son de presentación; ninguna representa una decisión del motor de seguridad.
+DownloadOutcome SecurityDownloadHandler::InterruptionOutcome(cef_download_interrupt_reason_t reason) {
+    switch (reason) {
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED:
+        return DownloadOutcome::FileAccessDenied;
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE:
+        return DownloadOutcome::FileNoSpace;
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_VIRUS_INFECTED:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED:
+        return DownloadOutcome::FileBlocked;
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_FAILED:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_TOO_SHORT:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_HASH_MISMATCH:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_FILE_SAME_AS_SOURCE:
+        return DownloadOutcome::FileFailed;
+    case CEF_DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_NETWORK_INVALID_REQUEST:
+        return DownloadOutcome::NetworkFailed;
+    case CEF_DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_SERVER_NO_RANGE:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_SERVER_UNAUTHORIZED:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_SERVER_CERT_PROBLEM:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_SERVER_FORBIDDEN:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_SERVER_UNREACHABLE:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_SERVER_CONTENT_LENGTH_MISMATCH:
+    case CEF_DOWNLOAD_INTERRUPT_REASON_SERVER_CROSS_ORIGIN_REDIRECT:
+        return DownloadOutcome::ServerFailed;
+    default:
+        return DownloadOutcome::Interrupted;
+    }
+}
+
 // Separa el nombre de la carpeta sin consultar el disco ni corregir la ruta recibida.
 std::optional<std::string> SecurityDownloadHandler::ExtractDestinationFileName(
     const std::string& path) {
@@ -410,7 +529,7 @@ void SecurityDownloadHandler::CompleteSaveDialog(DownloadKey key,
     // Un destino que no se puede interpretar es un fallo de destino, distinto de un bloqueo de política.
     const auto fileName = ExtractDestinationFileName(*path);
     if (!fileName.has_value()) {
-        CancelDownload(key);
+        FailDownload(key, DownloadOutcome::DestinationFailed);
         return;
     }
 
