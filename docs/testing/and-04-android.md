@@ -14,8 +14,7 @@ en el puerto `8081` de Windows.
 | Estado de la pantalla | Verifiqué con pruebas JVM la validación de campos, el bloqueo de envíos duplicados, el estado de éxito y la distinción entre credenciales incorrectas y fallo de conexión. |
 | Compilación | Compilé los APK de desarrollo y release, y Lint terminó correctamente. Pasaron 17 pruebas JVM y 4 en el emulador. |
 
-La renovación automática queda aplazada. Al incorporar la primera consulta privada
-se deberá descartar la sesión caducada y volver a Login.
+La renovación automática queda aplazada.
 
 ## Cierre de sesión
 
@@ -30,3 +29,18 @@ Han pasado 22 pruebas JVM y Lint. He compilado el APK de desarrollo y el de
 pruebas instrumentadas. En el emulador inicié sesión con una cuenta de prueba
 y pulsé «Cerrar sesión». La app mostró «Sesión cerrada», el mensaje que
 corresponde a la confirmación `204` de Spring Boot.
+
+## Sesión caducada
+
+La app consulta `GET /api/v1/users/me` al mostrar la sesión iniciada y al
+regresar al primer plano. He comprobado con MockWebServer la ruta, el envío
+del access token como Bearer y la recepción del `401`.
+
+Con respuestas controladas he verificado que un `401` de la sesión actual
+retira los dos tokens y devuelve al formulario, donde puedo iniciar sesión
+de nuevo. También he comprobado que un `403`, un `503` y un fallo de conexión
+conservan la sesión y que un `401` anterior no cierra una sesión posterior.
+
+Han pasado las 26 pruebas JVM y Lint. He compilado el APK de desarrollo y el de
+pruebas instrumentadas. Queda pendiente la comprobación manual con un JWT que
+haya caducado en Spring Boot.

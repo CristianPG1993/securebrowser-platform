@@ -18,6 +18,20 @@ class AuthApiTest {
     @get:Rule
     val server = MockWebServer()
 
+    /** Comprueba la ruta y el encabezado de la primera petición privada. */
+    @Test
+    fun profileCheckSendsBearerAndReceivesUnauthorized() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401))
+        val api = createRetrofit(server.url("/api/v1/").toString()).create(AuthApi::class.java)
+        val response = api.checkSession("Bearer test-access")
+        response.errorBody()?.close()
+        assertEquals(401, response.code())
+        val request = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/users/me", request.path)
+        assertEquals("Bearer test-access", request.getHeader("Authorization"))
+    }
+
     /** Verifica el JSON de logout y la respuesta 204 sin contenido. */
     @Test
     fun logoutPostsOnlyTheRefreshToken() = runBlocking {

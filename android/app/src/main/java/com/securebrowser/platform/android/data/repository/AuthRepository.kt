@@ -17,6 +17,17 @@ internal class AuthRepository(private val api: AuthApi, private val session: Ses
     /** Permite recuperar el estado de acceso al recrear la pantalla dentro del mismo proceso. */
     val hasSession: Boolean get() = session.currentTokens != null
 
+    /** Un 401 del recurso privado invalida la sesión que envió el JWT. Un fallo de red permite reintentar. */
+    suspend fun expireIfUnauthorized(): Boolean {
+        val tokens = session.currentTokens ?: return true
+        val result = executeApiCall {
+            val response = api.checkSession("Bearer ${tokens.accessToken}")
+            response.errorBody()?.close()
+            response.code()
+        }
+        return result is ApiResult.Success && result.value == 401 && session.clearIfCurrent(tokens)
+    }
+
     /** Borra primero la sesión local. Una respuesta tardía solo informa del resultado remoto. */
     suspend fun logout(): LogoutResult {
         val refreshToken = session.clear() ?: return LogoutResult.LocalOnly

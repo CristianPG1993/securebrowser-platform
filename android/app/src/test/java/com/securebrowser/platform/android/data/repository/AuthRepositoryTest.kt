@@ -13,6 +13,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -28,11 +29,13 @@ class AuthRepositoryTest {
     /** Sustituye solo la API remota para controlar el orden de las respuestas en estas pruebas. */
     private fun repository(
         revoke: suspend (LogoutRequest) -> Response<Unit> = { error("Logout inesperado") },
+        check: suspend (String) -> Response<Unit> = { error("Consulta privada inesperada") },
         reply: suspend () -> TokenResponse
     ): AuthRepository {
         val api = object : AuthApi {
             override suspend fun login(credentials: LoginRequest) = reply()
             override suspend fun logout(request: LogoutRequest) = revoke(request)
+            override suspend fun checkSession(bearer: String) = check(bearer)
         }
         return AuthRepository(api, session)
     }
@@ -124,5 +127,41 @@ class AuthRepositoryTest {
         repo.login("user@example.invalid", "test")
         assertEquals(LogoutResult.LocalOnly, repo.logout())
         assertNull(session.currentTokens)
+    }
+
+    /** Solo el rechazo de autenticación invalida el par de tokens actual. */
+    @Test
+    fun onlyUnauthorizedPrivateResponseClearsTokens() = runBlocking {
+        var code = 200
+        val repo = repository(check = { bearer ->
+            assertEquals("Bearer access-test", bearer)
+            when (code) {
+                0 -> throw IOException("Sin conexión")
+                200 -> Response.success(Unit)
+                else -> Response.error(code, "{}".toResponseBody())
+            }
+        }) { tokens }
+        repo.login("user@example.invalid", "test")
+        for (status in listOf(200, 403, 503, 0)) {
+            code = status
+            assertFalse(repo.expireIfUnauthorized())
+            assertSame(tokens, session.currentTokens)
+        }
+        code = 401
+        assertTrue(repo.expireIfUnauthorized())
+        assertNull(session.currentTokens)
+    }
+
+    @Test
+    fun lateUnauthorizedResponsePreservesNewSession() = runBlocking {
+        val response = CompletableDeferred<Response<Unit>>()
+        val repo = repository(check = { response.await() }) { tokens }
+        repo.login("first@example.invalid", "test")
+        val pending = async(start = CoroutineStart.UNDISPATCHED) { repo.expireIfUnauthorized() }
+        val newer = TokenResponse("new-access", "Bearer", 60, "new-refresh")
+        repository { newer }.login("second@example.invalid", "test")
+        response.complete(Response.error(401, "{}".toResponseBody()))
+        assertFalse(pending.await())
+        assertSame(newer, session.currentTokens)
     }
 }

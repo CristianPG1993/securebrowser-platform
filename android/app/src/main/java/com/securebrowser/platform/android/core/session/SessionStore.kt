@@ -26,6 +26,14 @@ internal class SessionStore {
         currentTokens = tokens
     }
 
+    /** Un 401 tardío solo puede retirar el par que se usó al enviar la petición. */
+    @Synchronized
+    fun clearIfCurrent(tokens: TokenResponse): Boolean {
+        if (currentTokens !== tokens) return false
+        clear()
+        return true
+    }
+
     /** Retira ambos tokens e invalida los logins pendientes antes de devolver el refresh para revocarlo. */
     @Synchronized
     fun clear(): String? {

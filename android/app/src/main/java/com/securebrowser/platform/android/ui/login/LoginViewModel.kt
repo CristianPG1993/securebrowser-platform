@@ -17,6 +17,7 @@ internal enum class LoginStatus(@get:StringRes val error: Int? = null) {
     EmptyPassword(R.string.login_empty_password),
     Rejected(R.string.login_invalid_credentials),
     Offline(R.string.login_connection_error),
+    SessionExpired(R.string.login_session_expired),
     Failed(R.string.login_failed)
 }
 
@@ -24,10 +25,18 @@ internal enum class LoginStatus(@get:StringRes val error: Int? = null) {
 internal class LoginViewModel(
     private val login: suspend (String, String) -> ApiResult<Unit>,
     private val logout: suspend () -> LogoutResult,
+    private val expireIfUnauthorized: suspend () -> Boolean,
     hasSession: Boolean
 ) : ViewModel() {
     private val current = MutableStateFlow(if (hasSession) LoginStatus.Authenticated else LoginStatus.Ready)
     val status = current.asStateFlow()
+
+    /** Devuelve al formulario solo si sigue mostrándose la sesión autenticada. */
+    suspend fun checkSession() {
+        if (current.value == LoginStatus.Authenticated && expireIfUnauthorized()) {
+            current.compareAndSet(LoginStatus.Authenticated, LoginStatus.SessionExpired)
+        }
+    }
 
     /** Al editar los campos se retira el error del intento anterior. */
     fun clearError() {
