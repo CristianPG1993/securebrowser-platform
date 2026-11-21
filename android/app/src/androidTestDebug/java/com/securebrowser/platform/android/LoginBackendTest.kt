@@ -1,27 +1,41 @@
 package com.securebrowser.platform.android
 
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.securebrowser.platform.android.core.network.ApiResult
-import com.securebrowser.platform.android.core.network.executeApiCall
-import com.securebrowser.platform.android.data.remote.LoginRequest
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Comprueba desde el emulador el login contra el backend local publicado por Docker Compose. */
 @RunWith(AndroidJUnit4::class)
 class LoginBackendTest {
-    /** El rechazo de credenciales ficticias confirma que la petición llega al endpoint de autenticación. */
+    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+    /** Verifica que el rechazo real de Spring Boot llega hasta el mensaje visible del formulario. */
+    @Test
+    fun loginScreenShowsInvalidCredentials() {
+        val activity = compose.activity
+        compose.onNodeWithText(activity.getString(R.string.login_email)).performTextInput("android-test@example.invalid")
+        compose.onNodeWithText(activity.getString(R.string.login_password)).performTextInput("test-only")
+        compose.onNodeWithText(activity.getString(R.string.login_submit)).performClick()
+        val rejection = activity.getString(R.string.login_invalid_credentials)
+        compose.waitUntil(15_000) { compose.onAllNodes(androidx.compose.ui.test.hasText(rejection)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(rejection).assertIsDisplayed()
+    }
+
     @Test
     fun loginWithUnknownUserReturnsInvalidCredentials() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val app = context.applicationContext as DebugApplication
-        val credentials = LoginRequest("android-test@example.invalid", "test-only")
-
         val result = runBlocking {
-            executeApiCall { app.authApi.login(credentials) }
+            app.authRepository.login("android-test@example.invalid", "test-only")
         }
         assertEquals(ApiResult.HttpError(401, "INVALID_CREDENTIALS"), result)
     }
