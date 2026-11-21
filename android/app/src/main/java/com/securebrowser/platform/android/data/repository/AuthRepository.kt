@@ -6,8 +6,11 @@ import com.securebrowser.platform.android.core.session.SessionStore
 import com.securebrowser.platform.android.data.remote.AuthApi
 import com.securebrowser.platform.android.data.remote.LoginRequest
 import com.securebrowser.platform.android.data.remote.LogoutRequest
+import com.securebrowser.platform.android.data.remote.UserProfileResponse
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.SerializationException
+import retrofit2.HttpException
 
 /** Distingue el cierre confirmado por Spring Boot del cierre solo en el dispositivo. */
 internal enum class LogoutResult { Revoked, LocalOnly }
@@ -17,15 +20,18 @@ internal class AuthRepository(private val api: AuthApi, private val session: Ses
     /** Permite recuperar el estado de acceso al recrear la pantalla dentro del mismo proceso. */
     val hasSession: Boolean get() = session.currentTokens != null
 
-    /** Un 401 del recurso privado invalida la sesión que envió el JWT. Un fallo de red permite reintentar. */
-    suspend fun expireIfUnauthorized(): Boolean {
-        val tokens = session.currentTokens ?: return true
+    /** Devuelve el perfil o el error de la sesión actual. Un resultado obsoleto se descarta con null. */
+    suspend fun loadProfile(): ApiResult<UserProfileResponse>? {
+        val tokens = session.currentTokens ?: return ApiResult.HttpError(401, null)
         val result = executeApiCall {
             val response = api.checkSession("Bearer ${tokens.accessToken}")
-            response.errorBody()?.close()
-            response.code()
+            if (!response.isSuccessful) throw HttpException(response)
+            response.body() ?: throw SerializationException("Respuesta de perfil vacía")
         }
-        return result is ApiResult.Success && result.value == 401 && session.clearIfCurrent(tokens)
+        if (result is ApiResult.HttpError && result.status == 401) {
+            return if (session.clearIfCurrent(tokens)) result else null
+        }
+        return result.takeIf { session.currentTokens === tokens }
     }
 
     /** Borra primero la sesión local. Una respuesta tardía solo informa del resultado remoto. */

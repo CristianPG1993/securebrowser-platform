@@ -16,7 +16,7 @@ internal interface AuthApi {
     @POST("auth/logout")
     suspend fun logout(@Body request: LogoutRequest): Response<Unit>
 
-    /** Comprueba el acceso al perfil privado. Para validar la sesión basta el estado HTTP. */
+    /** Lee el perfil autenticado y conserva el estado HTTP para detectar una sesión caducada. */
     @GET("users/me")
-    suspend fun checkSession(@Header("Authorization") bearer: String): Response<Unit>
+    suspend fun checkSession(@Header("Authorization") bearer: String): Response<UserProfileResponse>
 }

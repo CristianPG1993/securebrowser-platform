@@ -6,6 +6,8 @@ import com.securebrowser.platform.android.data.remote.AuthApi
 import com.securebrowser.platform.android.data.remote.LoginRequest
 import com.securebrowser.platform.android.data.remote.LogoutRequest
 import com.securebrowser.platform.android.data.remote.TokenResponse
+import com.securebrowser.platform.android.data.remote.UserProfileResponse
+import com.securebrowser.platform.android.data.remote.UserRole
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -13,7 +15,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -29,7 +30,7 @@ class AuthRepositoryTest {
     /** Sustituye solo la API remota para controlar el orden de las respuestas en estas pruebas. */
     private fun repository(
         revoke: suspend (LogoutRequest) -> Response<Unit> = { error("Logout inesperado") },
-        check: suspend (String) -> Response<Unit> = { error("Consulta privada inesperada") },
+        check: suspend (String) -> Response<UserProfileResponse> = { error("Consulta privada inesperada") },
         reply: suspend () -> TokenResponse
     ): AuthRepository {
         val api = object : AuthApi {
@@ -137,31 +138,59 @@ class AuthRepositoryTest {
             assertEquals("Bearer access-test", bearer)
             when (code) {
                 0 -> throw IOException("Sin conexión")
-                200 -> Response.success(Unit)
+                200 -> Response.success(UserProfileResponse("Ana", "Díaz", "ana@example.invalid", UserRole.USER))
                 else -> Response.error(code, "{}".toResponseBody())
             }
         }) { tokens }
         repo.login("user@example.invalid", "test")
         for (status in listOf(200, 403, 503, 0)) {
             code = status
-            assertFalse(repo.expireIfUnauthorized())
+            val result = repo.loadProfile()
+            when (status) {
+                0 -> assertEquals(ApiResult.ConnectionError, result)
+                200 -> assertTrue(result is ApiResult.Success)
+                else -> assertEquals(ApiResult.HttpError(status, null), result)
+            }
             assertSame(tokens, session.currentTokens)
         }
         code = 401
-        assertTrue(repo.expireIfUnauthorized())
+        assertEquals(ApiResult.HttpError(401, null), repo.loadProfile())
         assertNull(session.currentTokens)
     }
 
     @Test
     fun lateUnauthorizedResponsePreservesNewSession() = runBlocking {
-        val response = CompletableDeferred<Response<Unit>>()
+        val response = CompletableDeferred<Response<UserProfileResponse>>()
         val repo = repository(check = { response.await() }) { tokens }
         repo.login("first@example.invalid", "test")
-        val pending = async(start = CoroutineStart.UNDISPATCHED) { repo.expireIfUnauthorized() }
+        val pending = async(start = CoroutineStart.UNDISPATCHED) { repo.loadProfile() }
         val newer = TokenResponse("new-access", "Bearer", 60, "new-refresh")
         repository { newer }.login("second@example.invalid", "test")
         response.complete(Response.error(401, "{}".toResponseBody()))
-        assertFalse(pending.await())
+        assertNull(pending.await())
         assertSame(newer, session.currentTokens)
+    }
+
+    @Test
+    fun profileRequiresABodyAndReturnsTheDecodedUser() = runBlocking {
+        val profile = UserProfileResponse("Ana", "Díaz", "ana@example.invalid", UserRole.ADMIN)
+        var body: UserProfileResponse? = profile
+        val repo = repository(check = { Response.success(body) }) { tokens }
+        repo.login("user@example.invalid", "test")
+        assertSame(profile, (repo.loadProfile() as ApiResult.Success).value)
+        body = null
+        assertEquals(ApiResult.InvalidResponse, repo.loadProfile())
+        assertSame(tokens, session.currentTokens)
+    }
+
+    @Test
+    fun profileArrivingAfterLogoutIsDiscarded() = runBlocking {
+        val response = CompletableDeferred<Response<UserProfileResponse>>()
+        val repo = repository(check = { response.await() }) { tokens }
+        repo.login("user@example.invalid", "test")
+        val pending = async(start = CoroutineStart.UNDISPATCHED) { repo.loadProfile() }
+        session.clear()
+        response.complete(Response.success(UserProfileResponse("Ana", "Díaz", "ana@example.invalid", UserRole.ADMIN)))
+        assertNull(pending.await())
     }
 }
