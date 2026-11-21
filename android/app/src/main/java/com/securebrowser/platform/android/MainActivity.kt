@@ -20,12 +20,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.securebrowser.platform.android.ui.dashboard.DashboardScreen
 import com.securebrowser.platform.android.ui.dashboard.DashboardState
 import com.securebrowser.platform.android.ui.dashboard.DashboardViewModel
 import com.securebrowser.platform.android.ui.login.LoginScreen
 import com.securebrowser.platform.android.ui.login.LoginStatus
 import com.securebrowser.platform.android.ui.login.LoginViewModel
+import com.securebrowser.platform.android.ui.navigation.DashboardNavigation
 import com.securebrowser.platform.android.ui.theme.SecureBrowserAndroidTheme
 
 /** Conecta el formulario de acceso con el repositorio de la aplicación. */
@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             }
-                            DashboardScreen(
+                            DashboardNavigation(
                                 state = state,
                                 onRetry = { retry++ },
                                 onSignOut = {

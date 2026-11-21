@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.securebrowser.platform.android.R
+import com.securebrowser.platform.android.ui.navigation.DashboardDestination
 
 /** Muestra el perfil de la sesión y delega el reintento y el cierre en quien presenta la pantalla. */
 @Composable
@@ -23,6 +24,7 @@ internal fun DashboardScreen(
     state: DashboardState,
     onRetry: () -> Unit,
     onSignOut: () -> Unit,
+    onOpen: (DashboardDestination) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -38,6 +40,9 @@ internal fun DashboardScreen(
                     style = MaterialTheme.typography.titleLarge)
                 Text(profile.email)
                 Text(stringResource(R.string.dashboard_role, profile.role.name))
+                for (destination in DashboardDestination.entries.filter { it.availableTo(profile.role) }) {
+                    Button(onClick = { onOpen(destination) }) { Text(stringResource(destination.title)) }
+                }
             }
             DashboardState.Error -> {
                 Text(stringResource(R.string.dashboard_profile_error))

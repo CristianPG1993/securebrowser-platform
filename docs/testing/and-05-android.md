@@ -14,3 +14,13 @@ que devuelve Spring Boot en `GET /api/v1/users/me`.
    Al volver al Dashboard vi «No se pudo cargar tu perfil» y el botón «Reintentar».
    Arranqué Spring Boot y pulsé «Reintentar». Volví a ver mi nombre, correo y rol
    sin introducir de nuevo las credenciales.
+
+## Navegación por rol
+
+Con la cuenta `USER` vi «Dispositivos» y «Eventos de seguridad». El acceso a
+«Catálogo de políticas» quedó oculto. Abrí cada destino y pulsé «Atrás» en el
+emulador. En ambas ocasiones volví al Dashboard.
+
+Con la cuenta `ADMIN` vi los tres accesos. Entré en «Dispositivos», «Catálogo de
+políticas» y «Eventos de seguridad». Desde cada destino pulsé «Atrás» y volví
+al Dashboard.

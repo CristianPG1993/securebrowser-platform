@@ -5,6 +5,10 @@
     <string name="dashboard_role">Rol: %1$s</string>
     <string name="dashboard_profile_error">No se pudo cargar tu perfil.</string>
     <string name="dashboard_retry">Reintentar</string>
+    <string name="devices_title">Dispositivos</string>
+    <string name="policies_title">Catálogo de políticas</string>
+    <string name="events_title">Eventos de seguridad</string>
+    <string name="dashboard_return">Volver al panel</string>
     <string name="login_title">Iniciar sesión</string>
     <string name="login_email">Correo electrónico</string>
     <string name="login_password">Contraseña</string>
