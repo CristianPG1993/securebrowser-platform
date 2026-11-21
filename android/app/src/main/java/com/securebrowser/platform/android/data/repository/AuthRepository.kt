@@ -10,6 +10,9 @@ import kotlinx.coroutines.ensureActive
 
 /** Usa [api] para enviar las credenciales y [session] para guardar en memoria los tokens recibidos. */
 internal class AuthRepository(private val api: AuthApi, private val session: SessionStore) {
+    /** Permite recuperar el estado de acceso al recrear la pantalla dentro del mismo proceso. */
+    val hasSession: Boolean get() = session.currentTokens != null
+
     /** Devuelve al formulario el resultado de la operación y mantiene los tokens dentro de la capa de datos. */
     suspend fun login(email: String, password: String): ApiResult<Unit> {
         // Cada intento recibe un identificador para poder descartar respuestas que lleguen tarde.

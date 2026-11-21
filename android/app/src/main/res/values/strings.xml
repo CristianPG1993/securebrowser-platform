@@ -1,3 +1,15 @@
 <resources>
     <string name="app_name">SecureBrowserAndroid</string>
+    <string name="login_title">Iniciar sesión</string>
+    <string name="login_email">Correo electrónico</string>
+    <string name="login_password">Contraseña</string>
+    <string name="login_submit">Entrar</string>
+    <string name="login_loading">Iniciando sesión…</string>
+    <string name="login_success">Sesión iniciada</string>
+    <string name="login_invalid_email">Introduce un correo electrónico válido.</string>
+    <string name="login_empty_password">Introduce tu contraseña.</string>
+    <string name="login_invalid_credentials">El correo o la contraseña son incorrectos.</string>
+    <string name="login_connection_error">No se pudo conectar con el servidor. Vuelve a intentarlo.</string>
+    <string name="login_failed">No se pudo iniciar sesión. Vuelve a intentarlo.</string>
+    <string name="login_unconfigured">El servidor de acceso está pendiente de configurar en esta versión.</string>
 </resources>
