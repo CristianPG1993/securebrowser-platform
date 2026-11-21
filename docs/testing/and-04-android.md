@@ -42,5 +42,8 @@ de nuevo. También he comprobado que un `403`, un `503` y un fallo de conexión
 conservan la sesión y que un `401` anterior no cierra una sesión posterior.
 
 Han pasado las 26 pruebas JVM y Lint. He compilado el APK de desarrollo y el de
-pruebas instrumentadas. Queda pendiente la comprobación manual con un JWT que
-haya caducado en Spring Boot.
+pruebas instrumentadas.
+
+En el emulador inicié sesión y esperé más de 15 minutos. Al volver a la app,
+vi el formulario de login con el aviso «Tu sesión ya no es válida. Vuelve a
+iniciar sesión.» y el botón «Entrar».
