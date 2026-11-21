@@ -18,6 +18,20 @@ class AuthApiTest {
     @get:Rule
     val server = MockWebServer()
 
+    /** Verifica el JSON de logout y la respuesta 204 sin contenido. */
+    @Test
+    fun logoutPostsOnlyTheRefreshToken() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(204))
+        val api = createRetrofit(server.url("/api/v1/").toString()).create(AuthApi::class.java)
+        assertEquals(204, api.logout(LogoutRequest("refresh-test")).code())
+
+        val request = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/auth/logout", request.path)
+        assertEquals(Json.parseToJsonElement("""{"refreshToken":"refresh-test"}"""),
+            Json.parseToJsonElement(request.body.readUtf8()))
+    }
+
     /** Ejecuta el mismo login de prueba con el tratamiento común de errores de la app. */
     private fun login(baseUrl: String = server.url("/api/v1/").toString()) = runBlocking {
         val api = createRetrofit(baseUrl).create(AuthApi::class.java)

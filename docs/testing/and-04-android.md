@@ -16,3 +16,17 @@ en el puerto `8081` de Windows.
 
 La renovación automática queda aplazada. Al incorporar la primera consulta privada
 se deberá descartar la sesión caducada y volver a Login.
+
+## Cierre de sesión
+
+He comprobado con MockWebServer que Android envía únicamente el campo
+`refreshToken` a `POST /api/v1/auth/logout` y acepta la confirmación `204`.
+Con respuestas controladas, he verificado que el dispositivo descarta sus tokens
+antes de recibir la respuesta y que un cierre anterior respeta la siguiente sesión.
+También he comprobado el cierre local ante un fallo de conexión o un rechazo del
+servidor y que dos pulsaciones seguidas generan una sola solicitud.
+
+Han pasado 22 pruebas JVM y Lint. He compilado el APK de desarrollo y el de
+pruebas instrumentadas. En el emulador inicié sesión con una cuenta de prueba
+y pulsé «Cerrar sesión». La app mostró «Sesión cerrada», el mensaje que
+corresponde a la confirmación `204` de Spring Boot.

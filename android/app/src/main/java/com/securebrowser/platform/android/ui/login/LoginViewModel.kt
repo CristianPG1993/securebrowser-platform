@@ -5,13 +5,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.securebrowser.platform.android.R
 import com.securebrowser.platform.android.core.network.ApiResult
+import com.securebrowser.platform.android.data.repository.LogoutResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /** Estado observable del formulario, libre de credenciales y tokens. */
 internal enum class LoginStatus(@get:StringRes val error: Int? = null) {
-    Ready, Loading, Authenticated,
+    Ready, Loading, Authenticated, SigningOut, SignedOut, SignedOutLocally,
     InvalidEmail(R.string.login_invalid_email),
     EmptyPassword(R.string.login_empty_password),
     Rejected(R.string.login_invalid_credentials),
@@ -22,6 +23,7 @@ internal enum class LoginStatus(@get:StringRes val error: Int? = null) {
 /** Valida el formulario y publica el resultado del repositorio para Compose. */
 internal class LoginViewModel(
     private val login: suspend (String, String) -> ApiResult<Unit>,
+    private val logout: suspend () -> LogoutResult,
     hasSession: Boolean
 ) : ViewModel() {
     private val current = MutableStateFlow(if (hasSession) LoginStatus.Authenticated else LoginStatus.Ready)
@@ -29,12 +31,25 @@ internal class LoginViewModel(
 
     /** Al editar los campos se retira el error del intento anterior. */
     fun clearError() {
-        if (current.value.error != null) current.value = LoginStatus.Ready
+        if (current.value.error != null || current.value == LoginStatus.SignedOut ||
+            current.value == LoginStatus.SignedOutLocally) current.value = LoginStatus.Ready
+    }
+
+    /** Retira la vista privada al pulsar el botón y comunica cómo terminó el cierre. */
+    fun signOut() {
+        if (current.value != LoginStatus.Authenticated) return
+        current.value = LoginStatus.SigningOut
+        viewModelScope.launch {
+            current.value = when (logout()) {
+                LogoutResult.Revoked -> LoginStatus.SignedOut
+                LogoutResult.LocalOnly -> LoginStatus.SignedOutLocally
+            }
+        }
     }
 
     /** Envía como máximo una petición a la vez y conserva la contraseña tal como se escribió. */
     fun submit(email: String, password: String) {
-        if (current.value == LoginStatus.Loading || current.value == LoginStatus.Authenticated) return
+        if (current.value in setOf(LoginStatus.Loading, LoginStatus.Authenticated, LoginStatus.SigningOut)) return
         val address = email.trim()
         if (!emailPattern.matches(address)) {
             current.value = LoginStatus.InvalidEmail

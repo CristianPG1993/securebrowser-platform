@@ -29,9 +29,11 @@ class MainActivity : ComponentActivity() {
                     if (repository == null) {
                         Text(stringResource(R.string.login_unconfigured), Modifier.padding(insets))
                     } else {
-                        val model = viewModel { LoginViewModel(repository::login, repository.hasSession) }
+                        val model = viewModel {
+                            LoginViewModel(repository::login, repository::logout, repository.hasSession)
+                        }
                         val status by model.status.collectAsStateWithLifecycle()
-                        LoginScreen(status, model::submit, model::clearError, Modifier.padding(insets))
+                        LoginScreen(status, model::submit, model::clearError, model::signOut, Modifier.padding(insets))
                     }
                 }
             }

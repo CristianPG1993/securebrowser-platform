@@ -6,6 +6,10 @@
     <string name="login_submit">Entrar</string>
     <string name="login_loading">Iniciando sesión…</string>
     <string name="login_success">Sesión iniciada</string>
+    <string name="logout_submit">Cerrar sesión</string>
+    <string name="logout_pending">Cerrando sesión…</string>
+    <string name="logout_confirmed">Sesión cerrada.</string>
+    <string name="logout_local_only">Sesión cerrada en este dispositivo. No se pudo confirmar el cierre en el servidor.</string>
     <string name="login_invalid_email">Introduce un correo electrónico válido.</string>
     <string name="login_empty_password">Introduce tu contraseña.</string>
     <string name="login_invalid_credentials">El correo o la contraseña son incorrectos.</string>

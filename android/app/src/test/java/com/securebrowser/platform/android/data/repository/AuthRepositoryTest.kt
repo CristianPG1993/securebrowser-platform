@@ -4,7 +4,9 @@ import com.securebrowser.platform.android.core.network.ApiResult
 import com.securebrowser.platform.android.core.session.SessionStore
 import com.securebrowser.platform.android.data.remote.AuthApi
 import com.securebrowser.platform.android.data.remote.LoginRequest
+import com.securebrowser.platform.android.data.remote.LogoutRequest
 import com.securebrowser.platform.android.data.remote.TokenResponse
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
@@ -24,9 +26,13 @@ class AuthRepositoryTest {
     private val tokens = TokenResponse("access-test", "Bearer", 900, "refresh-test")
 
     /** Sustituye solo la API remota para controlar el orden de las respuestas en estas pruebas. */
-    private fun repository(reply: suspend () -> TokenResponse): AuthRepository {
+    private fun repository(
+        revoke: suspend (LogoutRequest) -> Response<Unit> = { error("Logout inesperado") },
+        reply: suspend () -> TokenResponse
+    ): AuthRepository {
         val api = object : AuthApi {
             override suspend fun login(credentials: LoginRequest) = reply()
+            override suspend fun logout(request: LogoutRequest) = revoke(request)
         }
         return AuthRepository(api, session)
     }
@@ -65,7 +71,7 @@ class AuthRepositoryTest {
         val pending = async(start = CoroutineStart.UNDISPATCHED) {
             repository { delayed.await() }.login("user@example.invalid", "test")
         }
-        session.clear()
+        assertEquals(LogoutResult.LocalOnly, repository { tokens }.logout())
         delayed.complete(tokens)
         pending.join()
         assertTrue(pending.isCancelled)
@@ -84,5 +90,39 @@ class AuthRepositoryTest {
         pending.join()
         assertTrue(pending.isCancelled)
         assertSame(tokens, session.currentTokens)
+    }
+
+    /** El cierre local es inmediato y la confirmación de la sesión anterior respeta el siguiente login. */
+    @Test
+    fun delayedLogoutOnlyRevokesTheOriginalSession() = runBlocking {
+        val response = CompletableDeferred<Response<Unit>>()
+        val repo = repository(revoke = { request ->
+            assertEquals(tokens.refreshToken, request.refreshToken)
+            response.await()
+        }) { tokens }
+        repo.login("first@example.invalid", "test")
+        val closing = async(start = CoroutineStart.UNDISPATCHED) { repo.logout() }
+        assertNull(session.currentTokens)
+        val newer = TokenResponse("new-access", "Bearer", 900, "new-refresh")
+        repository { newer }.login("second@example.invalid", "test")
+        response.complete(Response.success<Unit>(204, null))
+        assertEquals(LogoutResult.Revoked, closing.await())
+        assertSame(newer, session.currentTokens)
+    }
+
+    @Test
+    fun failedLogoutStillRemovesLocalTokens() = runBlocking {
+        val repo = repository(revoke = { throw IOException("Sin conexión") }) { tokens }
+        repo.login("user@example.invalid", "test")
+        assertEquals(LogoutResult.LocalOnly, repo.logout())
+        assertNull(session.currentTokens)
+    }
+
+    @Test
+    fun serverRejectionDoesNotConfirmRevocation() = runBlocking {
+        val repo = repository(revoke = { Response.error(401, "{}".toResponseBody()) }) { tokens }
+        repo.login("user@example.invalid", "test")
+        assertEquals(LogoutResult.LocalOnly, repo.logout())
+        assertNull(session.currentTokens)
     }
 }

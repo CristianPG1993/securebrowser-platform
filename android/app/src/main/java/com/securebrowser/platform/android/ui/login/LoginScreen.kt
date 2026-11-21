@@ -27,11 +27,19 @@ internal fun LoginScreen(
     status: LoginStatus,
     onSubmit: (String, String) -> Unit,
     onEdit: () -> Unit,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.Center) {
         if (status == LoginStatus.Authenticated) {
-            Text(stringResource(R.string.login_success), style = MaterialTheme.typography.headlineSmall)
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(stringResource(R.string.login_success), style = MaterialTheme.typography.headlineSmall)
+                Button(onClick = onSignOut) { Text(stringResource(R.string.logout_submit)) }
+            }
+            return@Box
+        }
+        if (status == LoginStatus.SigningOut) {
+            Text(stringResource(R.string.logout_pending))
             return@Box
         }
         var email by remember { mutableStateOf("") }
@@ -47,6 +55,11 @@ internal fun LoginScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(stringResource(R.string.login_title), style = MaterialTheme.typography.headlineMedium)
+            when (status) {
+                LoginStatus.SignedOut -> Text(stringResource(R.string.logout_confirmed))
+                LoginStatus.SignedOutLocally -> Text(stringResource(R.string.logout_local_only))
+                else -> Unit
+            }
             // Los campos de texto y su estado interno quedan fuera del estado restaurable de Android.
             CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
                 OutlinedTextField(

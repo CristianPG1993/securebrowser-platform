@@ -5,13 +5,29 @@ import com.securebrowser.platform.android.core.network.executeApiCall
 import com.securebrowser.platform.android.core.session.SessionStore
 import com.securebrowser.platform.android.data.remote.AuthApi
 import com.securebrowser.platform.android.data.remote.LoginRequest
+import com.securebrowser.platform.android.data.remote.LogoutRequest
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+
+/** Distingue el cierre confirmado por Spring Boot del cierre solo en el dispositivo. */
+internal enum class LogoutResult { Revoked, LocalOnly }
 
 /** Usa [api] para enviar las credenciales y [session] para guardar en memoria los tokens recibidos. */
 internal class AuthRepository(private val api: AuthApi, private val session: SessionStore) {
     /** Permite recuperar el estado de acceso al recrear la pantalla dentro del mismo proceso. */
     val hasSession: Boolean get() = session.currentTokens != null
+
+    /** Borra primero la sesión local. Una respuesta tardía solo informa del resultado remoto. */
+    suspend fun logout(): LogoutResult {
+        val refreshToken = session.clear() ?: return LogoutResult.LocalOnly
+        val result = executeApiCall {
+            val response = api.logout(LogoutRequest(refreshToken))
+            response.errorBody()?.close()
+            response.code()
+        }
+        return if (result is ApiResult.Success && result.value == 204) LogoutResult.Revoked
+        else LogoutResult.LocalOnly
+    }
 
     /** Devuelve al formulario el resultado de la operación y mantiene los tokens dentro de la capa de datos. */
     suspend fun login(email: String, password: String): ApiResult<Unit> {

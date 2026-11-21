@@ -1,6 +1,7 @@
 package com.securebrowser.platform.android.ui.login
 
 import com.securebrowser.platform.android.core.network.ApiResult
+import com.securebrowser.platform.android.data.repository.LogoutResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -16,13 +17,14 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoginViewModelTest {
     private val dispatcher = StandardTestDispatcher()
+    private val unexpectedLogout: suspend () -> LogoutResult = { error("Logout inesperado") }
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
     @After fun tearDown() = Dispatchers.resetMain()
 
     @Test
     fun invalidFieldsKeepRequestLocal() {
-        val model = LoginViewModel({ _, _ -> error("Petición inesperada") }, false)
+        val model = LoginViewModel({ _, _ -> error("Petición inesperada") }, unexpectedLogout, false)
         model.submit("correo", "test")
         assertEquals(LoginStatus.InvalidEmail, model.status.value)
         model.clearError()
@@ -40,7 +42,7 @@ class LoginViewModelTest {
             assertEquals("user@example.invalid", email)
             assertEquals(" test ", password)
             response.await()
-        }, false)
+        }, unexpectedLogout, false)
         repeat(2) { model.submit(" user@example.invalid ", " test ") }
         dispatcher.scheduler.runCurrent()
         assertEquals(LoginStatus.Loading, model.status.value)
@@ -53,7 +55,7 @@ class LoginViewModelTest {
     @Test
     fun connectionFailureAndInvalidCredentialsHaveDifferentStates() {
         var response: ApiResult<Unit> = ApiResult.ConnectionError
-        val model = LoginViewModel({ _, _ -> response }, false)
+        val model = LoginViewModel({ _, _ -> response }, unexpectedLogout, false)
         model.submit("user@example.invalid", "test")
         dispatcher.scheduler.runCurrent()
         assertEquals(LoginStatus.Offline, model.status.value)
@@ -65,7 +67,23 @@ class LoginViewModelTest {
 
     @Test
     fun existingSessionOpensSuccessState() {
-        val model = LoginViewModel({ _, _ -> error("Petición inesperada") }, true)
+        val model = LoginViewModel({ _, _ -> error("Petición inesperada") }, unexpectedLogout, true)
         assertEquals(LoginStatus.Authenticated, model.status.value)
+    }
+
+    @Test
+    fun signOutRunsOnceAndDistinguishesLocalFromConfirmedLogout() {
+        for ((result, expected) in listOf(
+            LogoutResult.Revoked to LoginStatus.SignedOut,
+            LogoutResult.LocalOnly to LoginStatus.SignedOutLocally
+        )) {
+            var calls = 0
+            val model = LoginViewModel({ _, _ -> error("Login inesperado") }, { calls++; result }, true)
+            repeat(2) { model.signOut() }
+            assertEquals(LoginStatus.SigningOut, model.status.value)
+            dispatcher.scheduler.runCurrent()
+            assertEquals(1, calls)
+            assertEquals(expected, model.status.value)
+        }
     }
 }

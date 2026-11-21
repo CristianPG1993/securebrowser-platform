@@ -26,10 +26,12 @@ internal class SessionStore {
         currentTokens = tokens
     }
 
-    /** Descarta las credenciales de sesión e invalida cualquier respuesta de login pendiente. */
+    /** Retira ambos tokens e invalida los logins pendientes antes de devolver el refresh para revocarlo. */
     @Synchronized
-    fun clear() {
+    fun clear(): String? {
+        val refreshToken = currentTokens?.refreshToken
         generation++
         currentTokens = null
+        return refreshToken
     }
 }

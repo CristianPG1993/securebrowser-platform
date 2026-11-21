@@ -16,7 +16,7 @@ class LoginScreenTest {
     @Test
     fun credentialsAreClearedOnStateRestoration() {
         val restoration = StateRestorationTester(compose)
-        restoration.setContent { LoginScreen(LoginStatus.Ready, { _, _ -> }, {}) }
+        restoration.setContent { LoginScreen(LoginStatus.Ready, { _, _ -> }, {}, {}) }
         compose.onNodeWithText("Correo electrónico").performTextInput("user@example.invalid")
         compose.onNodeWithText("Contraseña").performTextInput("test-only")
         restoration.emulateSavedInstanceStateRestore()
