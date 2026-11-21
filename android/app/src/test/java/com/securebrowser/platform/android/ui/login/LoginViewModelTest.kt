@@ -5,7 +5,6 @@ import com.securebrowser.platform.android.data.repository.LogoutResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -19,14 +18,13 @@ import org.junit.Test
 class LoginViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val unexpectedLogout: suspend () -> LogoutResult = { error("Logout inesperado") }
-    private val unexpectedCheck: suspend () -> Boolean = { error("Consulta privada inesperada") }
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
     @After fun tearDown() = Dispatchers.resetMain()
 
     @Test
     fun invalidFieldsKeepRequestLocal() {
-        val model = LoginViewModel({ _, _ -> error("Petición inesperada") }, unexpectedLogout, unexpectedCheck, false)
+        val model = LoginViewModel({ _, _ -> error("Petición inesperada") }, unexpectedLogout, false)
         model.submit("correo", "test")
         assertEquals(LoginStatus.InvalidEmail, model.status.value)
         model.clearError()
@@ -44,7 +42,7 @@ class LoginViewModelTest {
             assertEquals("user@example.invalid", email)
             assertEquals(" test ", password)
             response.await()
-        }, unexpectedLogout, unexpectedCheck, false)
+        }, unexpectedLogout, false)
         repeat(2) { model.submit(" user@example.invalid ", " test ") }
         dispatcher.scheduler.runCurrent()
         assertEquals(LoginStatus.Loading, model.status.value)
@@ -57,7 +55,7 @@ class LoginViewModelTest {
     @Test
     fun connectionFailureAndInvalidCredentialsHaveDifferentStates() {
         var response: ApiResult<Unit> = ApiResult.ConnectionError
-        val model = LoginViewModel({ _, _ -> response }, unexpectedLogout, unexpectedCheck, false)
+        val model = LoginViewModel({ _, _ -> response }, unexpectedLogout, false)
         model.submit("user@example.invalid", "test")
         dispatcher.scheduler.runCurrent()
         assertEquals(LoginStatus.Offline, model.status.value)
@@ -69,7 +67,7 @@ class LoginViewModelTest {
 
     @Test
     fun existingSessionOpensSuccessState() {
-        val model = LoginViewModel({ _, _ -> error("Petición inesperada") }, unexpectedLogout, unexpectedCheck, true)
+        val model = LoginViewModel({ _, _ -> error("Petición inesperada") }, unexpectedLogout, true)
         assertEquals(LoginStatus.Authenticated, model.status.value)
     }
 
@@ -80,7 +78,7 @@ class LoginViewModelTest {
             LogoutResult.LocalOnly to LoginStatus.SignedOutLocally
         )) {
             var calls = 0
-            val model = LoginViewModel({ _, _ -> error("Login inesperado") }, { calls++; result }, unexpectedCheck, true)
+            val model = LoginViewModel({ _, _ -> error("Login inesperado") }, { calls++; result }, true)
             repeat(2) { model.signOut() }
             assertEquals(LoginStatus.SigningOut, model.status.value)
             dispatcher.scheduler.runCurrent()
@@ -90,9 +88,9 @@ class LoginViewModelTest {
     }
 
     @Test
-    fun expiredSessionReturnsToFormAndAllowsLoginAgain() = runBlocking {
-        val model = LoginViewModel({ _, _ -> ApiResult.Success(Unit) }, unexpectedLogout, { true }, true)
-        model.checkSession()
+    fun expiredSessionReturnsToFormAndAllowsLoginAgain() {
+        val model = LoginViewModel({ _, _ -> ApiResult.Success(Unit) }, unexpectedLogout, true)
+        model.onSessionExpired()
         assertEquals(LoginStatus.SessionExpired, model.status.value)
         model.submit("user@example.invalid", "test")
         dispatcher.scheduler.runCurrent()

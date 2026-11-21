@@ -27,17 +27,9 @@ internal fun LoginScreen(
     status: LoginStatus,
     onSubmit: (String, String) -> Unit,
     onEdit: () -> Unit,
-    onSignOut: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.Center) {
-        if (status == LoginStatus.Authenticated) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(stringResource(R.string.login_success), style = MaterialTheme.typography.headlineSmall)
-                Button(onClick = onSignOut) { Text(stringResource(R.string.logout_submit)) }
-            }
-            return@Box
-        }
         if (status == LoginStatus.SigningOut) {
             Text(stringResource(R.string.logout_pending))
             return@Box

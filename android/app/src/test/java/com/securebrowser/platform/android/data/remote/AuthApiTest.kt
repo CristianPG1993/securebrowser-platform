@@ -18,6 +18,23 @@ class AuthApiTest {
     @get:Rule
     val server = MockWebServer()
 
+    /** Comprueba la lectura del perfil para los dos roles que devuelve Spring Boot. */
+    @Test
+    fun profileResponseReadsIdentityAndRole() = runBlocking {
+        val api = createRetrofit(server.url("/api/v1/").toString()).create(AuthApi::class.java)
+        for (role in listOf(UserRole.ADMIN, UserRole.USER)) {
+            server.enqueue(MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("""{"id":1,"name":"Ana","lastName":"Díaz","email":"ana@example.invalid","role":"${role.name}"}"""))
+            val response = api.checkSession("Bearer test-access")
+            assertEquals(200, response.code())
+            val profile = requireNotNull(response.body())
+            assertEquals("Ana", profile.name)
+            assertEquals("Díaz", profile.lastName)
+            assertEquals("ana@example.invalid", profile.email)
+            assertEquals(role, profile.role)
+        }
+    }
+
     /** Comprueba la ruta y el encabezado de la primera petición privada. */
     @Test
     fun profileCheckSendsBearerAndReceivesUnauthorized() = runBlocking {
