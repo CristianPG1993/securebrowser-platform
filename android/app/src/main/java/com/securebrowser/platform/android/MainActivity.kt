@@ -8,20 +8,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.securebrowser.platform.android.ui.dashboard.DashboardState
 import com.securebrowser.platform.android.ui.dashboard.DashboardViewModel
+import com.securebrowser.platform.android.ui.devices.DevicesRoute
+import com.securebrowser.platform.android.ui.devices.DevicesViewModel
 import com.securebrowser.platform.android.ui.login.LoginScreen
 import com.securebrowser.platform.android.ui.login.LoginStatus
 import com.securebrowser.platform.android.ui.login.LoginViewModel
@@ -33,13 +28,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val repository = (application as? AuthRepositoryProvider)?.authRepository
+        val repositories = application as? RepositoryProvider
         setContent {
             SecureBrowserAndroidTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { insets ->
-                    if (repository == null) {
+                    if (repositories == null) {
                         Text(stringResource(R.string.login_unconfigured), Modifier.padding(insets))
                     } else {
+                        val repository = repositories.authRepository
                         val model = viewModel {
                             LoginViewModel(repository::login, repository::logout, repository.hasSession)
                         }
@@ -47,27 +43,28 @@ class MainActivity : ComponentActivity() {
                         if (status == LoginStatus.Authenticated) {
                             val dashboard = viewModel { DashboardViewModel(repository::loadProfile) }
                             val state by dashboard.state.collectAsStateWithLifecycle()
-                            val lifecycle = LocalLifecycleOwner.current.lifecycle
-                            var retry by remember { mutableIntStateOf(0) }
-                            // Una consulta carga el perfil y comprueba la sesión al entrar, volver o reintentar.
-                            LaunchedEffect(lifecycle, dashboard, retry) {
-                                lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                                    dashboard.refresh()
-                                    if (dashboard.state.value == DashboardState.SessionExpired) {
-                                        model.onSessionExpired()
-                                        dashboard.clearProfile()
-                                    }
-                                }
+                            val signOut = {
+                                dashboard.clearProfile()
+                                model.signOut()
+                            }
+                            val sessionExpired = {
+                                model.onSessionExpired()
+                                dashboard.clearProfile()
                             }
                             DashboardNavigation(
                                 state = state,
-                                onRetry = { retry++ },
-                                onSignOut = {
-                                    dashboard.clearProfile()
-                                    model.signOut()
+                                onRefreshProfile = {
+                                    dashboard.refresh()
+                                    if (dashboard.state.value == DashboardState.SessionExpired) {
+                                        sessionExpired()
+                                    }
                                 },
+                                onSignOut = signOut,
                                 modifier = Modifier.padding(insets)
-                            )
+                            ) { onBack ->
+                                val devices = viewModel { DevicesViewModel(repositories.deviceRepository::loadPage) }
+                                DevicesRoute(devices, onBack, signOut, sessionExpired, Modifier.padding(insets))
+                            }
                         } else {
                             LoginScreen(status, model::submit, model::clearError, Modifier.padding(insets))
                         }

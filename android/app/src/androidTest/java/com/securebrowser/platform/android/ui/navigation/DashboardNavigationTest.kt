@@ -4,9 +4,14 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.securebrowser.platform.android.core.network.ApiResult
+import com.securebrowser.platform.android.data.remote.DevicePageResponse
+import com.securebrowser.platform.android.data.remote.DeviceResponse
 import com.securebrowser.platform.android.data.remote.UserProfileResponse
 import com.securebrowser.platform.android.data.remote.UserRole
 import com.securebrowser.platform.android.ui.dashboard.DashboardState
+import com.securebrowser.platform.android.ui.devices.DevicesRoute
+import com.securebrowser.platform.android.ui.devices.DevicesViewModel
 import org.junit.Rule
 import org.junit.Test
 
@@ -16,7 +21,15 @@ class DashboardNavigationTest {
 
     private fun openDashboard(role: UserRole) {
         val profile = UserProfileResponse("Ana", "Díaz", "ana@example.invalid", role)
-        compose.setContent { DashboardNavigation(DashboardState.Ready(profile), {}, {}) }
+        val devices = DevicesViewModel { page, size ->
+            val device = DeviceResponse(7, "test-installation", active = true)
+            ApiResult.Success(DevicePageResponse(listOf(device), page, size, 1, 1))
+        }
+        compose.setContent {
+            DashboardNavigation(DashboardState.Ready(profile), {}, {}) { onBack ->
+                DevicesRoute(devices, onBack, {}, {})
+            }
+        }
     }
 
     @Test
@@ -26,6 +39,10 @@ class DashboardNavigationTest {
         for (title in listOf("Dispositivos", "Eventos de seguridad")) {
             compose.onNodeWithText(title).performClick()
             compose.onNodeWithText(title).assertIsDisplayed()
+            if (title == "Dispositivos") {
+                compose.onNodeWithText("ID 7").assertIsDisplayed()
+                compose.onNodeWithText("Sin comunicación registrada").assertIsDisplayed()
+            }
             compose.onNodeWithText("Volver al panel").performClick()
             compose.onNodeWithText("Panel de usuario").assertIsDisplayed()
         }

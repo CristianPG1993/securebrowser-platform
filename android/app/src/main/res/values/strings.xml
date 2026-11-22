@@ -6,6 +6,16 @@
     <string name="dashboard_profile_error">No se pudo cargar tu perfil.</string>
     <string name="dashboard_retry">Reintentar</string>
     <string name="devices_title">Dispositivos</string>
+    <string name="devices_load_error">No se pudieron cargar los dispositivos.</string>
+    <string name="devices_empty">No hay dispositivos en esta página.</string>
+    <string name="devices_page">Página %1$d de %2$d</string>
+    <string name="devices_previous">Anterior</string>
+    <string name="devices_next">Siguiente</string>
+    <string name="devices_id">ID %1$d</string>
+    <string name="devices_active">Activo</string>
+    <string name="devices_inactive">Inactivo</string>
+    <string name="devices_never_seen">Sin comunicación registrada</string>
+    <string name="devices_last_seen">Última comunicación: %1$s</string>
     <string name="policies_title">Catálogo de políticas</string>
     <string name="events_title">Eventos de seguridad</string>
     <string name="dashboard_return">Volver al panel</string>
