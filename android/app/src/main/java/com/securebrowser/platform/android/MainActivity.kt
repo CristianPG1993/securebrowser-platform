@@ -18,6 +18,8 @@ import com.securebrowser.platform.android.ui.dashboard.DashboardState
 import com.securebrowser.platform.android.ui.dashboard.DashboardViewModel
 import com.securebrowser.platform.android.ui.devices.DevicesRoute
 import com.securebrowser.platform.android.ui.devices.DevicesViewModel
+import com.securebrowser.platform.android.ui.events.EventsRoute
+import com.securebrowser.platform.android.ui.events.EventsViewModel
 import com.securebrowser.platform.android.ui.login.LoginScreen
 import com.securebrowser.platform.android.ui.login.LoginStatus
 import com.securebrowser.platform.android.ui.login.LoginViewModel
@@ -85,6 +87,10 @@ class MainActivity : ComponentActivity() {
                                         onSessionExpired = sessionExpired,
                                         modifier = Modifier.padding(insets)
                                     )
+                                },
+                                eventsScreen = { onBack ->
+                                    val events = viewModel { EventsViewModel(repositories.securityEventRepository::loadPage) }
+                                    EventsRoute(events, onBack, signOut, sessionExpired, Modifier.padding(insets))
                                 }
                             )
                         } else {
