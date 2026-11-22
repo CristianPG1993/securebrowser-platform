@@ -21,6 +21,8 @@ import com.securebrowser.platform.android.ui.login.LoginScreen
 import com.securebrowser.platform.android.ui.login.LoginStatus
 import com.securebrowser.platform.android.ui.login.LoginViewModel
 import com.securebrowser.platform.android.ui.navigation.DashboardNavigation
+import com.securebrowser.platform.android.ui.policies.PoliciesRoute
+import com.securebrowser.platform.android.ui.policies.PoliciesViewModel
 import com.securebrowser.platform.android.ui.theme.SecureBrowserAndroidTheme
 
 /** Conecta el formulario de acceso con el repositorio de la aplicación. */
@@ -60,11 +62,23 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onSignOut = signOut,
-                                modifier = Modifier.padding(insets)
-                            ) { onBack ->
-                                val devices = viewModel { DevicesViewModel(repositories.deviceRepository::loadPage) }
-                                DevicesRoute(devices, onBack, signOut, sessionExpired, Modifier.padding(insets))
-                            }
+                                modifier = Modifier.padding(insets),
+                                devicesScreen = { onBack ->
+                                    val devices = viewModel { DevicesViewModel(repositories.deviceRepository::loadPage) }
+                                    DevicesRoute(devices, onBack, signOut, sessionExpired, Modifier.padding(insets))
+                                },
+                                policiesScreen = { onBack ->
+                                    val policies = viewModel { PoliciesViewModel(repositories.policyRepository::loadPage) }
+                                    PoliciesRoute(
+                                        model = policies,
+                                        onOpenPolicy = null,
+                                        onBack = onBack,
+                                        onSignOut = signOut,
+                                        onSessionExpired = sessionExpired,
+                                        modifier = Modifier.padding(insets)
+                                    )
+                                }
+                            )
                         } else {
                             LoginScreen(status, model::submit, model::clearError, Modifier.padding(insets))
                         }
