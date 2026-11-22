@@ -1,11 +1,15 @@
 package com.securebrowser.platform.android.ui.policies
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -17,12 +21,23 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun PoliciesRoute(
     model: PoliciesViewModel,
-    onOpenPolicy: ((Long) -> Unit)?,
+    detailModel: PolicyDetailViewModel,
     onBack: () -> Unit,
     onSignOut: () -> Unit,
     onSessionExpired: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var selectedId by remember { mutableStateOf<Long?>(null) }
+    // Conserva la página mientras se consulta el detalle y límpiala al salir del catálogo.
+    DisposableEffect(model) { onDispose { model.clearPage() } }
+    val policyId = selectedId
+    if (policyId != null) {
+        val backToCatalog = { selectedId = null }
+        BackHandler(onBack = backToCatalog)
+        PolicyDetailRoute(detailModel, policyId, backToCatalog, onSignOut, onSessionExpired, modifier)
+        return
+    }
+
     val state by model.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -35,14 +50,44 @@ internal fun PoliciesRoute(
     LaunchedEffect(state) {
         if (state == PoliciesState.SessionExpired) sessionExpired()
     }
-    DisposableEffect(model) { onDispose { model.clearPage() } }
 
     PoliciesScreen(
         state = state,
-        onOpenPolicy = onOpenPolicy,
+        onOpenPolicy = { id -> selectedId = id },
         onPrevious = { scope.launch { model.previousPage() } },
         onNext = { scope.launch { model.nextPage() } },
         onRetry = { scope.launch { model.refresh() } },
+        onBack = onBack,
+        onSignOut = onSignOut,
+        modifier = modifier
+    )
+}
+
+/** Consulta el detalle del ID elegido y vuelve a validar la sesión al regresar al primer plano. */
+@Composable
+private fun PolicyDetailRoute(
+    model: PolicyDetailViewModel,
+    id: Long,
+    onBack: () -> Unit,
+    onSignOut: () -> Unit,
+    onSessionExpired: () -> Unit,
+    modifier: Modifier
+) {
+    val state by model.state.collectAsStateWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val scope = rememberCoroutineScope()
+    val sessionExpired by rememberUpdatedState(onSessionExpired)
+
+    DisposableEffect(model, id) { onDispose { model.clearDetail() } }
+    LaunchedEffect(lifecycle, model, id) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { model.refresh(id) }
+    }
+    LaunchedEffect(state) {
+        if (state == PolicyDetailState.SessionExpired) sessionExpired()
+    }
+    PolicyDetailScreen(
+        state = state,
+        onRetry = { scope.launch { model.refresh(id) } },
         onBack = onBack,
         onSignOut = onSignOut,
         modifier = modifier

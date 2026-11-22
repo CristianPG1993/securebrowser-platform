@@ -1,13 +1,19 @@
 package com.securebrowser.platform.android.ui.navigation
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.test.espresso.Espresso.pressBack
 import com.securebrowser.platform.android.core.network.ApiResult
 import com.securebrowser.platform.android.data.remote.DevicePageResponse
 import com.securebrowser.platform.android.data.remote.DeviceResponse
+import com.securebrowser.platform.android.data.remote.FilterMode
 import com.securebrowser.platform.android.data.remote.PolicyPageResponse
+import com.securebrowser.platform.android.data.remote.PolicyResponse
 import com.securebrowser.platform.android.data.remote.UserProfileResponse
 import com.securebrowser.platform.android.data.remote.UserRole
 import com.securebrowser.platform.android.ui.dashboard.DashboardState
@@ -15,6 +21,7 @@ import com.securebrowser.platform.android.ui.devices.DevicesRoute
 import com.securebrowser.platform.android.ui.devices.DevicesViewModel
 import com.securebrowser.platform.android.ui.policies.PoliciesRoute
 import com.securebrowser.platform.android.ui.policies.PoliciesViewModel
+import com.securebrowser.platform.android.ui.policies.PolicyDetailViewModel
 import org.junit.Rule
 import org.junit.Test
 
@@ -22,22 +29,25 @@ import org.junit.Test
 class DashboardNavigationTest {
     @get:Rule val compose = createComposeRule()
 
-    private fun openDashboard(role: UserRole) {
+    private fun openDashboard(role: UserRole, catalog: List<PolicyResponse> = emptyList()) {
         val profile = UserProfileResponse("Ana", "Díaz", "ana@example.invalid", role)
         val devices = DevicesViewModel { page, size ->
             val device = DeviceResponse(7, "test-installation", active = true)
             ApiResult.Success(DevicePageResponse(listOf(device), page, size, 1, 1))
         }
         val policies = PoliciesViewModel { page, size ->
-            ApiResult.Success(PolicyPageResponse(emptyList(), page, size, 0, 0))
+            val items = catalog.drop(page * size).take(size)
+            val totalPages = (catalog.size + size - 1) / size
+            ApiResult.Success(PolicyPageResponse(items, page, size, catalog.size.toLong(), totalPages))
         }
+        val detail = PolicyDetailViewModel { id -> ApiResult.Success(catalog.single { it.id == id }) }
         compose.setContent {
             DashboardNavigation(
                 state = DashboardState.Ready(profile),
                 onRefreshProfile = {},
                 onSignOut = {},
                 devicesScreen = { onBack -> DevicesRoute(devices, onBack, {}, {}) },
-                policiesScreen = { onBack -> PoliciesRoute(policies, null, onBack, {}, {}) }
+                policiesScreen = { onBack -> PoliciesRoute(policies, detail, onBack, {}, {}) }
             )
         }
     }
@@ -65,5 +75,25 @@ class DashboardNavigationTest {
         compose.onNodeWithText("No hay políticas en esta página.").assertIsDisplayed()
         compose.onNodeWithText("Volver al panel").assertIsDisplayed().performClick()
         compose.onNodeWithText("Panel de usuario").assertIsDisplayed()
+    }
+
+    @Test
+    fun selectedPolicyOpensAndBothBackActionsRestoreItsCatalogPage() {
+        val catalog = (1L..21L).map { id ->
+            PolicyResponse(id, 1, "Política $id", true, FilterMode.DENYLIST, listOf("rule-$id.example"),
+                false, FilterMode.DENYLIST, emptyList(), "", "")
+        }
+        openDashboard(UserRole.ADMIN, catalog)
+        compose.onNodeWithText("Catálogo de políticas").performClick()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Siguiente"))
+        compose.onNodeWithText("Siguiente").performClick()
+        compose.onNodeWithText("Política 21").performClick()
+        compose.onNodeWithText("rule-21.example").assertIsDisplayed()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Volver al catálogo"))
+        compose.onNodeWithText("Volver al catálogo").performClick()
+        compose.onNodeWithText("Política 21").performClick()
+        compose.onNodeWithText("rule-21.example").assertIsDisplayed()
+        pressBack()
+        compose.onNodeWithText("Página 2 de 2").assertIsDisplayed()
     }
 }

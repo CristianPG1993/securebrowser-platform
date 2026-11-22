@@ -24,7 +24,7 @@ import com.securebrowser.platform.android.R
 @Composable
 internal fun PoliciesScreen(
     state: PoliciesState,
-    onOpenPolicy: ((Long) -> Unit)?,
+    onOpenPolicy: (Long) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onRetry: () -> Unit,
@@ -51,8 +51,7 @@ internal fun PoliciesScreen(
                 if (page.items.isEmpty()) item { Text(stringResource(R.string.policies_empty)) }
                 items(page.items, key = { it.id }) { policy ->
                     OutlinedCard(
-                        onClick = { onOpenPolicy?.invoke(policy.id) },
-                        enabled = onOpenPolicy != null,
+                        onClick = { onOpenPolicy(policy.id) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(policy.name, Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)

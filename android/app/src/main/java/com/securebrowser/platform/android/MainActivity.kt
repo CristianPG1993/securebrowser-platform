@@ -23,6 +23,7 @@ import com.securebrowser.platform.android.ui.login.LoginViewModel
 import com.securebrowser.platform.android.ui.navigation.DashboardNavigation
 import com.securebrowser.platform.android.ui.policies.PoliciesRoute
 import com.securebrowser.platform.android.ui.policies.PoliciesViewModel
+import com.securebrowser.platform.android.ui.policies.PolicyDetailViewModel
 import com.securebrowser.platform.android.ui.theme.SecureBrowserAndroidTheme
 
 /** Conecta el formulario de acceso con el repositorio de la aplicación. */
@@ -69,9 +70,10 @@ class MainActivity : ComponentActivity() {
                                 },
                                 policiesScreen = { onBack ->
                                     val policies = viewModel { PoliciesViewModel(repositories.policyRepository::loadPage) }
+                                    val detail = viewModel { PolicyDetailViewModel(repositories.policyRepository::loadPolicy) }
                                     PoliciesRoute(
                                         model = policies,
-                                        onOpenPolicy = null,
+                                        detailModel = detail,
                                         onBack = onBack,
                                         onSignOut = signOut,
                                         onSessionExpired = sessionExpired,
