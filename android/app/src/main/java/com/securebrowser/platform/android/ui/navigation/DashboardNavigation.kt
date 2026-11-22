@@ -44,7 +44,8 @@ internal fun DashboardNavigation(
     onRefreshProfile: suspend () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
-    devicesScreen: @Composable (onBack: () -> Unit) -> Unit
+    devicesScreen: @Composable (onBack: () -> Unit) -> Unit,
+    policiesScreen: @Composable (onBack: () -> Unit) -> Unit
 ) {
     var selected by remember { mutableStateOf<DashboardDestination?>(null) }
     val role = (state as? DashboardState.Ready)?.profile?.role
@@ -54,7 +55,11 @@ internal fun DashboardNavigation(
         devicesScreen { selected = null }
         return
     }
-    // Dispositivos valida la sesión con su propia consulta cuando está en primer plano.
+    if (destination == DashboardDestination.Policies) {
+        policiesScreen { selected = null }
+        return
+    }
+    // Los listados validan la sesión con su propia consulta al entrar en primer plano.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val refreshProfile by rememberUpdatedState(onRefreshProfile)
     var retry by remember { mutableIntStateOf(0) }

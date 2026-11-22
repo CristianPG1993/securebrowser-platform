@@ -26,6 +26,7 @@ import com.securebrowser.platform.android.data.remote.DeviceResponse
 @Composable
 internal fun DevicesScreen(
     state: DevicesState,
+    onOpenPolicy: ((Long) -> Unit)?,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onRetry: () -> Unit,
@@ -50,7 +51,7 @@ internal fun DevicesScreen(
             DevicesState.SessionExpired -> item { Text(stringResource(R.string.login_session_expired)) }
             is DevicesState.Ready -> {
                 if (state.isEmpty) item { Text(stringResource(R.string.devices_empty)) }
-                items(state.page.items, key = { it.id }) { device -> DeviceCard(device) }
+                items(state.page.items, key = { it.id }) { device -> DeviceCard(device, onOpenPolicy) }
                 if (state.hasPrevious || state.hasNext) item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (!state.isEmpty) {
@@ -77,7 +78,7 @@ internal fun DevicesScreen(
 
 /** Usa el identificador de instalación si el dispositivo carece de nombre. */
 @Composable
-private fun DeviceCard(device: DeviceResponse) {
+private fun DeviceCard(device: DeviceResponse, onOpenPolicy: ((Long) -> Unit)?) {
     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(device.name?.takeIf { it.isNotBlank() } ?: device.deviceIdentifier,
@@ -87,6 +88,11 @@ private fun DeviceCard(device: DeviceResponse) {
             val seen = device.lastSeenAt
             Text(if (seen == null) stringResource(R.string.devices_never_seen)
                 else stringResource(R.string.devices_last_seen, seen))
+            if (onOpenPolicy != null) {
+                OutlinedButton(onClick = { onOpenPolicy(device.id) }, enabled = device.active) {
+                    Text(stringResource(R.string.devices_view_policy))
+                }
+            }
         }
     }
 }
