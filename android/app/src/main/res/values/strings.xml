@@ -6,6 +6,8 @@
     <string name="dashboard_profile_error">No se pudo cargar tu perfil.</string>
     <string name="dashboard_retry">Reintentar</string>
     <string name="devices_title">Dispositivos</string>
+    <string name="devices_view_policy">Ver política</string>
+    <string name="policy_back_to_devices">Volver a dispositivos</string>
     <string name="devices_load_error">No se pudieron cargar los dispositivos.</string>
     <string name="devices_empty">No hay dispositivos en esta página.</string>
     <string name="devices_page">Página %1$d de %2$d</string>
@@ -23,6 +25,7 @@
     <string name="policy_detail_title">Detalle de la política</string>
     <string name="policy_detail_forbidden">Tu cuenta no tiene permiso para consultar esta política.</string>
     <string name="policy_detail_not_found">No se ha encontrado la política.</string>
+    <string name="policy_detail_device_inactive">El dispositivo está inactivo. Solo puedes consultar la política de un dispositivo activo.</string>
     <string name="policy_detail_error">No se pudo cargar la política.</string>
     <string name="policy_url_filter">Filtro de URL</string>
     <string name="policy_download_control">Control de descargas</string>

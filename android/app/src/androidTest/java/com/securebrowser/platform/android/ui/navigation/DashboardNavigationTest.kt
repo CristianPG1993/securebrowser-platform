@@ -41,12 +41,16 @@ class DashboardNavigationTest {
             ApiResult.Success(PolicyPageResponse(items, page, size, catalog.size.toLong(), totalPages))
         }
         val detail = PolicyDetailViewModel { id -> ApiResult.Success(catalog.single { it.id == id }) }
+        val assignedPolicy = if (role == UserRole.USER) PolicyDetailViewModel { deviceId ->
+            check(deviceId == 7L)
+            ApiResult.Success(catalog.single())
+        } else null
         compose.setContent {
             DashboardNavigation(
                 state = DashboardState.Ready(profile),
                 onRefreshProfile = {},
                 onSignOut = {},
-                devicesScreen = { onBack -> DevicesRoute(devices, onBack, {}, {}) },
+                devicesScreen = { onBack -> DevicesRoute(devices, assignedPolicy, onBack, {}, {}) },
                 policiesScreen = { onBack -> PoliciesRoute(policies, detail, onBack, {}, {}) }
             )
         }
@@ -66,6 +70,19 @@ class DashboardNavigationTest {
             compose.onNodeWithText("Volver al panel").performClick()
             compose.onNodeWithText("Panel de usuario").assertIsDisplayed()
         }
+    }
+
+    @Test
+    fun userCanOpenAssignedPolicyFromDeviceAndReturn() {
+        val policy = PolicyResponse(23, 1, "Política asignada", true, FilterMode.DENYLIST, listOf("device.example"),
+            false, FilterMode.DENYLIST, emptyList(), "", "")
+        openDashboard(UserRole.USER, listOf(policy))
+        compose.onNodeWithText("Dispositivos").performClick()
+        compose.onNodeWithText("Ver política").performClick()
+        compose.onNodeWithText("Política asignada").assertIsDisplayed()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Volver a dispositivos"))
+        compose.onNodeWithText("Volver a dispositivos").performClick()
+        compose.onNodeWithText("ID 7").assertIsDisplayed()
     }
 
     @Test

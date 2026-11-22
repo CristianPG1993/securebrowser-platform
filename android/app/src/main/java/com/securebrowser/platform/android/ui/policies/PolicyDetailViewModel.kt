@@ -12,6 +12,7 @@ internal sealed interface PolicyDetailState {
     class Ready(val policy: PolicyResponse) : PolicyDetailState
     data object Forbidden : PolicyDetailState
     data object NotFound : PolicyDetailState
+    data object DeviceInactive : PolicyDetailState
     data object SessionExpired : PolicyDetailState
     data object Error : PolicyDetailState
 }
@@ -42,6 +43,7 @@ internal class PolicyDetailViewModel(
                 401 -> PolicyDetailState.SessionExpired
                 403 -> PolicyDetailState.Forbidden
                 404 -> PolicyDetailState.NotFound
+                409 -> if (result.code == "DEVICE_INACTIVE") PolicyDetailState.DeviceInactive else PolicyDetailState.Error
                 else -> PolicyDetailState.Error
             }
             ApiResult.ConnectionError, ApiResult.InvalidResponse -> PolicyDetailState.Error

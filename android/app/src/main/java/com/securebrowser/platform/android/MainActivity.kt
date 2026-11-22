@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.securebrowser.platform.android.data.remote.UserRole
 import com.securebrowser.platform.android.ui.dashboard.DashboardState
 import com.securebrowser.platform.android.ui.dashboard.DashboardViewModel
 import com.securebrowser.platform.android.ui.devices.DevicesRoute
@@ -66,7 +67,12 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(insets),
                                 devicesScreen = { onBack ->
                                     val devices = viewModel { DevicesViewModel(repositories.deviceRepository::loadPage) }
-                                    DevicesRoute(devices, onBack, signOut, sessionExpired, Modifier.padding(insets))
+                                    val assignedPolicy = if ((state as? DashboardState.Ready)?.profile?.role == UserRole.USER) {
+                                        viewModel(key = "deviceAssignedPolicy") {
+                                            PolicyDetailViewModel(repositories.deviceRepository::loadAssignedPolicy)
+                                        }
+                                    } else null
+                                    DevicesRoute(devices, assignedPolicy, onBack, signOut, sessionExpired, Modifier.padding(insets))
                                 },
                                 policiesScreen = { onBack ->
                                     val policies = viewModel { PoliciesViewModel(repositories.policyRepository::loadPage) }

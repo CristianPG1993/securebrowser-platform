@@ -26,7 +26,8 @@ internal fun PolicyDetailScreen(
     onRetry: () -> Unit,
     onBack: () -> Unit,
     onSignOut: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    @StringRes backLabel: Int = R.string.policy_back_to_catalog
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -38,6 +39,7 @@ internal fun PolicyDetailScreen(
             PolicyDetailState.Loading -> item { CircularProgressIndicator() }
             PolicyDetailState.Forbidden -> item { Text(stringResource(R.string.policy_detail_forbidden)) }
             PolicyDetailState.NotFound -> item { Text(stringResource(R.string.policy_detail_not_found)) }
+            PolicyDetailState.DeviceInactive -> item { Text(stringResource(R.string.policy_detail_device_inactive)) }
             PolicyDetailState.SessionExpired -> item { Text(stringResource(R.string.login_session_expired)) }
             PolicyDetailState.Error -> {
                 item { Text(stringResource(R.string.policy_detail_error)) }
@@ -51,7 +53,7 @@ internal fun PolicyDetailScreen(
             }
         }
         if (state != PolicyDetailState.SessionExpired) {
-            item { OutlinedButton(onClick = onBack) { Text(stringResource(R.string.policy_back_to_catalog)) } }
+            item { OutlinedButton(onClick = onBack) { Text(stringResource(backLabel)) } }
             item { OutlinedButton(onClick = onSignOut) { Text(stringResource(R.string.logout_submit)) } }
         }
     }
