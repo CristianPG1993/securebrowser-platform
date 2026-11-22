@@ -36,6 +36,15 @@
     <string name="policy_no_rules">Sin reglas configuradas</string>
     <string name="policy_back_to_catalog">Volver al catálogo</string>
     <string name="events_title">Eventos de seguridad</string>
+    <string name="events_filter">Tipo: %1$s</string>
+    <string name="events_all_types">Todos</string>
+    <string name="events_url_blocked">URL bloqueada</string>
+    <string name="events_download_blocked">Descarga bloqueada</string>
+    <string name="events_policy_updated">Política actualizada</string>
+    <string name="events_device">Dispositivo %1$d</string>
+    <string name="events_empty">No hay eventos en esta página.</string>
+    <string name="events_load_error">No se pudo cargar el historial de eventos.</string>
+    <string name="events_forbidden">Tu cuenta no tiene permiso para consultar el historial.</string>
     <string name="dashboard_return">Volver al panel</string>
     <string name="login_title">Iniciar sesión</string>
     <string name="login_email">Correo electrónico</string>

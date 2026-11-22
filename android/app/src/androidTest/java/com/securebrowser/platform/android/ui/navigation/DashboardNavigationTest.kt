@@ -14,11 +14,16 @@ import com.securebrowser.platform.android.data.remote.DeviceResponse
 import com.securebrowser.platform.android.data.remote.FilterMode
 import com.securebrowser.platform.android.data.remote.PolicyPageResponse
 import com.securebrowser.platform.android.data.remote.PolicyResponse
+import com.securebrowser.platform.android.data.remote.SecurityEventPageResponse
+import com.securebrowser.platform.android.data.remote.SecurityEventResponse
+import com.securebrowser.platform.android.data.remote.SecurityEventType
 import com.securebrowser.platform.android.data.remote.UserProfileResponse
 import com.securebrowser.platform.android.data.remote.UserRole
 import com.securebrowser.platform.android.ui.dashboard.DashboardState
 import com.securebrowser.platform.android.ui.devices.DevicesRoute
 import com.securebrowser.platform.android.ui.devices.DevicesViewModel
+import com.securebrowser.platform.android.ui.events.EventsRoute
+import com.securebrowser.platform.android.ui.events.EventsViewModel
 import com.securebrowser.platform.android.ui.policies.PoliciesRoute
 import com.securebrowser.platform.android.ui.policies.PoliciesViewModel
 import com.securebrowser.platform.android.ui.policies.PolicyDetailViewModel
@@ -41,6 +46,11 @@ class DashboardNavigationTest {
             ApiResult.Success(PolicyPageResponse(items, page, size, catalog.size.toLong(), totalPages))
         }
         val detail = PolicyDetailViewModel { id -> ApiResult.Success(catalog.single { it.id == id }) }
+        val events = EventsViewModel { page, size, type ->
+            val event = SecurityEventResponse(1, 7, SecurityEventType.URL_BLOCKED, "2026-11-22T10:00:00Z")
+            val items = listOf(event).filter { type == null || it.type == type }
+            ApiResult.Success(SecurityEventPageResponse(items, page, size, items.size.toLong(), items.size))
+        }
         val assignedPolicy = if (role == UserRole.USER) PolicyDetailViewModel { deviceId ->
             check(deviceId == 7L)
             ApiResult.Success(catalog.single())
@@ -51,7 +61,8 @@ class DashboardNavigationTest {
                 onRefreshProfile = {},
                 onSignOut = {},
                 devicesScreen = { onBack -> DevicesRoute(devices, assignedPolicy, onBack, {}, {}) },
-                policiesScreen = { onBack -> PoliciesRoute(policies, detail, onBack, {}, {}) }
+                policiesScreen = { onBack -> PoliciesRoute(policies, detail, onBack, {}, {}) },
+                eventsScreen = { onBack -> EventsRoute(events, onBack, {}, {}) }
             )
         }
     }
@@ -66,6 +77,11 @@ class DashboardNavigationTest {
             if (title == "Dispositivos") {
                 compose.onNodeWithText("ID 7").assertIsDisplayed()
                 compose.onNodeWithText("Sin comunicación registrada").assertIsDisplayed()
+            } else {
+                compose.onNodeWithText("Dispositivo 7").assertIsDisplayed()
+                compose.onNodeWithText("Tipo: Todos").performClick()
+                compose.onNodeWithText("Descarga bloqueada").performClick()
+                compose.onNodeWithText("No hay eventos en esta página.").assertIsDisplayed()
             }
             compose.onNodeWithText("Volver al panel").performClick()
             compose.onNodeWithText("Panel de usuario").assertIsDisplayed()
