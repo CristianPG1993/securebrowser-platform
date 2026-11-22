@@ -17,6 +17,9 @@
     <string name="devices_never_seen">Sin comunicación registrada</string>
     <string name="devices_last_seen">Última comunicación: %1$s</string>
     <string name="policies_title">Catálogo de políticas</string>
+    <string name="policies_empty">No hay políticas en esta página.</string>
+    <string name="policies_load_error">No se pudo cargar el catálogo de políticas.</string>
+    <string name="policies_forbidden">Tu cuenta no tiene permiso para consultar el catálogo.</string>
     <string name="events_title">Eventos de seguridad</string>
     <string name="dashboard_return">Volver al panel</string>
     <string name="login_title">Iniciar sesión</string>
