@@ -78,7 +78,12 @@ class MainActivity : ComponentActivity() {
                                 },
                                 policiesScreen = { onBack ->
                                     val policies = viewModel { PoliciesViewModel(repositories.policyRepository::loadPage) }
-                                    val detail = viewModel { PolicyDetailViewModel(repositories.policyRepository::loadPolicy) }
+                                    val detail = viewModel {
+                                        PolicyDetailViewModel(
+                                            loadPolicy = repositories.policyRepository::loadPolicy,
+                                            updatePolicy = repositories.policyRepository::updatePolicy,
+                                        )
+                                    }
                                     PoliciesRoute(
                                         model = policies,
                                         detailModel = detail,
