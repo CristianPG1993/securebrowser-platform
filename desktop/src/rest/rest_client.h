@@ -18,6 +18,7 @@ enum class RestTransportError {
     Cancelled
 };
 
+// Datos que recibe quien llamó a Send: estado HTTP, cuerpo y posible fallo de transporte.
 // Copia propia del resultado, sin conservar referencias a la respuesta de Qt Network.
 struct RestResult {
     // Ausente si no se recibió un estado HTTP; puede coexistir con un fallo posterior de transporte.
@@ -34,7 +35,7 @@ struct RestResult {
 // Cliente que realizará las peticiones HTTP de la aplicación de forma asíncrona.
 class RestClient final {
 public:
-    // Función que recibirá una copia del resultado cuando termine la petición.
+    // Función que aporta quien llama a Send; recibirá una copia del resultado al terminar la petición.
     using CompletionCallback = std::function<void(RestResult)>;
 
     // Operaciones necesarias para consultar datos y enviar login, refresh, logout y eventos.
@@ -70,10 +71,12 @@ private:
     // Evita utilizar el gestor de Qt desde un hilo distinto del que lo posee.
     void RequireOwnerThread() const;
 
+    // Prepara una copia con las opciones de transporte; el envío se realiza después desde Send.
     // Valida la petición y fija JSON, acceso a red y redirecciones sin seguirlas automáticamente.
     [[nodiscard]] static QNetworkRequest PrepareRequest(
         Method method, const QNetworkRequest& request, const QByteArray& body);
 
+    // Convierte la respuesta Qt en nuestro struct RestResult cuando la operación ya ha terminado.
     // Copia estado, cuerpo y error; no interpreta JSON ni decide si la operación fue autorizada.
     [[nodiscard]] static RestResult ReadResult(QNetworkReply& reply, bool timedOut);
 

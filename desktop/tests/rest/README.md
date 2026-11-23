@@ -1,0 +1,91 @@
+# Pruebas del transporte REST — #122
+
+Suite de 11 pruebas GoogleTest del cliente `RestClient`, usando un servidor TCP/HTTP
+falso dentro del mismo proceso. Escucha únicamente en `127.0.0.1`, en un puerto
+libre asignado por Windows. No utiliza Spring Boot, PostgreSQL, CEF, credenciales
+reales ni variables de `.env`. Los datos de autenticación de los casos son fixtures.
+
+## Qué comprueba
+
+- GET asíncrono con Bearer explícito, estado/cuerpo conservados y una sola entrega.
+- POST con cuerpo JSON, sin añadir Authorization implícitamente al login.
+- HTTP 401 y 503 como respuestas del servidor, separadas de los fallos de transporte.
+- Desconexión sin respuesta y HTTP 200 con cuerpo truncado.
+- Timeout con el plazo real de producción de 15 segundos; es el caso más lento.
+- Cancelación de dos peticiones pendientes, una entrega por petición.
+- Destrucción del cliente durante una petición y desde su propia callback.
+- Rechazo de peticiones inválidas antes de enviar datos.
+- Redirección devuelta sin seguirla ni reenviar Authorization al destino.
+
+No acredita login/refresh reales, TLS contra un servidor remoto, identificación del
+Device, política aplicada ni E2E con CEF. Esas verificaciones corresponden a los
+siguientes incrementos. Los resultados comprobados se recogen en la evidencia
+local; las configuraciones restantes y CI conservan su validación pendiente.
+
+## Preparación y ejecución
+
+Desde la raíz del repositorio, con el toolchain MSVC x64 habitual y las copias
+preparadas de ICU y GoogleTest descritas en [la guía general](../README.md).
+El Qt fijado es 6.12.0. Ajustar `Qt6_DIR` si el kit está en otra carpeta.
+
+```powershell
+cmake -S desktop -B desktop/build/rest-tests -G "Visual Studio 17 2022" -A "x64,version=10.0.28000.0" -T v143 -DSBP_BUILD_DESKTOP_APP=OFF -DBUILD_TESTING=ON -DSBP_BUILD_REST_TESTS=ON "-DQt6_DIR=C:/Qt/6.12.0/msvc2022_64/lib/cmake/Qt6"
+```
+
+Compilar y ejecutar Debug:
+
+```powershell
+cmake --build desktop/build/rest-tests --config Debug --target sbp_rest_tests --parallel 1
+$restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
+ctest --test-dir desktop/build/rest-tests -C Debug -R '^REST\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/rest-Debug.xml"
+```
+
+Repetir en Release:
+
+```powershell
+cmake --build desktop/build/rest-tests --config Release --target sbp_rest_tests --parallel 1
+$restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
+ctest --test-dir desktop/build/rest-tests -C Release -R '^REST\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/rest-Release.xml"
+```
+
+Se esperan 11 casos por configuración, sin fallos. Cada caso tiene un límite CTest
+de 30 segundos; el del timeout deja hasta 20 segundos al bucle de eventos para
+observar el vencimiento de 15 segundos. La espera procesa eventos Qt, sin bloquear
+con sleeps el hilo que atiende cliente y servidor. El ejecutable copia Core y
+Network junto a su salida; no requiere modificar el PATH ni plugins de ventanas.
+
+Los informes XML quedan en `desktop/build/rest-tests/`. Ante un fallo, conservar
+también `Testing/Temporary/LastTest.log` y el SHA de la revisión probada. Registrar
+comando, configuración y resultado real antes de proponer el commit de pruebas.
+
+## Regresión del navegador
+
+Después de estos cambios de CMake/runtime, volver a compilar el navegador en Debug
+y Release mediante sus comandos habituales y conservar la comprobación de arranque
+y cierre. Desktop CI ejecutará la suite REST, las suites existentes y los controles
+de runtime/arranque. Hasta publicar una PR y terminar sus checks, CI queda pendiente.
+
+## Evidencia local — 23 de noviembre de 2026
+
+El autor confirmó la ejecución y se revisó el informe JUnit generado:
+
+| Configuración | Resultado | Informe local |
+| --- | --- | --- |
+| Debug | 11 pruebas, 0 fallos, 0 errores y 0 omitidas; 16 segundos en total. | `desktop/build/rest-tests/rest-Debug.xml` |
+| Release | 11 pruebas, 0 fallos, 0 errores y 0 omitidas; 15 segundos en total. | `desktop/build/rest-tests/rest-Release.xml` |
+
+El código del transporte probado corresponde al commit `b869fe7`; esta entrega
+incorpora la suite y su configuración de CMake y CI. Los SHA de la revisión completa
+se registran en su PR. Las compilaciones de la suite son posteriores a las fuentes
+de sus ejecuciones. Después se ampliaron únicamente los comentarios didácticos:
+se comprobó que los seis archivos C++ conservan el mismo contenido al excluir
+comentarios y espacios. Antes del commit también se compararon los dos archivos
+del transporte con `b869fe7`, con el mismo resultado.
+Los binarios y los informes permanecen en `build/` y no se versionan.
+
+Huellas SHA-256 de los informes revisados:
+
+- Debug: `8CCB2B14CF42CB95F26979BD6137B780522DD304E3702EA17B48D261DB99EFBA`.
+- Release: `FA3BB0EE6C52B014EBDB7D0F2EF49CC6A074EDFABD2ADE40CA0503CB189156CE`.
+
+La regresión del navegador y GitHub Actions de este incremento siguen pendientes.

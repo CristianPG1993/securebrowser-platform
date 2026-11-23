@@ -28,12 +28,15 @@ RestClient::~RestClient() {
 
 void RestClient::Send(Method method, const QNetworkRequest& request,
                       const QByteArray& body, CompletionCallback onCompleted) {
+    // Estas comprobaciones detectan un uso incorrecto del cliente antes de enviar datos al servidor.
     RequireOwnerThread();
     if (!onCompleted) {
         throw std::invalid_argument("REST request requires a completion callback.");
     }
 
     const QNetworkRequest prepared = PrepareRequest(method, request, body);
+    // get/post inician la operación y devuelven el control sin esperar a la respuesta HTTP.
+    // reply representa la operación en curso; su estado y cuerpo se recogerán al recibir finished().
     QNetworkReply* reply = method == Method::Get
         ? networkManager_.get(prepared) : networkManager_.post(prepared, body);
 
@@ -41,13 +44,15 @@ void RestClient::Send(Method method, const QNetworkRequest& request,
     auto* timer = new QTimer(reply);
     timer->setSingleShot(true);
     timer->setTimerType(Qt::PreciseTimer);
-    // Las dos funciones conservan el motivo del aborto y una única entrega consumible por petición.
+    // shared_ptr mantiene estos datos vivos después de que Send retorne y las lambdas comparten su contenido.
+    // timedOut indica si venció nuestro plazo; completion conserva la función que recibirá el resultado.
     const auto timedOut = std::make_shared<bool>(false);
     const auto completion = std::make_shared<CompletionCallback>(std::move(onCompleted));
 
     // Consulta la señal en ejecución para evitar importar QTimer::staticMetaObject como dato.
     const QMetaObject* timerMeta = timer->metaObject();
     const int timeoutIndex = timerMeta->indexOfSignal("timeout()");
+    // connect registra la reacción; no ejecuta la lambda ahora. timeoutConnection permite comprobar el registro.
     // Se ejecuta en Qt: fijar primero el motivo distingue el timeout de una cancelación explícita.
     const auto timeoutConnection = QMetaObject::connect(
         timer, timerMeta->method(timeoutIndex), reply, [reply, timedOut] {
@@ -59,15 +64,19 @@ void RestClient::Send(Method method, const QNetworkRequest& request,
     // deliveryContext pertenece al cliente y retira la entrega encolada si este se destruye.
     const auto finish = [reply, timer, timedOut, completion, deliveryContext = &networkManager_] {
         if (!*completion) {
+            // Otra ejecución de finish ya retiró la callback: no se vuelve a entregar esta petición.
             return;
         }
+        // exchange devuelve la callback anterior y deja vacía la compartida, consumiéndola una sola vez.
         auto callback = std::exchange(*completion, CompletionCallback{});
+        // La operación ya terminó, también si falló o se canceló: detener el plazo y copiar su resultado.
         timer->stop();
         RestResult result = ReadResult(*reply, *timedOut);
         // Qt exige retirada diferida de la respuesta desde finished; no se utiliza después de la entrega.
         reply->deleteLater();
         // Entregar fuera de la señal finished permite que el receptor destruya el cliente sin destruir
         // la respuesta dentro de su propio callback de red. La tarea conserva únicamente datos propios.
+        // singleShot(0) encola la tarea en Qt; es independiente del temporizador de 15 segundos.
         QTimer::singleShot(0, deliveryContext,
             [callback = std::move(callback), result = std::move(result)]() mutable {
                 DeliverResult(std::move(callback), std::move(result));
@@ -77,9 +86,11 @@ void RestClient::Send(Method method, const QNetworkRequest& request,
     // Consultar los metadatos del objeto conserva /DELAYLOAD, igual que en la interfaz Qt existente.
     const QMetaObject* replyMeta = reply->metaObject();
     const int finishedIndex = replyMeta->indexOfSignal("finished()");
+    // Une el aviso finished() con finish; connection guarda el registro, no el resultado HTTP.
     const auto connection = QMetaObject::connect(
         reply, replyMeta->method(finishedIndex), &networkManager_, finish);
     if (!timeoutConnection || !connection) {
+        // Este fallo es de conexión de señales Qt; todavía no describe si el backend aceptó la operación.
         // Si solo falló el temporizador, retirar finished antes de abortar evita una segunda entrega.
         if (connection) {
             QObject::disconnect(connection);
@@ -102,6 +113,7 @@ void RestClient::Send(Method method, const QNetworkRequest& request,
         // El gestor actúa como contexto y retira esta tarea si el cliente se destruye antes de atenderla.
         QTimer::singleShot(0, &networkManager_, finish);
     } else {
+        // Solo una operación pendiente necesita el plazo: si vence, timeout() marca timedOut y llama a abort().
         timer->start(RequestTimeoutMilliseconds);
     }
 }
@@ -112,6 +124,7 @@ void RestClient::CancelAll() {
     QList<QPointer<QNetworkReply>> replies;
     const auto children = OwnedReplies();
     for (auto* reply : children) {
+        // QPointer vigila la vida del objeto; se vuelve nulo si Qt lo destruye, sin impedir su destrucción.
         replies.append(QPointer<QNetworkReply>(reply));
     }
     // La lista es local: después de abortar no se vuelve a consultar ningún miembro de este cliente.
@@ -161,10 +174,12 @@ QNetworkRequest RestClient::PrepareRequest(
     }
 
     QNetworkRequest prepared(request);
+    // Estas cabeceras sí viajan al servidor: Accept describe la respuesta esperada y Content-Type el cuerpo enviado.
     prepared.setRawHeader("Accept", "application/json, application/problem+json");
     if (method == Method::Post && !prepared.hasRawHeader("Content-Type")) {
         prepared.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     }
+    // setAttribute fija opciones internas de Qt; setHeader/setRawHeader fija las cabeceras HTTP explícitas.
     // El token se enviará solo al destino solicitado; el cliente no sigue redirecciones de la API.
     prepared.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     prepared.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
@@ -177,6 +192,7 @@ QNetworkRequest RestClient::PrepareRequest(
     // Se utiliza solo el plazo total propio, sin otro timeout de inactividad que compita con su clasificación.
     prepared.setTransferTimeout(0);
     if (scheme == QStringLiteral("https")) {
+        // Configura la validación del certificado; la comprobación real ocurre al establecer la conexión HTTPS.
         auto ssl = QSslConfiguration::defaultConfiguration();
         ssl.setPeerVerifyMode(QSslSocket::VerifyPeer);
         prepared.setSslConfiguration(ssl);
@@ -189,6 +205,7 @@ RestResult RestClient::ReadResult(QNetworkReply& reply, bool timedOut) {
     QRestReply response(&reply);
     RestResult result;
     const int status = response.httpStatus();
+    // statusCode permanece vacío si no llegó una línea de estado HTTP válida.
     if (status >= 100 && status <= 599) {
         result.statusCode = status;
     }
@@ -198,8 +215,11 @@ RestResult RestClient::ReadResult(QNetworkReply& reply, bool timedOut) {
     }
 
     if (timedOut) {
+        // Tiene prioridad el motivo que fijó nuestro temporizador antes de abortar la operación.
         result.transportError = RestTransportError::Timeout;
     } else {
+        // timedOut=false no garantiza éxito: todavía puede haber cancelación, fallo de red u otro timeout de Qt.
+        // QRestReply separa los HTTP 401/503 recibidos correctamente de los fallos de transporte.
         switch (response.error()) {
         case QNetworkReply::NoError:
             // Sin estado HTTP no existe una respuesta REST válida, aunque Qt no señale otro error.
@@ -223,6 +243,7 @@ RestResult RestClient::ReadResult(QNetworkReply& reply, bool timedOut) {
 
 void RestClient::DeliverResult(CompletionCallback onCompleted, RestResult result) noexcept {
     try {
+        // Entrega los datos en bruto: quien solicitó login o política interpretará después el JSON y el estado HTTP.
         onCompleted(std::move(result));
     } catch (...) {
         // No registrar la excepción: podría incluir credenciales o el cuerpo de la respuesta.
