@@ -206,7 +206,7 @@ if(SBP_BUILD_DESKTOP_APP)
         )
     endif()
 
-    find_package(Qt6 6.12.0 EXACT REQUIRED CONFIG COMPONENTS Widgets NO_DEFAULT_PATH)
+    find_package(Qt6 6.12.0 EXACT REQUIRED CONFIG COMPONENTS Widgets Network NO_DEFAULT_PATH)
 endif()
 
 # El SDK se prepara con setup-cef.ps1 y se selecciona mediante una ruta local.
@@ -437,6 +437,8 @@ add_library(SecureBrowser SHARED
     src/demo/demo_policy_source.cpp
     src/diagnostics/diagnostics_log.cpp
     src/diagnostics/diagnostics_log.h
+    src/rest/rest_client.h
+    src/rest/rest_client.cpp
     src/ui/browser_host.cpp
     src/ui/browser_host.h
     src/ui/browser_window.cpp
@@ -465,6 +467,7 @@ target_link_options(SecureBrowser PRIVATE
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Core>"
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Gui>"
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Widgets>"
+    "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Network>"
 )
 # Carga estas DLL de Windows al usarlas, después de distinguir los subprocesos de CEF.
 # Contienen las funciones para obtener la carpeta del usuario y liberar su resultado.
@@ -474,6 +477,7 @@ target_link_options(SecureBrowser PRIVATE "/DELAYLOAD:$<TARGET_FILE_NAME:sbp_icu
 target_link_libraries(SecureBrowser PRIVATE
     sbp_security_core
     Qt6::Widgets
+    Qt6::Network
     libcef_dll_wrapper
     libcef_lib
     ${CEF_STANDARD_LIBS}
