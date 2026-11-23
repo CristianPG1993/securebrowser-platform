@@ -87,6 +87,7 @@ private fun PolicyDetailRoute(
     }
     PolicyDetailScreen(
         state = state,
+        onSave = { draft -> scope.launch { model.save(draft) } },
         onRetry = { scope.launch { model.refresh(id) } },
         onBack = onBack,
         onSignOut = onSignOut,
