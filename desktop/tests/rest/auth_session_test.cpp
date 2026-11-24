@@ -1,4 +1,4 @@
-#include "rest_test_support.h"
+#include "auth_refresh_test.h"
 
 #include "rest/auth_session.h"
 
@@ -16,9 +16,7 @@ namespace sbp {
 // Reutiliza el servidor y la espera de eventos de las pruebas de transporte.
 using AuthSessionTest = RestClientTest;
 
-constexpr char ValidLoginResponse[] =
-    R"({"accessToken":"fake-access","tokenType":"Bearer","expiresIn":900,"refreshToken":"fake-refresh"})";
-
+// Verifica el correo y la contraseña que recibe el servidor y el éxito que Login entrega al cliente.
 TEST_F(AuthSessionTest, LoginPostsCredentialsAndReportsSuccess) {
     RestTestServer server(HttpResponse(200, ValidLoginResponse));
     ASSERT_TRUE(server.Listen());
@@ -53,6 +51,7 @@ TEST_F(AuthSessionTest, LoginPostsCredentialsAndReportsSuccess) {
     EXPECT_EQ(expected, body.object());
 }
 
+// Comprueba que la callback recibe el 401 y el código INVALID_CREDENTIALS cuando falla el login.
 TEST_F(AuthSessionTest, LoginReportsInvalidCredentialsOn401) {
     RestTestServer server(HttpResponse(401, R"({"code":"INVALID_CREDENTIALS"})"));
     ASSERT_TRUE(server.Listen());
@@ -72,6 +71,7 @@ TEST_F(AuthSessionTest, LoginReportsInvalidCredentialsOn401) {
     EXPECT_EQ(RestTransportError::None, result->transportError);
 }
 
+// Comprueba que el login exige tanto un estado 200 como un par de tokens completo.
 TEST_F(AuthSessionTest, LoginRequiresHttp200AndCompleteTokens) {
     // El primer 200 tiene un DTO incompleto. El 201 sí trae tokens válidos, pero el login exige un 200.
     const std::pair<int, QByteArray> cases[] = {
@@ -97,6 +97,7 @@ TEST_F(AuthSessionTest, LoginRequiresHttp200AndCompleteTokens) {
     }
 }
 
+// Verifica que el cliente conserva el 503 aunque el cuerpo carezca de un código de error válido.
 TEST_F(AuthSessionTest, LoginPreservesHttpErrorWithoutAUsableProblemCode) {
     const QByteArray bodies[] = {"Service unavailable", R"({})", R"({"code":42})", R"({"code":"  "})"};
     for (const auto& body : bodies) {
@@ -119,6 +120,7 @@ TEST_F(AuthSessionTest, LoginPreservesHttpErrorWithoutAUsableProblemCode) {
     }
 }
 
+// Simula un corte antes de las cabeceras o durante el cuerpo y comprueba qué estado HTTP llega al cliente.
 TEST_F(AuthSessionTest, LoginReportsDroppedConnectionBeforeOrAfterHttpStatus) {
     // El segundo caso envía JSON válido, pero anuncia un byte de más y corta el cuerpo HTTP.
     const QByteArray body = ValidLoginResponse;
@@ -145,6 +147,7 @@ TEST_F(AuthSessionTest, LoginReportsDroppedConnectionBeforeOrAfterHttpStatus) {
     }
 }
 
+// Completa un segundo login antes del primero y comprueba que la respuesta antigua se descarta.
 TEST_F(AuthSessionTest, NewerLoginDiscardsLateSuccessAndLateError) {
     for (const int oldStatus : {200, 401}) {
         SCOPED_TRACE(oldStatus);
@@ -179,6 +182,7 @@ TEST_F(AuthSessionTest, NewerLoginDiscardsLateSuccessAndLateError) {
     }
 }
 
+// Responde al login después de destruir la sesión y comprueba que su callback queda retirada.
 TEST_F(AuthSessionTest, DestroyedSessionDiscardsPendingLoginResponse) {
     RestTestServer server({}, RestTestServer::Mode::Hold);
     ASSERT_TRUE(server.Listen());
@@ -200,6 +204,7 @@ TEST_F(AuthSessionTest, DestroyedSessionDiscardsPendingLoginResponse) {
     EXPECT_EQ(0, *calls);
 }
 
+// Comprueba que el cliente rechaza las URL base inválidas antes de enviar el correo o la contraseña.
 TEST_F(AuthSessionTest, LoginRejectsInvalidApiBasesBeforeSendingCredentials) {
     RestTestServer server(HttpResponse(200, ValidLoginResponse));
     ASSERT_TRUE(server.Listen());
@@ -229,6 +234,7 @@ TEST_F(AuthSessionTest, LoginRejectsInvalidApiBasesBeforeSendingCredentials) {
     EXPECT_EQ(0, calls);
 }
 
+// Verifica que una llamada sin callback o desde otro hilo permite que el login pendiente termine correctamente.
 TEST_F(AuthSessionTest, InvalidCallsPreserveTheLoginAlreadyInProgress) {
     RestTestServer server({}, RestTestServer::Mode::Hold);
     ASSERT_TRUE(server.Listen());
@@ -305,6 +311,121 @@ TEST_F(AuthSessionTest, FetchUserIdentityUsesLoginTokenAndReadsProfile) {
     ASSERT_TRUE(identity.has_value());
     EXPECT_EQ(7, identity->id);
     EXPECT_EQ(3, identity->companyId);
+}
+
+// Comprueba que un 401 en el perfil provoca un refresh y que el segundo GET utiliza el nuevo accessToken.
+TEST_F(AuthSessionTest, FetchUserIdentityRetriesWithRefreshedAccessToken) {
+    RestTestServer server({}, RestTestServer::Mode::Hold);
+    ASSERT_TRUE(server.Listen());
+    std::optional<AuthResult> loginResult;
+    std::optional<AuthResult> profileResult;
+    std::optional<UserIdentity> identity;
+    RestClient client;
+    AuthSession session(client, server.Url(QStringLiteral("/api/v1/")));
+
+    // Guarda el resultado del login para iniciar la consulta cuando la sesión tenga el primer par de tokens.
+    session.Login(QStringLiteral("user@example.test"), QStringLiteral("clave"), [&loginResult](AuthResult received) {
+        loginResult = std::move(received);
+    });
+    // Espera a que el servidor local reciba el POST de login.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 1; }));
+    ASSERT_TRUE(server.ReplyToHeldRequest(0, HttpResponse(200, ValidLoginResponse)));
+    // El hilo Qt entrega el resultado antes de iniciar el primer GET.
+    ASSERT_TRUE(WaitFor([&loginResult] { return loginResult.has_value(); }));
+    ASSERT_EQ(AuthOutcome::Success, loginResult->outcome);
+
+    // El receptor del perfil sigue siendo el mismo durante el GET inicial, la renovación y el reintento.
+    session.FetchUserIdentity([&profileResult, &identity](AuthResult received, std::optional<UserIdentity> user) {
+        profileResult = std::move(received);
+        identity = std::move(user);
+    });
+    // Rechaza el primer GET para que AuthSession tenga que renovar.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 2; }));
+    ASSERT_TRUE(server.Requests()[1].startsWith("GET /api/v1/users/me HTTP/1.1\r\n"));
+    ASSERT_TRUE(server.ReplyToHeldRequest(1, HttpResponse(401, R"({"code":"AUTHENTICATION_REQUIRED"})")));
+
+    // Comprueba el POST que desencadenó el 401 antes de entregar los tokens renovados.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 3; }));
+    const QByteArray& refresh = server.Requests()[2];
+    ASSERT_TRUE(refresh.startsWith("POST /api/v1/auth/refresh HTTP/1.1\r\n"));
+    const qsizetype separator = refresh.indexOf("\r\n\r\n");
+    ASSERT_GE(separator, 0);
+    EXPECT_FALSE(refresh.first(separator).toLower().contains("\r\nauthorization:"));
+    const QJsonObject expected{{QStringLiteral("refreshToken"), QStringLiteral("fake-refresh")}};
+    EXPECT_EQ(expected, QJsonDocument::fromJson(refresh.mid(separator + 4)).object());
+    ASSERT_TRUE(server.ReplyToHeldRequest(2, HttpResponse(200, ValidRefreshResponse)));
+
+    // Inspecciona la cabecera del segundo GET antes de responder con el perfil.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 4; }));
+    EXPECT_FALSE(profileResult.has_value());
+    const QByteArray& retry = server.Requests()[3];
+    ASSERT_TRUE(retry.startsWith("GET /api/v1/users/me HTTP/1.1\r\n"));
+    const QByteArray headerName = "\r\nauthorization:";
+    const qsizetype headerStart = retry.toLower().indexOf(headerName);
+    ASSERT_GE(headerStart, 0);
+    EXPECT_TRUE(retry.sliced(headerStart + headerName.size()).startsWith(" Bearer new-access\r\n"));
+    ASSERT_TRUE(server.ReplyToHeldRequest(3, HttpResponse(200, R"({"id":7,"companyId":3})")));
+
+    // Espera la entrega del resultado del segundo GET al receptor original.
+    ASSERT_TRUE(WaitFor([&profileResult] { return profileResult.has_value(); }));
+    EXPECT_EQ(AuthOutcome::Success, profileResult->outcome);
+    EXPECT_EQ(200, profileResult->statusCode);
+    ASSERT_TRUE(identity.has_value());
+    EXPECT_EQ(7, identity->id);
+    EXPECT_EQ(3, identity->companyId);
+}
+
+// Comprueba que un segundo 401 en GET /users/me llega al receptor y termina la consulta tras un solo refresh.
+TEST_F(AuthSessionTest, FetchUserIdentityStopsAfterSecond401) {
+    RestTestServer server({}, RestTestServer::Mode::Hold);
+    ASSERT_TRUE(server.Listen());
+    const QByteArray unauthorized = HttpResponse(401, R"({"code":"AUTHENTICATION_REQUIRED"})");
+    std::optional<AuthResult> loginResult;
+    std::optional<AuthResult> profileResult;
+    int profileCalls = 0;
+    RestClient client;
+    AuthSession session(client, server.Url(QStringLiteral("/api/v1/")));
+
+    // Guarda el resultado del login antes de pedir el perfil.
+    session.Login(QStringLiteral("user@example.test"), QStringLiteral("clave"), [&loginResult](AuthResult received) {
+        loginResult = std::move(received);
+    });
+    // La primera petición permite entregar a la sesión su par inicial de tokens.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 1; }));
+    ASSERT_TRUE(server.ReplyToHeldRequest(0, HttpResponse(200, ValidLoginResponse)));
+    // Espera a que Login haya aceptado los tokens en el hilo Qt.
+    ASSERT_TRUE(WaitFor([&loginResult] { return loginResult.has_value(); }));
+    ASSERT_EQ(AuthOutcome::Success, loginResult->outcome);
+
+    // Cuenta las entregas de esta única consulta y comprueba que el error llega sin identidad.
+    session.FetchUserIdentity([&profileCalls, &profileResult](AuthResult received, std::optional<UserIdentity> user) {
+        ++profileCalls;
+        EXPECT_FALSE(user.has_value());
+        profileResult = std::move(received);
+    });
+    // El primer GET recibe el 401 que inicia la renovación.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 2; }));
+    ASSERT_TRUE(server.Requests()[1].startsWith("GET /api/v1/users/me HTTP/1.1\r\n"));
+    ASSERT_TRUE(server.ReplyToHeldRequest(1, unauthorized));
+    // El refresh tiene éxito y entrega al cliente el nuevo par.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 3; }));
+    ASSERT_TRUE(server.Requests()[2].startsWith("POST /api/v1/auth/refresh HTTP/1.1\r\n"));
+    ASSERT_TRUE(server.ReplyToHeldRequest(2, HttpResponse(200, ValidRefreshResponse)));
+    // Rechaza también el GET de reintento. El receptor aún espera su resultado.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 4; }));
+    ASSERT_TRUE(server.Requests()[3].startsWith("GET /api/v1/users/me HTTP/1.1\r\n"));
+    ASSERT_EQ(0, profileCalls);
+    ASSERT_TRUE(server.ReplyToHeldRequest(3, unauthorized));
+
+    // Una quinta petición indicaría que el cliente volvió a renovar o reintentar.
+    ASSERT_TRUE(WaitFor([&] { return profileResult.has_value() || server.Requests().size() > 4; }));
+    ProcessEventsFor(50);
+    EXPECT_EQ(4u, server.Requests().size());
+    EXPECT_EQ(1, profileCalls);
+    ASSERT_TRUE(profileResult.has_value());
+    EXPECT_EQ(AuthOutcome::HttpError, profileResult->outcome);
+    EXPECT_EQ(401, profileResult->statusCode);
+    EXPECT_EQ(QStringLiteral("AUTHENTICATION_REQUIRED"), profileResult->problemCode);
 }
 
 }  // namespace sbp
