@@ -128,3 +128,16 @@ Huellas SHA-256 de los informes revisados:
 - Release: `FA3BB0EE6C52B014EBDB7D0F2EF49CC6A074EDFABD2ADE40CA0503CB189156CE`.
 
 La regresión del navegador y GitHub Actions de este incremento siguen pendientes.
+
+## Ajuste de la comprobación temporal en CI
+
+El [Desktop CI de la revisión 799f085](https://github.com/CristianPG1993/securebrowser-platform/actions/runs/45205082778)
+falló únicamente en el límite inferior medido por el test del timeout: registró
+14.996 ms frente a los 15.000 ms exigidos. Las otras diez pruebas de transporte
+pasaron. El resto del workflow quedó sin ejecutar tras ese fallo; Backend CI pasó.
+
+La comprobación de duración admite ahora 100 ms de margen de medición, manteniendo
+el timeout de producción en 15 segundos. Sigue comprobando `Timeout`, ausencia de
+estado HTTP, recepción de la petición en el servidor y una única entrega. El
+watchdog del test continúa en 20 segundos. Este ajuste del test queda pendiente
+de revalidación en CI y no modifica los controles del cliente.

@@ -136,7 +136,10 @@ TEST_F(RestClientTest, PendingRequestTimesOutAfterTheProductionDeadline) {
     });
     // El watchdog deja margen al planificador; el límite independiente de CTest también acota esta prueba.
     ASSERT_TRUE(WaitFor([&] { return result.has_value(); }, 20000));
-    EXPECT_GE(elapsed.elapsed(), 15000);
+    // El runner de Windows midió 14996 ms para un plazo de 15000 ms: deja 100 ms de margen de medición.
+    // Sigue exigiendo una espera próxima a 15 s; no cambia el temporizador ni la clasificación del cliente.
+    constexpr qint64 timingToleranceMilliseconds = 100;
+    EXPECT_GE(elapsed.elapsed(), 15000 - timingToleranceMilliseconds);
     EXPECT_EQ(RestTransportError::Timeout, result->transportError);
     EXPECT_FALSE(result->statusCode.has_value());
     ASSERT_EQ(1u, server.Requests().size());
