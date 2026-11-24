@@ -2,6 +2,7 @@
 
 #include "rest/rest_client.h"
 #include "rest/token_response.h"
+#include "rest/user_identity.h"
 
 #include <QString>
 #include <QThread>
@@ -19,10 +20,12 @@ enum class AuthOutcome {
     Success,
     HttpError,
     TransportError,
-    InvalidResponse
+    InvalidResponse,
+    // Una consulta protegida requiere que la sesión tenga tokens.
+    NoSession
 };
 
-// Información que recibirá quien solicite login, refresh o logout.
+// Resultado de las operaciones de autenticación y de la consulta del perfil.
 // Los tokens se gestionarán dentro de AuthSession; este resultado no expone secretos ni el cuerpo HTTP.
 struct AuthResult {
     // Empieza sin éxito confirmado: solo la operación completada podrá indicar Success.
@@ -45,6 +48,9 @@ public:
     // Quien solicite la operación recibirá su resultado interpretado, sin tokens ni contraseña.
     using CompletionCallback = std::function<void(AuthResult)>;
 
+    // La consulta del perfil entrega su resultado y, solo en caso de éxito, la identidad del usuario.
+    using IdentityCallback = std::function<void(AuthResult, std::optional<UserIdentity>)>;
+
     // client debe vivir más que esta sesión; la URL base se conserva por valor.
     // Ejemplo de base de la demo local: http://127.0.0.1:8081/api/v1/.
     AuthSession(RestClient& client, QUrl apiBaseUrl);
@@ -59,9 +65,19 @@ public:
     // Destruir AuthSession también retira sus entregas. Callback o URL base incorrectas lanzan invalid_argument.
     void Login(const QString& email, const QString& password, CompletionCallback onCompleted);
 
+    // Consulta GET /users/me con el accessToken de la sesión. Los fallos locales previos al envío se entregan
+    // en esta misma llamada. Sin tokens, el resultado es NoSession y la identidad está vacía.
+    // Si la sesión cambia mientras llega la respuesta, descarta la entrega de la sesión anterior.
+    void FetchUserIdentity(IdentityCallback onCompleted);
+
 private:
     // Se llamará antes de leer o modificar la sesión; otro hilo constituye un uso incorrecto de la clase.
     void RequireOwnerThread() const;
+
+    // Valida la base y conserva su ruta al añadir un endpoint relativo de la API.
+    [[nodiscard]] QUrl EndpointUrl(const QString& relativePath) const;
+    // Recoge errores HTTP y de transporte. Cada operación confirma el éxito tras validar su propio cuerpo.
+    [[nodiscard]] static AuthResult ReadResponseStatus(const RestResult& received);
 
     // Estado privado de una sesión; se consultará y modificará únicamente desde su hilo Qt.
     struct State {

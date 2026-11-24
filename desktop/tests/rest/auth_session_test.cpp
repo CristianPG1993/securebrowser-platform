@@ -256,4 +256,55 @@ TEST_F(AuthSessionTest, InvalidCallsPreserveTheLoginAlreadyInProgress) {
     EXPECT_EQ(1u, server.Requests().size());
 }
 
+// Comprueba que FetchUserIdentity usa el token de Login en GET /users/me y entrega los dos IDs del perfil.
+TEST_F(AuthSessionTest, FetchUserIdentityUsesLoginTokenAndReadsProfile) {
+    RestTestServer server({}, RestTestServer::Mode::Hold);
+    ASSERT_TRUE(server.Listen());
+    std::optional<AuthResult> loginResult;
+    std::optional<AuthResult> profileResult;
+    std::optional<UserIdentity> identity;
+    RestClient client;
+    AuthSession session(client, server.Url(QStringLiteral("/api/v1")));
+
+    // El tercer argumento es la lambda que Login guarda como onCompleted. Al pasarla, loginResult sigue vacío.
+    session.Login(QStringLiteral("user@example.test"), QStringLiteral("clave"), [&loginResult](AuthResult received) {
+        // Login llama a onCompleted(std::move(result)). Ese result entra aquí con el nombre received.
+        // La captura [&loginResult] permite guardar el resultado en la variable del test que observará WaitFor.
+        loginResult = std::move(received);
+    });
+    // Login ya ha iniciado el POST. WaitFor procesa eventos de Qt hasta que el servidor recibe la petición.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 1; }));
+    // El índice 0 identifica el POST de login. De HttpResponse(200, ...) sale el 200 que llegará en received.statusCode.
+    ASSERT_TRUE(server.ReplyToHeldRequest(0, HttpResponse(200, ValidLoginResponse)));
+    // has_value() pasa a true cuando la lambda guarda received en loginResult, también si hubo un error.
+    ASSERT_TRUE(WaitFor([&loginResult] { return loginResult.has_value(); }));
+    // Ahora que hay un resultado, comprobamos si el login tuvo éxito.
+    ASSERT_EQ(AuthOutcome::Success, loginResult->outcome);
+
+    // El test aporta la callback de FetchUserIdentity. Sus dos variables siguen vivas durante la consulta.
+    session.FetchUserIdentity([&profileResult, &identity](AuthResult received, std::optional<UserIdentity> user) {
+        profileResult = std::move(received);
+        identity = std::move(user);
+    });
+    // La petición 1 es la consulta del perfil. Se inspecciona antes de enviarle la respuesta.
+    ASSERT_TRUE(WaitFor([&server] { return server.Requests().size() == 2; }));
+    const QByteArray& request = server.Requests()[1];
+    EXPECT_TRUE(request.startsWith("GET /api/v1/users/me HTTP/1.1\r\n"));
+    EXPECT_EQ(request.size() - 4, request.indexOf("\r\n\r\n"));
+    // El nombre de la cabecera admite mayúsculas y minúsculas. El valor del token se compara tal como llegó.
+    const QByteArray headerName = "\r\nauthorization:";
+    const qsizetype headerStart = request.toLower().indexOf(headerName);
+    ASSERT_GE(headerStart, 0);
+    EXPECT_TRUE(request.sliced(headerStart + headerName.size()).startsWith(" Bearer fake-access\r\n"));
+
+    ASSERT_TRUE(server.ReplyToHeldRequest(1, HttpResponse(200, R"({"id":7,"companyId":3})")));
+    // La callback se ejecuta después de que AuthSession haya interpretado la respuesta del GET.
+    ASSERT_TRUE(WaitFor([&profileResult] { return profileResult.has_value(); }));
+    EXPECT_EQ(AuthOutcome::Success, profileResult->outcome);
+    EXPECT_EQ(200, profileResult->statusCode);
+    ASSERT_TRUE(identity.has_value());
+    EXPECT_EQ(7, identity->id);
+    EXPECT_EQ(3, identity->companyId);
+}
+
 }  // namespace sbp

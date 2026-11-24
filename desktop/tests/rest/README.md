@@ -1,6 +1,6 @@
 # Pruebas de transporte REST, tokens, login e identidad — #122
 
-La suite contiene 30 pruebas GoogleTest. Las 11 de `RestClient` y las 9 de
+La suite contiene 31 pruebas GoogleTest. Las 11 de `RestClient` y las 10 de
 `AuthSession` utilizan un servidor TCP/HTTP de prueba dentro del mismo proceso.
 Las 6 de `TokenResponseParser` y las 4 de `UserIdentityParser` interpretan directamente el cuerpo JSON.
 El servidor escucha únicamente en `127.0.0.1`, en un puerto libre asignado por
@@ -23,6 +23,7 @@ de `.env`. Los datos de autenticación de los casos son fixtures.
 - Descarte de respuestas tardías tras un segundo login o la destrucción de la sesión.
 - Rechazo de bases inválidas y conservación del login pendiente ante llamadas incorrectas.
 - Lectura de `id` y `companyId` del perfil, con precisión de 64 bits y rechazo de identidades incompletas o inválidas.
+- Consulta de `GET /users/me` con el token del login y entrega de la identidad devuelta por el servidor local.
 
 No acredita login/refresh reales, TLS contra un servidor remoto, identificación del
 Device, política aplicada ni E2E con CEF. Esas verificaciones corresponden a los
@@ -55,7 +56,7 @@ $restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
 ctest --test-dir desktop/build/rest-tests -C Release -R '^REST\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/rest-Release.xml"
 ```
 
-Se esperan 30 casos por configuración, sin fallos. Cada caso tiene un límite CTest
+Se esperan 31 casos por configuración, sin fallos. Cada caso tiene un límite CTest
 de 30 segundos; el del timeout deja hasta 20 segundos al bucle de eventos para
 observar el vencimiento de 15 segundos. La espera procesa eventos Qt, sin bloquear
 con sleeps el hilo que atiende cliente y servidor. El ejecutable copia Core y
@@ -77,15 +78,15 @@ siguientes informes locales en `desktop/build/rest-tests/`.
 | Debug | 4 de 4 pasaron | `identity-Debug.xml` | `29FF97F9EFE8495BDCE28719C98FDD17D010B12D500B72FB26863DCEE56FBC37` |
 | Release | 4 de 4 pasaron | `identity-Release.xml` | `E577EDB4300D50B58C3A053272B7985D9949621AAEA0059B321774CC832CA8B1` |
 
-## Ejecutar solo las pruebas de login
+## Ejecutar las pruebas de sesión
 
 Después de compilar `sbp_rest_tests` en Debug y Release, este filtro selecciona
-los nueve casos de `AuthSessionTest` y conserva un informe por configuración.
+los diez casos de `AuthSessionTest` y conserva un informe por configuración.
 
 ```powershell
 $restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
-ctest --test-dir desktop/build/rest-tests -C Debug -R '^REST\.AuthSessionTest\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/auth-Debug.xml"
-ctest --test-dir desktop/build/rest-tests -C Release -R '^REST\.AuthSessionTest\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/auth-Release.xml"
+ctest --test-dir desktop/build/rest-tests -C Debug -R '^REST\.AuthSessionTest\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/session-Debug.xml"
+ctest --test-dir desktop/build/rest-tests -C Release -R '^REST\.AuthSessionTest\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/session-Release.xml"
 ```
 
 El 24 de noviembre de 2026 se comprobaron los nueve casos de login en ambas
@@ -96,6 +97,19 @@ configuraciones contra el servidor de prueba. Los informes se conservan en
 | --- | --- | --- | --- |
 | Debug | 9 de 9 pasaron | `auth-Debug.log` (registro de CTest) | `7586AAC6F24276B24131F516FB9B6456641790974DB7B9888D366746A17CB3B4` |
 | Release | 9 de 9 pasaron | `auth-Release.xml` (JUnit) | `ADA82678F4EB4E44424DAF9D9BE5E1DD668CC4604CB6032FF23DD3360826B58E` |
+
+## Login y consulta del perfil propio
+
+El 24 de noviembre de 2026 se compiló `SecureBrowser` y se ejecutó la suite REST
+completa en Debug y Release. El servidor local recibió el Bearer del login en un
+`GET /api/v1/users/me` con cuerpo vacío. Al responder con `{"id":7,"companyId":3}`,
+la callback de Desktop recibió `Success` y ambos identificadores. La integración
+con Spring Boot y PostgreSQL queda para la prueba E2E.
+
+| Configuración | Resultado | Informe en `desktop/build/rest-tests/` | SHA-256 |
+| --- | --- | --- | --- |
+| Debug | 31 de 31 pasaron | `rest-profile-Debug.xml` | `F6F649B6E6ED45FDEFC8D7BBD3EFFFD0A58AA1905F77A06B397C59B6B2544316` |
+| Release | 31 de 31 pasaron | `rest-profile-Release.xml` | `DEA6E22BF9F5ADF79D5257C917B086023C39B870DAD5F12B09B95B45A2B72E4B` |
 
 ## Comprobar solo el nuevo lector de tokens
 
