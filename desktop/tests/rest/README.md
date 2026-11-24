@@ -1,8 +1,8 @@
-# Pruebas de transporte REST, tokens y login — #122
+# Pruebas de transporte REST, tokens, login e identidad — #122
 
-La suite contiene 26 pruebas GoogleTest. Las 11 de `RestClient` y las 9 de
+La suite contiene 30 pruebas GoogleTest. Las 11 de `RestClient` y las 9 de
 `AuthSession` utilizan un servidor TCP/HTTP de prueba dentro del mismo proceso.
-Las 6 de `TokenResponseParser` interpretan directamente el cuerpo JSON.
+Las 6 de `TokenResponseParser` y las 4 de `UserIdentityParser` interpretan directamente el cuerpo JSON.
 El servidor escucha únicamente en `127.0.0.1`, en un puerto libre asignado por
 Windows. No utiliza Spring Boot, PostgreSQL, CEF, credenciales reales ni variables
 de `.env`. Los datos de autenticación de los casos son fixtures.
@@ -22,6 +22,7 @@ de `.env`. Los datos de autenticación de los casos son fixtures.
 - Login correcto, HTTP 401 con código, respuesta de tokens inválida y fallo de conexión.
 - Descarte de respuestas tardías tras un segundo login o la destrucción de la sesión.
 - Rechazo de bases inválidas y conservación del login pendiente ante llamadas incorrectas.
+- Lectura de `id` y `companyId` del perfil, con precisión de 64 bits y rechazo de identidades incompletas o inválidas.
 
 No acredita login/refresh reales, TLS contra un servidor remoto, identificación del
 Device, política aplicada ni E2E con CEF. Esas verificaciones corresponden a los
@@ -54,7 +55,7 @@ $restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
 ctest --test-dir desktop/build/rest-tests -C Release -R '^REST\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/rest-Release.xml"
 ```
 
-Se esperan 26 casos por configuración, sin fallos. Cada caso tiene un límite CTest
+Se esperan 30 casos por configuración, sin fallos. Cada caso tiene un límite CTest
 de 30 segundos; el del timeout deja hasta 20 segundos al bucle de eventos para
 observar el vencimiento de 15 segundos. La espera procesa eventos Qt, sin bloquear
 con sleeps el hilo que atiende cliente y servidor. El ejecutable copia Core y
@@ -63,6 +64,18 @@ Network junto a su salida; no requiere modificar el PATH ni plugins de ventanas.
 Los informes XML quedan en `desktop/build/rest-tests/`. Ante un fallo, conservar
 también `Testing/Temporary/LastTest.log` y el SHA de la revisión probada. Registrar
 comando, configuración y resultado real antes de proponer el commit de pruebas.
+
+## Comprobar el lector de identidad
+
+El filtro `^REST\.UserIdentityParserTest\.` selecciona cuatro casos. Comprueban
+los dos identificadores del perfil, la precisión de 64 bits y el rechazo de
+documentos o campos inválidos. El 24 de noviembre de 2026 se verificaron los
+siguientes informes locales en `desktop/build/rest-tests/`.
+
+| Configuración | Resultado | Informe JUnit | SHA-256 |
+| --- | --- | --- | --- |
+| Debug | 4 de 4 pasaron | `identity-Debug.xml` | `29FF97F9EFE8495BDCE28719C98FDD17D010B12D500B72FB26863DCEE56FBC37` |
+| Release | 4 de 4 pasaron | `identity-Release.xml` | `E577EDB4300D50B58C3A053272B7985D9949621AAEA0059B321774CC832CA8B1` |
 
 ## Ejecutar solo las pruebas de login
 
