@@ -1,9 +1,10 @@
-# Pruebas del transporte REST — #122
+# Pruebas REST y del lector de tokens — #122
 
-Suite de 11 pruebas GoogleTest del cliente `RestClient`, usando un servidor TCP/HTTP
-falso dentro del mismo proceso. Escucha únicamente en `127.0.0.1`, en un puerto
-libre asignado por Windows. No utiliza Spring Boot, PostgreSQL, CEF, credenciales
-reales ni variables de `.env`. Los datos de autenticación de los casos son fixtures.
+Suite de 17 pruebas GoogleTest: 11 del cliente `RestClient`, usando un servidor
+TCP/HTTP falso dentro del mismo proceso, y 6 de `TokenResponseParser`, sin red.
+El servidor escucha únicamente en `127.0.0.1`, en un puerto libre asignado por
+Windows. No utiliza Spring Boot, PostgreSQL, CEF, credenciales reales ni variables
+de `.env`. Los datos de autenticación de los casos son fixtures.
 
 ## Qué comprueba
 
@@ -16,6 +17,7 @@ reales ni variables de `.env`. Los datos de autenticación de los casos son fixt
 - Destrucción del cliente durante una petición y desde su propia callback.
 - Rechazo de peticiones inválidas antes de enviar datos.
 - Redirección devuelta sin seguirla ni reenviar Authorization al destino.
+- Lectura completa del DTO de tokens, tipos obligatorios, contenido y duración entera de 64 bits.
 
 No acredita login/refresh reales, TLS contra un servidor remoto, identificación del
 Device, política aplicada ni E2E con CEF. Esas verificaciones corresponden a los
@@ -48,7 +50,7 @@ $restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
 ctest --test-dir desktop/build/rest-tests -C Release -R '^REST\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/rest-Release.xml"
 ```
 
-Se esperan 11 casos por configuración, sin fallos. Cada caso tiene un límite CTest
+Se esperan 17 casos por configuración, sin fallos. Cada caso tiene un límite CTest
 de 30 segundos; el del timeout deja hasta 20 segundos al bucle de eventos para
 observar el vencimiento de 15 segundos. La espera procesa eventos Qt, sin bloquear
 con sleeps el hilo que atiende cliente y servidor. El ejecutable copia Core y
@@ -57,6 +59,42 @@ Network junto a su salida; no requiere modificar el PATH ni plugins de ventanas.
 Los informes XML quedan en `desktop/build/rest-tests/`. Ante un fallo, conservar
 también `Testing/Temporary/LastTest.log` y el SHA de la revisión probada. Registrar
 comando, configuración y resultado real antes de proponer el commit de pruebas.
+
+## Comprobar solo el nuevo lector de tokens
+
+Tras configurar y compilar `sbp_rest_tests`, estos comandos seleccionan las seis
+pruebas nuevas. Los informes tienen nombres distintos para conservar los del
+transporte. Cada grupo comprueba un comportamiento: respuesta completa, Bearer y
+64 bits, JSON inválido, campos obligatorios/tipos, valores de texto y duración.
+
+```powershell
+$restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
+ctest --test-dir desktop/build/rest-tests -C Debug -R '^REST\.TokenResponseParserTest\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/token-parser-Debug.xml"
+```
+
+Repetir tras compilar Release:
+
+```powershell
+$restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
+ctest --test-dir desktop/build/rest-tests -C Release -R '^REST\.TokenResponseParserTest\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/token-parser-Release.xml"
+```
+
+Evidencia del lector revisada el 24 de noviembre de 2026:
+
+| Configuración | Resultado | Informe local |
+| --- | --- | --- |
+| Debug | 6 pruebas, 0 fallos, 0 errores y 0 omitidas. | `desktop/build/rest-tests/token-parser-Debug.xml` |
+| Release | 6 pruebas, 0 fallos, 0 errores y 0 omitidas. | `desktop/build/rest-tests/token-parser-Release.xml` |
+
+Ambas compilaciones son posteriores a las fuentes del lector y sus pruebas.
+La revisión de este incremento se registra en la PR #157. Desktop CI incluirá
+automáticamente estos casos al ejecutar el filtro global `^REST\.`; los resultados
+de una revisión anterior no validan los nuevos casos.
+
+Huellas SHA-256 de los informes del lector revisados:
+
+- Debug: `633102C6BEAF0F3603FB4A878C81512786896F62CE5C2B8D7D392CAC756E6EC0`.
+- Release: `B97D4D4B75FBA17F17D200F8AD5D3D99BEED0250AC268EFE34C787D23E631647`.
 
 ## Regresión del navegador
 
@@ -67,7 +105,8 @@ de runtime/arranque. Hasta publicar una PR y terminar sus checks, CI queda pendi
 
 ## Evidencia local — 23 de noviembre de 2026
 
-El autor confirmó la ejecución y se revisó el informe JUnit generado:
+El autor confirmó la ejecución y se revisaron los informes JUnit de las 11 pruebas
+de transporte. Esta evidencia es anterior a añadir las seis del lector de tokens:
 
 | Configuración | Resultado | Informe local |
 | --- | --- | --- |

@@ -224,8 +224,12 @@ if(SBP_BUILD_REST_TESTS)
         tests/rest/rest_test_support.h
         tests/rest/rest_test_support.cpp
         tests/rest/rest_client_test.cpp
+        tests/rest/token_response_parser_test.cpp
         src/rest/rest_client.h
         src/rest/rest_client.cpp
+        src/rest/token_response.h
+        src/rest/token_response_parser.h
+        src/rest/token_response_parser.cpp
     )
     target_include_directories(sbp_rest_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(sbp_rest_tests PRIVATE NOMINMAX)
@@ -476,6 +480,9 @@ add_library(SecureBrowser SHARED
     src/diagnostics/diagnostics_log.h
     src/rest/rest_client.h
     src/rest/rest_client.cpp
+    src/rest/token_response.h
+    src/rest/token_response_parser.h
+    src/rest/token_response_parser.cpp
     src/ui/browser_host.cpp
     src/ui/browser_host.h
     src/ui/browser_window.cpp
