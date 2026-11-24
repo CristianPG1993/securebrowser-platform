@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace sbp {
 
@@ -67,10 +68,19 @@ public:
 
     // Consulta GET /users/me con el accessToken de la sesión. Los fallos locales previos al envío se entregan
     // en esta misma llamada. Sin tokens, el resultado es NoSession y la identidad está vacía.
+    // Ante 401 AUTHENTICATION_REQUIRED puede renovar los tokens y repetir el GET una sola vez.
     // Si la sesión cambia mientras llega la respuesta, descarta la entrega de la sesión anterior.
     void FetchUserIdentity(IdentityCallback onCompleted);
 
 private:
+    void SendUserIdentityRequest(IdentityCallback onCompleted, bool allowRefresh);
+    void FetchUserIdentityAfterRefresh(IdentityCallback onCompleted);
+
+    // Renueva la sesión con POST /auth/refresh usando el refreshToken guardado.
+    // Las peticiones de la misma sesión que necesiten renovar a la vez compartirán una sola renovación.
+    // Tras un 200 con tokens válidos, la sesión sustituirá el par y entregará el AuthResult a cada callback.
+    void Refresh(CompletionCallback onCompleted);
+
     // Se llamará antes de leer o modificar la sesión; otro hilo constituye un uso incorrecto de la clase.
     void RequireOwnerThread() const;
 
@@ -87,6 +97,13 @@ private:
 
         // Vacío hasta aceptar un TokenResponse completo; ambos tokens se conservan y sustituyen juntos.
         std::optional<TokenResponse> tokens;
+
+        // Cuenta las renovaciones aceptadas desde Login para reconocer un GET enviado con el par anterior.
+        std::uint64_t tokenRevision = 0;
+
+        // La petición de refresh posee esta lista mientras está en curso.
+        // Las demás peticiones de la misma sesión pueden añadir su callback a la lista.
+        std::weak_ptr<std::vector<CompletionCallback>> pendingRefresh;
     };
 
     // Referencia no propietaria al transporte HTTP; su creación y destrucción pertenecen a la composición.

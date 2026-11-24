@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -42,6 +43,8 @@ void AuthSession::Login(const QString& email, const QString& password, Completio
     // Cada intento retira el par anterior y recibe una generación no reutilizada.
     const std::uint64_t attempt = ++state_->generation;
     state_->tokens.reset();
+    state_->tokenRevision = 0;
+    state_->pendingRefresh.reset();
     const std::weak_ptr<State> weakState(state_);
 
     // RestClient llamará a esta lambda en el hilo Qt y le pasará la respuesta HTTP en received.
@@ -85,6 +88,15 @@ void AuthSession::FetchUserIdentity(IdentityCallback onCompleted) {
         return;
     }
 
+    // Si el POST de renovación ya salió, esta consulta espera el nuevo par antes de enviar su GET.
+    if (!state_->pendingRefresh.expired()) {
+        FetchUserIdentityAfterRefresh(std::move(onCompleted));
+        return;
+    }
+    SendUserIdentityRequest(std::move(onCompleted), true);
+}
+
+void AuthSession::SendUserIdentityRequest(IdentityCallback onCompleted, bool allowRefresh) {
     QNetworkRequest request(EndpointUrl(QStringLiteral("users/me")));
     QHttpHeaders headers;
     const QByteArray bearer = "Bearer " + state_->tokens->accessToken.toUtf8();
@@ -97,15 +109,26 @@ void AuthSession::FetchUserIdentity(IdentityCallback onCompleted) {
 
     // Consultar el perfil pertenece a la generación que abrió Login y conserva ese número durante el GET.
     const auto generation = state_->generation;
+    const auto tokenRevision = state_->tokenRevision;
     const std::weak_ptr<State> weakState(state_);
-    // RestClient ejecuta la lambda en el hilo Qt y le pasa la respuesta de este GET. El cuerpo enviado está vacío.
+    // RestClient entrega el GET en el hilo Qt. Antes de usar this, comprobamos que la sesión sigue viva.
     client_.Send(RestClient::Method::Get, request, {},
-        [weakState, generation, onCompleted = std::move(onCompleted)](RestResult received) {
-            if (const auto state = weakState.lock(); !state || state->generation != generation) {
+        [this, weakState, generation, tokenRevision, allowRefresh, onCompleted = std::move(onCompleted)](RestResult received) mutable {
+            if (const auto state = weakState.lock(); !state || state->generation != generation || !state->tokens) {
                 return;
             }
 
             AuthResult result = ReadResponseStatus(received);
+            if (allowRefresh && result.outcome == AuthOutcome::HttpError && result.statusCode == 401
+                && result.problemCode == QStringLiteral("AUTHENTICATION_REQUIRED")) {
+                if (state_->tokenRevision == tokenRevision) {
+                    FetchUserIdentityAfterRefresh(std::move(onCompleted));
+                } else {
+                    // Otra petición ya renovó el par mientras este GET esperaba su respuesta.
+                    SendUserIdentityRequest(std::move(onCompleted), false);
+                }
+                return;
+            }
             std::optional<UserIdentity> identity;
             if (result.transportError == RestTransportError::None && result.statusCode == 200) {
                 identity = UserIdentityParser::Parse(received.body);
@@ -116,6 +139,85 @@ void AuthSession::FetchUserIdentity(IdentityCallback onCompleted) {
             // El receptor recibe los dos argumentos juntos. Solo Success lleva una identidad.
             onCompleted(std::move(result), std::move(identity));
         });
+}
+
+void AuthSession::FetchUserIdentityAfterRefresh(IdentityCallback onCompleted) {
+    // Refresh llama en el hilo Qt y comprueba que la sesión sigue viva y pertenece al mismo login.
+    Refresh([this, onCompleted = std::move(onCompleted)](AuthResult result) mutable {
+        if (result.outcome == AuthOutcome::Success) {
+            SendUserIdentityRequest(std::move(onCompleted), false);
+        } else {
+            onCompleted(std::move(result), std::nullopt);
+        }
+    });
+}
+
+void AuthSession::Refresh(CompletionCallback onCompleted) {
+    RequireOwnerThread();
+    if (!onCompleted) {
+        throw std::invalid_argument("Auth refresh requires a completion callback.");
+    }
+    if (!state_->tokens) {
+        AuthResult result;
+        result.outcome = AuthOutcome::NoSession;
+        onCompleted(std::move(result));
+        return;
+    }
+
+    // Un refreshToken se consume al usarlo. Si el POST ya salió, esta llamada espera su resultado.
+    if (auto pending = state_->pendingRefresh.lock()) {
+        pending->push_back(std::move(onCompleted));
+        return;
+    }
+
+    QNetworkRequest request(EndpointUrl(QStringLiteral("auth/refresh")));
+    const QJsonObject payload{{QStringLiteral("refreshToken"), state_->tokens->refreshToken}};
+    const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+    auto callbacks = std::make_shared<std::vector<CompletionCallback>>();
+    callbacks->push_back(std::move(onCompleted));
+    state_->pendingRefresh = callbacks;
+
+    const std::weak_ptr<State> weakState(state_);
+    const auto generation = state_->generation;
+    // RestClient conserva la lista en esta lambda y entrega la respuesta en el hilo Qt de la sesión.
+    // Si Send falla al iniciar la petición, su lista se libera y una llamada posterior puede volver a renovar.
+    client_.Send(RestClient::Method::Post, request, body, [weakState, generation, callbacks](RestResult received) {
+        auto state = weakState.lock();
+        if (!state || state->generation != generation) {
+            return;
+        }
+        state->pendingRefresh.reset();
+        AuthResult result = ReadResponseStatus(received);
+        if (result.transportError == RestTransportError::None && result.statusCode == 200) {
+            auto tokens = TokenResponseParser::Parse(received.body);
+            // El backend rota el refreshToken. Solo el par completo y renovado sustituye al anterior.
+            if (tokens && state->tokens && tokens->refreshToken != state->tokens->refreshToken) {
+                state->tokens = std::move(*tokens);
+                ++state->tokenRevision;
+                result.outcome = AuthOutcome::Success;
+            }
+        } else if (result.outcome == AuthOutcome::HttpError && result.statusCode == 401
+                   && result.problemCode == QStringLiteral("INVALID_REFRESH_TOKEN")) {
+            // Este rechazo confirma que hace falta un nuevo login. Un fallo temporal conserva la sesión.
+            state->tokens.reset();
+        }
+
+        const bool hasTokens = state->tokens.has_value();
+        state.reset();
+        for (auto& callback : *callbacks) {
+            // Un receptor anterior puede destruir la sesión, iniciar otro login o perderla al procesar eventos.
+            if (const auto current = weakState.lock();
+                !current || current->generation != generation || current->tokens.has_value() != hasTokens) {
+                return;
+            }
+            try {
+                callback(result);
+            } catch (...) {
+                // Un fallo de un receptor permite continuar con los demás. El mensaje omite los datos de la sesión.
+                std::fputs("Auth refresh completion callback failed.\n", stderr);
+            }
+        }
+    });
 }
 
 QUrl AuthSession::EndpointUrl(const QString& relativePath) const {
