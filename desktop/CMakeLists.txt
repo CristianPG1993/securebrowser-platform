@@ -224,7 +224,10 @@ if(SBP_BUILD_REST_TESTS)
         tests/rest/rest_test_support.h
         tests/rest/rest_test_support.cpp
         tests/rest/rest_client_test.cpp
+        tests/rest/auth_session_test.cpp
         tests/rest/token_response_parser_test.cpp
+        src/rest/auth_session.h
+        src/rest/auth_session.cpp
         src/rest/rest_client.h
         src/rest/rest_client.cpp
         src/rest/token_response.h
@@ -478,6 +481,8 @@ add_library(SecureBrowser SHARED
     src/demo/demo_policy_source.cpp
     src/diagnostics/diagnostics_log.cpp
     src/diagnostics/diagnostics_log.h
+    src/rest/auth_session.h
+    src/rest/auth_session.cpp
     src/rest/rest_client.h
     src/rest/rest_client.cpp
     src/rest/token_response.h

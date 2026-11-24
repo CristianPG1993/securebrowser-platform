@@ -47,6 +47,18 @@ const std::vector<QByteArray>& RestTestServer::Requests() const {
     return requests_;
 }
 
+bool RestTestServer::ReplyToHeldRequest(std::size_t index, const QByteArray& response) {
+    if (index >= heldSockets_.size() || !heldSockets_[index]) {
+        return false;
+    }
+    // Cada índice identifica una conexión retenida y solo se puede responder una vez.
+    QTcpSocket* socket = heldSockets_[index].data();
+    heldSockets_[index].clear();
+    const auto written = socket->write(response);
+    socket->disconnectFromHost();
+    return written == response.size();
+}
+
 void RestTestServer::AcceptConnections() {
     while (server_.hasPendingConnections()) {
         // Un socket representa el canal de una conexión aceptada, no la petición HTTP ya interpretada.
@@ -100,8 +112,10 @@ void RestTestServer::ReadRequest(QTcpSocket* socket) {
         socket->write(response_);
         // Qt cierra después de enviar lo pendiente; si la fixture declara más bytes, el cliente detectará truncamiento.
         socket->disconnectFromHost();
+    } else {
+        // La prueba decide cuándo responder, incluso si otro login más reciente ya terminó.
+        heldSockets_.push_back(socket);
     }
-    // Hold conserva la conexión abierta sin responder para probar timeout y cancelación.
 }
 
 bool RestClientTest::WaitFor(const std::function<bool()>& condition, int timeoutMilliseconds) {

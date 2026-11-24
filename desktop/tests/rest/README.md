@@ -1,7 +1,8 @@
-# Pruebas REST y del lector de tokens — #122
+# Pruebas de transporte REST, tokens y login — #122
 
-Suite de 17 pruebas GoogleTest: 11 del cliente `RestClient`, usando un servidor
-TCP/HTTP falso dentro del mismo proceso, y 6 de `TokenResponseParser`, sin red.
+La suite contiene 26 pruebas GoogleTest. Las 11 de `RestClient` y las 9 de
+`AuthSession` utilizan un servidor TCP/HTTP de prueba dentro del mismo proceso.
+Las 6 de `TokenResponseParser` interpretan directamente el cuerpo JSON.
 El servidor escucha únicamente en `127.0.0.1`, en un puerto libre asignado por
 Windows. No utiliza Spring Boot, PostgreSQL, CEF, credenciales reales ni variables
 de `.env`. Los datos de autenticación de los casos son fixtures.
@@ -18,6 +19,9 @@ de `.env`. Los datos de autenticación de los casos son fixtures.
 - Rechazo de peticiones inválidas antes de enviar datos.
 - Redirección devuelta sin seguirla ni reenviar Authorization al destino.
 - Lectura completa del DTO de tokens, tipos obligatorios, contenido y duración entera de 64 bits.
+- Login correcto, HTTP 401 con código, respuesta de tokens inválida y fallo de conexión.
+- Descarte de respuestas tardías tras un segundo login o la destrucción de la sesión.
+- Rechazo de bases inválidas y conservación del login pendiente ante llamadas incorrectas.
 
 No acredita login/refresh reales, TLS contra un servidor remoto, identificación del
 Device, política aplicada ni E2E con CEF. Esas verificaciones corresponden a los
@@ -50,7 +54,7 @@ $restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
 ctest --test-dir desktop/build/rest-tests -C Release -R '^REST\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/rest-Release.xml"
 ```
 
-Se esperan 17 casos por configuración, sin fallos. Cada caso tiene un límite CTest
+Se esperan 26 casos por configuración, sin fallos. Cada caso tiene un límite CTest
 de 30 segundos; el del timeout deja hasta 20 segundos al bucle de eventos para
 observar el vencimiento de 15 segundos. La espera procesa eventos Qt, sin bloquear
 con sleeps el hilo que atiende cliente y servidor. El ejecutable copia Core y
@@ -59,6 +63,26 @@ Network junto a su salida; no requiere modificar el PATH ni plugins de ventanas.
 Los informes XML quedan en `desktop/build/rest-tests/`. Ante un fallo, conservar
 también `Testing/Temporary/LastTest.log` y el SHA de la revisión probada. Registrar
 comando, configuración y resultado real antes de proponer el commit de pruebas.
+
+## Ejecutar solo las pruebas de login
+
+Después de compilar `sbp_rest_tests` en Debug y Release, este filtro selecciona
+los nueve casos de `AuthSessionTest` y conserva un informe por configuración.
+
+```powershell
+$restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
+ctest --test-dir desktop/build/rest-tests -C Debug -R '^REST\.AuthSessionTest\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/auth-Debug.xml"
+ctest --test-dir desktop/build/rest-tests -C Release -R '^REST\.AuthSessionTest\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/auth-Release.xml"
+```
+
+El 24 de noviembre de 2026 se comprobaron los nueve casos de login en ambas
+configuraciones contra el servidor de prueba. Los informes se conservan en
+`desktop/build/rest-tests/`.
+
+| Configuración | Resultado observado | Evidencia local | SHA-256 |
+| --- | --- | --- | --- |
+| Debug | 9 de 9 pasaron | `auth-Debug.log` (registro de CTest) | `7586AAC6F24276B24131F516FB9B6456641790974DB7B9888D366746A17CB3B4` |
+| Release | 9 de 9 pasaron | `auth-Release.xml` (JUnit) | `ADA82678F4EB4E44424DAF9D9BE5E1DD668CC4604CB6032FF23DD3360826B58E` |
 
 ## Comprobar solo el nuevo lector de tokens
 
@@ -139,5 +163,5 @@ pasaron. El resto del workflow quedó sin ejecutar tras ese fallo; Backend CI pa
 La comprobación de duración admite ahora 100 ms de margen de medición, manteniendo
 el timeout de producción en 15 segundos. Sigue comprobando `Timeout`, ausencia de
 estado HTTP, recepción de la petición en el servidor y una única entrega. El
-watchdog del test continúa en 20 segundos. Este ajuste del test queda pendiente
-de revalidación en CI y no modifica los controles del cliente.
+watchdog del test continúa en 20 segundos. El ajuste pasó en el
+[Desktop CI de la revisión b4d891c](https://github.com/CristianPG1993/securebrowser-platform/actions/runs/45332116252).

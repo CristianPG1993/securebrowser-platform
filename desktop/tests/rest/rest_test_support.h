@@ -1,11 +1,13 @@
 #pragma once
 
 #include <QByteArray>
+#include <QPointer>
 #include <QTcpServer>
 #include <QUrl>
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <vector>
@@ -31,6 +33,8 @@ public:
     [[nodiscard]] QUrl Url(const QString& path = QStringLiteral("/api/v1/devices/17/policy")) const;
     // Conserva los mensajes completos recibidos para comprobar método, cabeceras y cuerpo enviados.
     [[nodiscard]] const std::vector<QByteArray>& Requests() const;
+    // En modo Hold, responde a la petición indicada por su posición en Requests().
+    [[nodiscard]] bool ReplyToHeldRequest(std::size_t index, const QByteArray& response);
 
 private:
     // Atiende el aviso newConnection de Qt y conecta readyRead para cada socket aceptado.
@@ -46,6 +50,7 @@ private:
     std::map<QTcpSocket*, QByteArray> buffers_;
     // Las pruebas usan exclusivamente datos ficticios, incluidos los posibles tokens de estos mensajes.
     std::vector<QByteArray> requests_;
+    std::vector<QPointer<QTcpSocket>> heldSockets_;
 };
 
 // Utiliza eventos Qt acotados por un watchdog; no duerme el hilo que atiende la red.
