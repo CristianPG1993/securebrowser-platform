@@ -66,6 +66,11 @@ public:
     // Destruir AuthSession también retira sus entregas. Callback o URL base incorrectas lanzan invalid_argument.
     void Login(const QString& email, const QString& password, CompletionCallback onCompleted);
 
+    // Cierra la sesión local y usa su refreshToken para solicitar el cierre al backend con POST /auth/logout.
+    // Sin tokens, entrega NoSession en esta llamada. El backend confirma el cierre con un 204 sin cuerpo.
+    // Un fallo remoto se entrega al callback y la sesión local sigue cerrada.
+    void Logout(CompletionCallback onCompleted);
+
     // Consulta GET /users/me con el accessToken de la sesión. Los fallos locales previos al envío se entregan
     // en esta misma llamada. Sin tokens, el resultado es NoSession y la identidad está vacía.
     // Ante 401 AUTHENTICATION_REQUIRED puede renovar los tokens y repetir el GET una sola vez.
@@ -83,6 +88,8 @@ private:
 
     // Se llamará antes de leer o modificar la sesión; otro hilo constituye un uso incorrecto de la clase.
     void RequireOwnerThread() const;
+    // Retira los tokens y la renovación pendiente. Devuelve la generación que sustituye a la anterior.
+    std::uint64_t ResetSession();
 
     // Valida la base y conserva su ruta al añadir un endpoint relativo de la API.
     [[nodiscard]] QUrl EndpointUrl(const QString& relativePath) const;
@@ -94,6 +101,9 @@ private:
         // Identificador local de intento/contexto, distinto del ID de usuario o Device del backend.
         // Se incrementará al iniciar otro login o retirar la sesión para invalidar respuestas anteriores.
         std::uint64_t generation = 0;
+
+        // Un segundo Logout local conserva la entrega del primer POST de cierre que aún espera respuesta.
+        bool logoutRequested = false;
 
         // Vacío hasta aceptar un TokenResponse completo; ambos tokens se conservan y sustituyen juntos.
         std::optional<TokenResponse> tokens;

@@ -37,14 +37,9 @@ void AuthSession::Login(const QString& email, const QString& password, Completio
     // Qt escapa el contenido del email y la contraseña como JSON. No se recorta ni normaliza la contraseña.
     const QJsonObject credentials{{QStringLiteral("email"), email}, {QStringLiteral("password"), password}};
     const QByteArray body = QJsonDocument(credentials).toJson(QJsonDocument::Compact);
-    if (state_->generation == std::numeric_limits<std::uint64_t>::max()) {
-        throw std::overflow_error("Auth session generations exhausted.");
-    }
     // Cada intento retira el par anterior y recibe una generación no reutilizada.
-    const std::uint64_t attempt = ++state_->generation;
-    state_->tokens.reset();
-    state_->tokenRevision = 0;
-    state_->pendingRefresh.reset();
+    const std::uint64_t attempt = ResetSession();
+    state_->logoutRequested = false;
     const std::weak_ptr<State> weakState(state_);
 
     // RestClient llamará a esta lambda en el hilo Qt y le pasará la respuesta HTTP en received.
@@ -72,6 +67,45 @@ void AuthSession::Login(const QString& email, const QString& password, Completio
             // Liberar nuestra referencia permite que las demás peticiones detecten esa destrucción.
             state.reset();
             // Aquí se ejecuta la función del llamador. Su parámetro AuthResult recibe el result que acabamos de preparar.
+            onCompleted(std::move(result));
+        });
+}
+
+void AuthSession::Logout(CompletionCallback onCompleted) {
+    RequireOwnerThread();
+    if (!onCompleted) {
+        throw std::invalid_argument("Auth logout requires a completion callback.");
+    }
+
+    // El POST necesita el refreshToken que pertenece al login que estamos cerrando.
+    const QString refreshToken = state_->tokens ? state_->tokens->refreshToken : QString{};
+    if (!state_->logoutRequested) {
+        // También retira un Login en curso que todavía no ha entregado sus tokens.
+        ResetSession();
+        state_->logoutRequested = true;
+    }
+    if (refreshToken.isEmpty()) {
+        AuthResult result;
+        result.outcome = AuthOutcome::NoSession;
+        onCompleted(std::move(result));
+        return;
+    }
+
+    QNetworkRequest request(EndpointUrl(QStringLiteral("auth/logout")));
+    const QJsonObject payload{{QStringLiteral("refreshToken"), refreshToken}};
+    const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+    const auto generation = state_->generation;
+    const std::weak_ptr<State> weakState(state_);
+    // RestClient entrega la respuesta en el hilo Qt. Otro Login o la destrucción de la sesión retiran esta entrega.
+    client_.Send(RestClient::Method::Post, request, body,
+        [weakState, generation, onCompleted = std::move(onCompleted)](RestResult received) {
+            if (const auto state = weakState.lock(); !state || state->generation != generation) {
+                return;
+            }
+            AuthResult result = ReadResponseStatus(received);
+            if (result.transportError == RestTransportError::None && result.statusCode == 204 && received.body.isEmpty()) {
+                result.outcome = AuthOutcome::Success;
+            }
             onCompleted(std::move(result));
         });
 }
@@ -218,6 +252,16 @@ void AuthSession::Refresh(CompletionCallback onCompleted) {
             }
         }
     });
+}
+
+std::uint64_t AuthSession::ResetSession() {
+    if (state_->generation == std::numeric_limits<std::uint64_t>::max()) {
+        throw std::overflow_error("Auth session generations exhausted.");
+    }
+    state_->tokens.reset();
+    state_->tokenRevision = 0;
+    state_->pendingRefresh.reset();
+    return ++state_->generation;
 }
 
 QUrl AuthSession::EndpointUrl(const QString& relativePath) const {
