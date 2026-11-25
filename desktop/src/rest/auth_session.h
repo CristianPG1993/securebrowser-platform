@@ -1,5 +1,6 @@
 #pragma once
 
+#include "rest/device_identity.h"
 #include "rest/rest_client.h"
 #include "rest/token_response.h"
 #include "rest/user_identity.h"
@@ -26,7 +27,7 @@ enum class AuthOutcome {
     NoSession
 };
 
-// Resultado de las operaciones de autenticación y de la consulta del perfil.
+// Resultado de las operaciones de autenticación y de las consultas de identidad.
 // Los tokens se gestionarán dentro de AuthSession; este resultado no expone secretos ni el cuerpo HTTP.
 struct AuthResult {
     // Empieza sin éxito confirmado: solo la operación completada podrá indicar Success.
@@ -51,6 +52,9 @@ public:
 
     // La consulta del perfil entrega su resultado y, solo en caso de éxito, la identidad del usuario.
     using IdentityCallback = std::function<void(AuthResult, std::optional<UserIdentity>)>;
+
+    // Entrega el estado de la consulta y, si se encontró la instalación, los datos de su dispositivo.
+    using DeviceIdentityCallback = std::function<void(AuthResult, std::optional<DeviceIdentity>)>;
 
     // client debe vivir más que esta sesión; la URL base se conserva por valor.
     // Ejemplo de base de la demo local: http://127.0.0.1:8081/api/v1/.
@@ -77,9 +81,20 @@ public:
     // Si la sesión cambia mientras llega la respuesta, descarta la entrega de la sesión anterior.
     void FetchUserIdentity(IdentityCallback onCompleted);
 
+    // Busca el UUID de la instalación en las páginas de GET /devices del usuario autenticado.
+    // Contrasta userId y companyId con su perfil de GET /users/me. Una búsqueda válida sin coincidencia
+    // entrega Success y std::nullopt. Un dispositivo encontrado conserva su valor de active.
+    // El UUID debe ser canónico (minúsculas, con guiones y sin llaves) o se lanza invalid_argument.
+    void FetchDeviceIdentity(QString deviceIdentifier, DeviceIdentityCallback onCompleted);
+
 private:
-    void SendUserIdentityRequest(IdentityCallback onCompleted, bool allowRefresh);
-    void FetchUserIdentityAfterRefresh(IdentityCallback onCompleted);
+    // Un GET protegido entrega el cuerpo al lector del endpoint cuando recibe HTTP 200.
+    using GetCallback = std::function<void(AuthResult, QByteArray)>;
+    void SendAuthenticatedGet(QString relativePath, GetCallback onCompleted, bool allowRefresh);
+    void SendAuthenticatedGetAfterRefresh(QString relativePath, GetCallback onCompleted);
+
+    // Conserva el perfil comprobado y el UUID mientras recorre las páginas del mismo usuario.
+    void FetchDevicePage(QString deviceIdentifier, UserIdentity owner, int page, DeviceIdentityCallback onCompleted);
 
     // Renueva la sesión con POST /auth/refresh usando el refreshToken guardado.
     // Las peticiones de la misma sesión que necesiten renovar a la vez compartirán una sola renovación.
