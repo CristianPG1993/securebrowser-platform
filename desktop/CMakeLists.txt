@@ -225,6 +225,8 @@ if(SBP_BUILD_REST_TESTS)
         tests/rest/rest_test_support.cpp
         tests/rest/rest_client_test.cpp
         tests/rest/auth_session_test.cpp
+        tests/rest/auth_device_policy_test.h
+        tests/rest/auth_device_policy_test.cpp
         tests/rest/auth_refresh_test.h
         tests/rest/auth_refresh_test.cpp
         tests/rest/token_response_parser_test.cpp
