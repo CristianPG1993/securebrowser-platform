@@ -1,28 +1,77 @@
 #include "app/browser_session.h"
 
+#include "app/backend_config.h"
 #include "app/browser_navigation.h"
 #include "app/browser_window_bridge.h"
 #include "browser/security_request_handler.h"
 #include "demo/demo_policy_source.h"
+#include "rest/auth_session.h"
+#include "rest/rest_client.h"
 #include "security/policy_manager.h"
 #include "ui/browser_window.h"
 #include "ui/browser_window_ui.h"
+#include "ui/login_dialog.h"
 
 #include "include/base/cef_callback.h"
 #include "include/wrapper/cef_closure_task.h"
 
 #include <QApplication>
+#include <QMessageBox>
+#include <QMetaMethod>
 #include <QMetaObject>
+#include <QPointer>
 #include <QString>
+#include <QtCore/qtenvironmentvariables.h>
 
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace sbp {
 
 BrowserSession::BrowserSession(const StartupOptions& startup_options)
     : startup_options_(startup_options) {}
+
+void BrowserSession::OpenLoginDialog(BrowserWindow& window, AuthSession& auth_session, const QString& error_message) {
+    auto* dialog = new LoginDialog(&window, error_message);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+
+    // Qt entrega la respuesta después de cerrar el formulario. La ventana puede haberse cerrado también.
+    const auto onCompleted = [this, owner = QPointer<BrowserWindow>(&window), &auth_session](AuthResult result) {
+        if (!owner || lifecycle_.CloseRequested()) {
+            return;
+        }
+        if (result.outcome == AuthOutcome::Success) {
+            owner->setWindowTitle(QStringLiteral("SecureBrowser — Sesión iniciada"));
+            std::fputs("Backend login succeeded.\n", stderr);
+            return;
+        }
+
+        const QString message = result.outcome == AuthOutcome::HttpError && result.statusCode == 401
+            ? QStringLiteral("Correo o contraseña incorrectos.")
+            : QStringLiteral("No se pudo iniciar sesión. Comprueba la conexión con el backend y vuelve a intentarlo.");
+        OpenLoginDialog(*owner, auth_session, message);
+    };
+
+    // Busca la señal por nombre para mantener la carga diferida de QtWidgets en Windows.
+    const auto* meta = dialog->metaObject();
+    const auto accepted = meta->method(meta->indexOfSignal("accepted()"));
+    // Al confirmar, el diálogo todavía conserva los campos. Login prepara el POST en esta llamada.
+    const auto connection = QMetaObject::connect(dialog, accepted, dialog, [this, dialog, &auth_session, onCompleted] {
+        if (!lifecycle_.CloseRequested()) {
+            auth_session.Login(dialog->Email(), dialog->Password(), onCompleted);
+        }
+    });
+    if (!connection) {
+        dialog->deleteLater();
+        std::fputs("Could not connect the login dialog.\n", stderr);
+        QMessageBox::warning(&window, QStringLiteral("Iniciar sesión"),
+                             QStringLiteral("No se pudo abrir el formulario de acceso."));
+        return;
+    }
+    dialog->open();
+}
 
 bool BrowserSession::PrepareDemoPolicy(PolicyManager& manager) const {
     if (!startup_options_.IsUrlFilteringDemo()) {
@@ -140,6 +189,27 @@ void BrowserSession::OnContextInitialized() {
 
 // Paso 1: Entramos en la sesión desde el hilo principal, utilizando el QApplication ya creado.
 int BrowserSession::Run(QApplication& qt_app) {
+    // En el arranque normal, la ruta explícita permite cargar la configuración de esta instalación.
+    std::optional<BackendConfig> backend_config;
+    // Viven durante Run. Al salir, auth_session se destruye antes que el cliente que utiliza.
+    std::optional<RestClient> rest_client;
+    std::optional<AuthSession> auth_session;
+    if (!startup_options_.IsUrlFilteringDemo() && qEnvironmentVariableIsSet("SBP_BACKEND_CONFIG")) {
+        const QString file_path = qEnvironmentVariable("SBP_BACKEND_CONFIG");
+        backend_config = BackendConfig::FromIniFile(file_path);
+        if (!backend_config) {
+            std::fputs("Backend configuration could not be loaded.\n", stderr);
+            QMessageBox::critical(nullptr, QStringLiteral("Configuración del backend"),
+                QStringLiteral("Comprueba la ruta de SBP_BACKEND_CONFIG y los valores apiBaseUrl y "
+                               "deviceIdentifier de la sección [backend]."));
+            return 1;
+        }
+        std::fputs("Backend configuration loaded.\n", stderr);
+        // Con el INI validado, la sesión recibe el cliente y la URL que usará al llamar a Login.
+        rest_client.emplace();
+        auth_session.emplace(*rest_client, backend_config->apiBaseUrl);
+    }
+
     // Paso 2: Preparamos el código que devolverá la sesión; 0 representa una salida correcta.
     int qt_exit_code = 0;
     // Paso 3: Abrimos un ámbito para destruir sus objetos locales antes de regresar al arranque CEF.
@@ -206,6 +276,9 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Paso 12: Show muestra la ventana, prepara el foco y devuelve el HWND del anfitrión.
         // OnHostReady guarda ese HWND y solicita crear el navegador cuando el contexto CEF también esté listo.
         lifecycle_.OnHostReady(window_bridge.Show(window, window_ui));
+        if (auth_session) {
+            OpenLoginDialog(window, *auth_session, {});
+        }
 
         std::fputs("Qt event loop starting with CEF initialized.\n", stderr);
 

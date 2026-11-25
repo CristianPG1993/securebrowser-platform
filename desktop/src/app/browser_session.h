@@ -14,6 +14,7 @@ class QString;
 
 namespace sbp {
 
+class AuthSession;
 class BrowserWindow;
 class BrowserWindowUi;
 class PolicyManager;
@@ -39,6 +40,9 @@ public:
     int Run(QApplication& qt_app);
 
 private:
+    // Muestra el formulario en Qt. Solo la confirmación del usuario envía las credenciales.
+    void OpenLoginDialog(BrowserWindow& window, AuthSession& auth_session, const QString& error_message);
+
     // Prepara el gestor que utilizará el handler: en modo demo crea contexto y publica el snapshot.
     // true indica que la preparación permite continuar el arranque; el permiso de navegar lo decide el motor.
     [[nodiscard]] bool PrepareDemoPolicy(PolicyManager& manager) const;
