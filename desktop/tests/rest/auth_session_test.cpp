@@ -428,4 +428,144 @@ TEST_F(AuthSessionTest, FetchUserIdentityStopsAfterSecond401) {
     EXPECT_EQ(QStringLiteral("AUTHENTICATION_REQUIRED"), profileResult->problemCode);
 }
 
+// El cierre parte del mismo login y del mismo servidor en modo Hold que las pruebas de renovación.
+using AuthLogoutTest = AuthRefreshTest;
+constexpr char LogoutConfirmed[] = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";
+
+// Comprueba que Logout cierra la sesión local antes del 204 y envía al backend el refreshToken del login.
+TEST_F(AuthLogoutTest, LogoutClosesLocallyBeforeServerConfirms) {
+    std::optional<AuthResult> logoutResult;
+    // Guarda la confirmación que Logout entrega al recibir la respuesta del servidor.
+    session->Logout([&logoutResult](AuthResult received) {
+        logoutResult = std::move(received);
+    });
+
+    // Al volver de Logout ya no se puede consultar el perfil, aunque el servidor aún no haya respondido.
+    const auto profile = FetchProfile();
+    ASSERT_EQ(1, profile->calls);
+    EXPECT_EQ(AuthOutcome::NoSession, profile->result.outcome);
+    EXPECT_FALSE(profile->identity.has_value());
+
+    // La petición 0 fue el login que hizo SetUp. La 1 debe llevar el secreto en el cuerpo del POST.
+    ASSERT_TRUE(WaitForRequest(1, "POST /api/v1/auth/logout"));
+    const QByteArray& request = server.Requests()[1];
+    const auto separator = request.indexOf("\r\n\r\n");
+    ASSERT_GE(separator, 0);
+    EXPECT_FALSE(request.first(separator).toLower().contains("\r\nauthorization:"));
+    const QJsonObject expected{{QStringLiteral("refreshToken"), QStringLiteral("fake-refresh")}};
+    EXPECT_EQ(expected, QJsonDocument::fromJson(request.mid(separator + 4)).object());
+    EXPECT_FALSE(logoutResult.has_value());
+
+    ASSERT_TRUE(server.ReplyToHeldRequest(1, LogoutConfirmed));
+    // Espera a que el cliente interprete el 204 y entregue el resultado en el hilo Qt.
+    ASSERT_TRUE(WaitFor([&logoutResult] { return logoutResult.has_value(); }));
+    EXPECT_EQ(AuthOutcome::Success, logoutResult->outcome);
+    EXPECT_EQ(204, logoutResult->statusCode);
+    EXPECT_EQ(2u, server.Requests().size());
+}
+
+// Un 503 se entrega al llamador y el cierre local sigue impidiendo consultar el perfil.
+TEST_F(AuthLogoutTest, LogoutReports503AndKeepsSessionClosed) {
+    std::optional<AuthResult> logoutResult;
+    // Recoge la respuesta que el cliente interpreta del POST de cierre.
+    session->Logout([&logoutResult](AuthResult received) {
+        logoutResult = std::move(received);
+    });
+    ASSERT_TRUE(WaitForRequest(1, "POST /api/v1/auth/logout"));
+    ASSERT_TRUE(server.ReplyToHeldRequest(1, HttpResponse(503, R"({"code":"SERVICE_UNAVAILABLE"})")));
+    // Primero deja que Logout procese el fallo remoto. Después comprueba el estado local.
+    ASSERT_TRUE(WaitFor([&logoutResult] { return logoutResult.has_value(); }));
+    EXPECT_EQ(AuthOutcome::HttpError, logoutResult->outcome);
+    EXPECT_EQ(503, logoutResult->statusCode);
+    EXPECT_EQ(QStringLiteral("SERVICE_UNAVAILABLE"), logoutResult->problemCode);
+    EXPECT_EQ(RestTransportError::None, logoutResult->transportError);
+
+    const auto profile = FetchProfile();
+    ASSERT_EQ(1, profile->calls);
+    EXPECT_EQ(AuthOutcome::NoSession, profile->result.outcome);
+    EXPECT_FALSE(profile->identity.has_value());
+    EXPECT_EQ(2u, server.Requests().size());
+}
+
+// Un segundo Logout devuelve NoSession mientras el primero conserva su callback y recibe el único 204.
+TEST_F(AuthLogoutTest, SecondLogoutKeepsFirstConfirmation) {
+    std::optional<AuthResult> firstResult;
+    std::optional<AuthResult> secondResult;
+    // La primera llamada debe esperar mientras el servidor retiene su POST.
+    session->Logout([&firstResult](AuthResult received) {
+        firstResult = std::move(received);
+    });
+    ASSERT_TRUE(WaitForRequest(1, "POST /api/v1/auth/logout"));
+    // La segunda llamada encuentra la sesión cerrada y completa en este mismo hilo.
+    session->Logout([&secondResult](AuthResult received) {
+        secondResult = std::move(received);
+    });
+    ASSERT_TRUE(secondResult.has_value());
+    EXPECT_EQ(AuthOutcome::NoSession, secondResult->outcome);
+    EXPECT_FALSE(secondResult->statusCode.has_value());
+    EXPECT_FALSE(firstResult.has_value());
+
+    ASSERT_TRUE(server.ReplyToHeldRequest(1, LogoutConfirmed));
+    // El 204 sigue perteneciendo a la primera llamada.
+    ASSERT_TRUE(WaitFor([&firstResult] { return firstResult.has_value(); }));
+    EXPECT_EQ(AuthOutcome::Success, firstResult->outcome);
+    EXPECT_EQ(204, firstResult->statusCode);
+    ProcessEventsFor(50);
+    EXPECT_EQ(2u, server.Requests().size());
+}
+
+// Cerrar durante un Login pendiente descarta su respuesta 200 y los tokens que contiene.
+TEST_F(AuthLogoutTest, LogoutDiscardsLateLoginSuccess) {
+    const auto loginCalls = std::make_shared<int>(0);
+    // Este nuevo Login retira los tokens del login inicial de SetUp y queda pendiente en el servidor.
+    session->Login(QStringLiteral("second@example.test"), QStringLiteral("clave"), [loginCalls](AuthResult) {
+        ++*loginCalls;
+    });
+    ASSERT_TRUE(WaitForRequest(1, "POST /api/v1/auth/login"));
+    std::optional<AuthResult> logoutResult;
+    // Al no disponer todavía de tokens, el cierre debe entregar NoSession inmediatamente.
+    session->Logout([&logoutResult](AuthResult received) {
+        logoutResult = std::move(received);
+    });
+    ASSERT_TRUE(logoutResult.has_value());
+    EXPECT_EQ(AuthOutcome::NoSession, logoutResult->outcome);
+
+    ASSERT_TRUE(server.ReplyToHeldRequest(1, HttpResponse(200, ValidLoginResponse)));
+    // Cuando el test vuelve a ser el único dueño del contador, el cliente ya retiró la callback de Login.
+    ASSERT_TRUE(WaitFor([&loginCalls] { return loginCalls.use_count() == 1; }));
+    EXPECT_EQ(0, *loginCalls);
+    const auto profile = FetchProfile();
+    ASSERT_EQ(1, profile->calls);
+    EXPECT_EQ(AuthOutcome::NoSession, profile->result.outcome);
+    EXPECT_FALSE(profile->identity.has_value());
+    EXPECT_EQ(2u, server.Requests().size());
+}
+
+// Un refresh que responde después del cierre no repite el GET ni vuelve a abrir la sesión.
+TEST_F(AuthLogoutTest, LogoutDiscardsLateRefreshSuccess) {
+    const auto pendingProfile = FetchProfile();
+    ASSERT_TRUE(ReplyToProfile(1, "fake-access", 401, R"({"code":"AUTHENTICATION_REQUIRED"})"));
+    ASSERT_TRUE(WaitForRequest(2, "POST /api/v1/auth/refresh"));
+    std::optional<AuthResult> logoutResult;
+    // El servidor guarda las dos peticiones para poder confirmar el cierre antes de responder al refresh.
+    session->Logout([&logoutResult](AuthResult received) {
+        logoutResult = std::move(received);
+    });
+    ASSERT_TRUE(WaitForRequest(3, "POST /api/v1/auth/logout"));
+    ASSERT_TRUE(server.ReplyToHeldRequest(3, LogoutConfirmed));
+    // El cierre ya debe estar confirmado cuando llegue el par de tokens de la sesión anterior.
+    ASSERT_TRUE(WaitFor([&logoutResult] { return logoutResult.has_value(); }));
+    ASSERT_EQ(AuthOutcome::Success, logoutResult->outcome);
+    ASSERT_TRUE(ReplyToRefresh(2, HttpResponse(200, ValidRefreshResponse), QStringLiteral("fake-refresh")));
+    // Espera a que se libere la callback antigua antes de consultar el perfil otra vez.
+    ASSERT_TRUE(WaitFor([&pendingProfile] { return pendingProfile.use_count() == 1; }));
+    EXPECT_EQ(0, pendingProfile->calls);
+
+    const auto profile = FetchProfile();
+    ASSERT_EQ(1, profile->calls);
+    EXPECT_EQ(AuthOutcome::NoSession, profile->result.outcome);
+    EXPECT_FALSE(profile->identity.has_value());
+    EXPECT_EQ(4u, server.Requests().size());
+}
+
 }  // namespace sbp
