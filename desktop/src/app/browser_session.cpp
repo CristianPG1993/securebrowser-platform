@@ -33,25 +33,28 @@ namespace sbp {
 BrowserSession::BrowserSession(const StartupOptions& startup_options)
     : startup_options_(startup_options) {}
 
-void BrowserSession::OpenLoginDialog(BrowserWindow& window, AuthSession& auth_session, const QString& error_message) {
+void BrowserSession::OpenLoginDialog(BrowserWindow& window, AuthSession& auth_session,
+                                     const QString& device_identifier, const QString& error_message) {
     auto* dialog = new LoginDialog(&window, error_message);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
 
-    // Qt entrega la respuesta después de cerrar el formulario. La ventana puede haberse cerrado también.
-    const auto onCompleted = [this, owner = QPointer<BrowserWindow>(&window), &auth_session](AuthResult result) {
+    // El UUID se conserva por valor para la búsqueda o para otro intento si el usuario corrige las credenciales.
+    const auto onCompleted = [this, owner = QPointer<BrowserWindow>(&window), &auth_session, device_identifier]
+                             (AuthResult result) {
         if (!owner || lifecycle_.CloseRequested()) {
             return;
         }
         if (result.outcome == AuthOutcome::Success) {
             owner->setWindowTitle(QStringLiteral("SecureBrowser — Sesión iniciada"));
             std::fputs("Backend login succeeded.\n", stderr);
+            IdentifyDevice(*owner, auth_session, device_identifier);
             return;
         }
 
         const QString message = result.outcome == AuthOutcome::HttpError && result.statusCode == 401
             ? QStringLiteral("Correo o contraseña incorrectos.")
             : QStringLiteral("No se pudo iniciar sesión. Comprueba la conexión con el backend y vuelve a intentarlo.");
-        OpenLoginDialog(*owner, auth_session, message);
+        OpenLoginDialog(*owner, auth_session, device_identifier, message);
     };
 
     // Busca la señal por nombre para mantener la carga diferida de QtWidgets en Windows.
@@ -71,6 +74,30 @@ void BrowserSession::OpenLoginDialog(BrowserWindow& window, AuthSession& auth_se
         return;
     }
     dialog->open();
+}
+
+void BrowserSession::IdentifyDevice(BrowserWindow& window, AuthSession& auth_session, const QString& device_identifier) {
+    // La búsqueda puede recorrer varias páginas. Solo se actualiza la ventana si sigue abierta al terminar.
+    auth_session.FetchDeviceIdentity(device_identifier,
+        [this, owner = QPointer<BrowserWindow>(&window)](AuthResult result, std::optional<DeviceIdentity> device) {
+            if (!owner || lifecycle_.CloseRequested()) {
+                return;
+            }
+            if (result.outcome != AuthOutcome::Success) {
+                owner->setWindowTitle(QStringLiteral("SecureBrowser — Error al consultar el dispositivo"));
+                return;
+            }
+            if (!device) {
+                owner->setWindowTitle(QStringLiteral("SecureBrowser — Dispositivo no encontrado para este usuario"));
+                return;
+            }
+            if (!device->active) {
+                owner->setWindowTitle(QStringLiteral("SecureBrowser — Dispositivo inactivo"));
+                return;
+            }
+            owner->setWindowTitle(QStringLiteral("SecureBrowser — Dispositivo identificado"));
+            std::fputs("Backend device identified.\n", stderr);
+        });
 }
 
 bool BrowserSession::PrepareDemoPolicy(PolicyManager& manager) const {
@@ -277,7 +304,7 @@ int BrowserSession::Run(QApplication& qt_app) {
         // OnHostReady guarda ese HWND y solicita crear el navegador cuando el contexto CEF también esté listo.
         lifecycle_.OnHostReady(window_bridge.Show(window, window_ui));
         if (auth_session) {
-            OpenLoginDialog(window, *auth_session, {});
+            OpenLoginDialog(window, *auth_session, backend_config->deviceIdentifier, {});
         }
 
         std::fputs("Qt event loop starting with CEF initialized.\n", stderr);

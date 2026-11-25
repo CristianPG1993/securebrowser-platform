@@ -41,7 +41,11 @@ public:
 
 private:
     // Muestra el formulario en Qt. Solo la confirmación del usuario envía las credenciales.
-    void OpenLoginDialog(BrowserWindow& window, AuthSession& auth_session, const QString& error_message);
+    void OpenLoginDialog(BrowserWindow& window, AuthSession& auth_session,
+                         const QString& device_identifier, const QString& error_message);
+
+    // Busca el UUID de la instalación entre los dispositivos del usuario que acaba de iniciar sesión.
+    void IdentifyDevice(BrowserWindow& window, AuthSession& auth_session, const QString& device_identifier);
 
     // Prepara el gestor que utilizará el handler: en modo demo crea contexto y publica el snapshot.
     // true indica que la preparación permite continuar el arranque; el permiso de navegar lo decide el motor.
