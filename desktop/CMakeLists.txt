@@ -239,6 +239,12 @@ if(SBP_BUILD_REST_TESTS)
         src/rest/user_identity.h
         src/rest/user_identity_parser.h
         src/rest/user_identity_parser.cpp
+        src/rest/device_identity.h
+        src/rest/device_identity_parser.h
+        src/rest/device_identity_parser.cpp
+        src/rest/device_page.h
+        src/rest/device_page_parser.h
+        src/rest/device_page_parser.cpp
     )
     target_include_directories(sbp_rest_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(sbp_rest_tests PRIVATE NOMINMAX)
@@ -497,6 +503,12 @@ add_library(SecureBrowser SHARED
     src/rest/user_identity.h
     src/rest/user_identity_parser.h
     src/rest/user_identity_parser.cpp
+    src/rest/device_identity.h
+    src/rest/device_identity_parser.h
+    src/rest/device_identity_parser.cpp
+    src/rest/device_page.h
+    src/rest/device_page_parser.h
+    src/rest/device_page_parser.cpp
     src/ui/browser_host.cpp
     src/ui/browser_host.h
     src/ui/browser_window.cpp
