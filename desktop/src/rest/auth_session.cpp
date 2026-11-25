@@ -1,5 +1,6 @@
 #include "rest/auth_session.h"
 #include "rest/device_page_parser.h"
+#include "rest/policy_response_parser.h"
 #include "rest/token_response_parser.h"
 #include "rest/user_identity_parser.h"
 
@@ -120,7 +121,7 @@ void AuthSession::FetchUserIdentity(IdentityCallback onCompleted) {
 
     // El GET entrega su resultado en el hilo de la sesión. Solo un perfil válido llega al receptor como Success.
     SendAuthenticatedGet(QStringLiteral("users/me"),
-        [onCompleted = std::move(onCompleted)](AuthResult result, QByteArray body) {
+        [onCompleted = std::move(onCompleted)](AuthResult result, QByteArray body, GetResultSource) {
             std::optional<UserIdentity> identity;
             if (result.outcome == AuthOutcome::Success) {
                 identity = UserIdentityParser::Parse(body);
@@ -157,7 +158,7 @@ void AuthSession::FetchDevicePage(QString deviceIdentifier, UserIdentity owner, 
     // El GET descarta las respuestas de sesiones retiradas. El UUID y el perfil viajan por valor entre páginas.
     SendAuthenticatedGet(path,
         [this, deviceIdentifier = std::move(deviceIdentifier), owner, page, onCompleted = std::move(onCompleted)]
-        (AuthResult result, QByteArray body) mutable {
+        (AuthResult result, QByteArray body, GetResultSource) mutable {
             if (result.outcome != AuthOutcome::Success) {
                 onCompleted(std::move(result), std::nullopt);
                 return;
@@ -185,11 +186,43 @@ void AuthSession::FetchDevicePage(QString deviceIdentifier, UserIdentity owner, 
         }, true);
 }
 
+void AuthSession::FetchDevicePolicy(SecurityContext context, DevicePolicyCallback onCompleted) {
+    RequireOwnerThread();
+    if (!onCompleted) {
+        throw std::invalid_argument("Device policy request requires a completion callback.");
+    }
+    if (context.Generation() == 0 || context.DeviceId() <= 0 || context.CompanyId() <= 0) {
+        throw std::invalid_argument("Device policy request requires a valid installation context.");
+    }
+
+    const QString path = QStringLiteral("devices/%1/policy").arg(context.DeviceId());
+    // El GET entrega en el hilo Qt de la sesión. La copia del contexto vincula tanto la política como el error a su instalación.
+    SendAuthenticatedGet(path,
+        [this, context, onCompleted = std::move(onCompleted)](AuthResult result, QByteArray body, GetResultSource source) {
+            std::optional<PolicySnapshot> policy;
+            if (result.outcome == AuthOutcome::Success) {
+                policy = PolicyResponseParser::Parse(body);
+                if (!policy || policy->CompanyId() != context.CompanyId()) {
+                    result.outcome = AuthOutcome::InvalidResponse;
+                    policy.reset();
+                }
+            } else if (source == GetResultSource::Get && result.outcome == AuthOutcome::HttpError
+                       && (result.statusCode == 403 || result.statusCode == 404
+                           || (result.statusCode == 409 && result.problemCode == QStringLiteral("DEVICE_INACTIVE")))) {
+                result.outcome = AuthOutcome::DeviceAccessDenied;
+            } else if (source == GetResultSource::Refresh && !state_->tokens) {
+                // Refresh ya retiró los tokens al confirmar que la sesión es irrecuperable.
+                result.outcome = AuthOutcome::NoSession;
+            }
+            onCompleted(std::move(result), context, std::move(policy));
+        }, true);
+}
+
 void AuthSession::SendAuthenticatedGet(QString relativePath, GetCallback onCompleted, bool allowRefresh) {
     if (!state_->tokens) {
         AuthResult result;
         result.outcome = AuthOutcome::NoSession;
-        onCompleted(std::move(result), {});
+        onCompleted(std::move(result), {}, GetResultSource::Local);
         return;
     }
 
@@ -204,12 +237,12 @@ void AuthSession::SendAuthenticatedGet(QString relativePath, GetCallback onCompl
     const QByteArray bearer = "Bearer " + state_->tokens->accessToken.toUtf8();
     if (!headers.append(QHttpHeaders::WellKnownHeader::Authorization, bearer)) {
         // Si Qt rechaza el valor de la cabecera, la petición termina aquí con InvalidResponse.
-        onCompleted(AuthResult{}, {});
+        onCompleted(AuthResult{}, {}, GetResultSource::Local);
         return;
     }
     request.setHeaders(std::move(headers));
 
-    // El perfil y cada página de dispositivos pertenecen a la generación que abrió Login.
+    // Cada GET protegido pertenece a la generación que abrió Login.
     const auto generation = state_->generation;
     const auto tokenRevision = state_->tokenRevision;
     const std::weak_ptr<State> weakState(state_);
@@ -235,7 +268,7 @@ void AuthSession::SendAuthenticatedGet(QString relativePath, GetCallback onCompl
             if (result.transportError == RestTransportError::None && result.statusCode == 200) {
                 result.outcome = AuthOutcome::Success;
             }
-            onCompleted(std::move(result), std::move(received.body));
+            onCompleted(std::move(result), std::move(received.body), GetResultSource::Get);
         });
 }
 
@@ -245,7 +278,7 @@ void AuthSession::SendAuthenticatedGetAfterRefresh(QString relativePath, GetCall
         if (result.outcome == AuthOutcome::Success) {
             SendAuthenticatedGet(std::move(relativePath), std::move(onCompleted), false);
         } else {
-            onCompleted(std::move(result), {});
+            onCompleted(std::move(result), {}, GetResultSource::Refresh);
         }
     });
 }

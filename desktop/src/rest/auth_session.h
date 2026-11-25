@@ -4,6 +4,8 @@
 #include "rest/rest_client.h"
 #include "rest/token_response.h"
 #include "rest/user_identity.h"
+#include "security/policy_snapshot.h"
+#include "security/security_context.h"
 
 #include <QString>
 #include <QThread>
@@ -17,17 +19,19 @@
 
 namespace sbp {
 
-// Resultado de una operación de autenticación, separado del estado de sesión y de la autorización de un Device.
+// Resultado de la autenticación o de una consulta protegida.
 enum class AuthOutcome {
     Success,
     HttpError,
     TransportError,
     InvalidResponse,
     // Una consulta protegida requiere que la sesión tenga tokens.
-    NoSession
+    NoSession,
+    // El endpoint de política ha denegado el acceso al dispositivo del contexto solicitante.
+    DeviceAccessDenied
 };
 
-// Resultado de las operaciones de autenticación y de las consultas de identidad.
+// Resultado de las operaciones de autenticación y de las consultas de identidad y política.
 // Los tokens se gestionarán dentro de AuthSession; este resultado no expone secretos ni el cuerpo HTTP.
 struct AuthResult {
     // Empieza sin éxito confirmado: solo la operación completada podrá indicar Success.
@@ -55,6 +59,9 @@ public:
 
     // Entrega el estado de la consulta y, si se encontró la instalación, los datos de su dispositivo.
     using DeviceIdentityCallback = std::function<void(AuthResult, std::optional<DeviceIdentity>)>;
+
+    // Entrega el resultado y el contexto que inició el GET. Solo un éxito lleva la política recibida.
+    using DevicePolicyCallback = std::function<void(AuthResult, SecurityContext, std::optional<PolicySnapshot>)>;
 
     // client debe vivir más que esta sesión; la URL base se conserva por valor.
     // Ejemplo de base de la demo local: http://127.0.0.1:8081/api/v1/.
@@ -87,9 +94,15 @@ public:
     // El UUID debe ser canónico (minúsculas, con guiones y sin llaves) o se lanza invalid_argument.
     void FetchDeviceIdentity(QString deviceIdentifier, DeviceIdentityCallback onCompleted);
 
+    // Recibe el contexto abierto para el dispositivo identificado por FetchDeviceIdentity.
+    // Consulta GET /devices/{id}/policy con context.DeviceId() y conserva ese contexto hasta la respuesta.
+    // Un 403, un 404 o un 409 DEVICE_INACTIVE de este GET entregan DeviceAccessDenied.
+    void FetchDevicePolicy(SecurityContext context, DevicePolicyCallback onCompleted);
+
 private:
-    // Un GET protegido entrega el cuerpo al lector del endpoint cuando recibe HTTP 200.
-    using GetCallback = std::function<void(AuthResult, QByteArray)>;
+    // El receptor de política necesita saber qué operación produjo el error antes de retirar el acceso.
+    enum class GetResultSource { Local, Get, Refresh };
+    using GetCallback = std::function<void(AuthResult, QByteArray, GetResultSource)>;
     void SendAuthenticatedGet(QString relativePath, GetCallback onCompleted, bool allowRefresh);
     void SendAuthenticatedGetAfterRefresh(QString relativePath, GetCallback onCompleted);
 
