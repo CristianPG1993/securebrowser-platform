@@ -231,6 +231,7 @@ if(SBP_BUILD_REST_TESTS)
         tests/rest/user_identity_parser_test.cpp
         tests/rest/device_identity_parser_test.cpp
         tests/rest/device_page_parser_test.cpp
+        tests/rest/policy_response_parser_test.cpp
         src/rest/auth_session.h
         src/rest/auth_session.cpp
         src/rest/rest_client.h
@@ -247,10 +248,12 @@ if(SBP_BUILD_REST_TESTS)
         src/rest/device_page.h
         src/rest/device_page_parser.h
         src/rest/device_page_parser.cpp
+        src/rest/policy_response_parser.h
+        src/rest/policy_response_parser.cpp
     )
     target_include_directories(sbp_rest_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(sbp_rest_tests PRIVATE NOMINMAX)
-    target_link_libraries(sbp_rest_tests PRIVATE Qt6::Network GTest::gtest)
+    target_link_libraries(sbp_rest_tests PRIVATE sbp_security_core Qt6::Network GTest::gtest)
     # Las pruebas son HTTP loopback; basta con desplegar Core y Network, sin plugins GUI ni TLS.
     add_custom_command(TARGET sbp_rest_tests POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
