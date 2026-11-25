@@ -511,6 +511,8 @@ add_library(SecureBrowser SHARED
     src/rest/device_page.h
     src/rest/device_page_parser.h
     src/rest/device_page_parser.cpp
+    src/rest/policy_response_parser.h
+    src/rest/policy_response_parser.cpp
     src/ui/browser_host.cpp
     src/ui/browser_host.h
     src/ui/browser_window.cpp
