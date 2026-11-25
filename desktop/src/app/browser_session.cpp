@@ -80,15 +80,17 @@ void BrowserSession::OpenLoginDialog(BrowserWindow& window, AuthSession& auth_se
 void BrowserSession::IdentifyDevice(BrowserWindow& window, AuthSession& auth_session,
                                     const std::shared_ptr<PolicyManager>& policy_manager,
                                     const QString& device_identifier) {
-    // La búsqueda puede recorrer varias páginas. Solo se actualiza la ventana si sigue abierta al terminar.
+    // La búsqueda puede recorrer varias páginas. Conservamos el UUID para poder reintentar tras un error.
     auth_session.FetchDeviceIdentity(device_identifier,
-        [this, owner = QPointer<BrowserWindow>(&window), &auth_session, policy_manager]
+        [this, owner = QPointer<BrowserWindow>(&window), &auth_session, policy_manager, device_identifier]
         (AuthResult result, std::optional<DeviceIdentity> device) {
             if (!owner || lifecycle_.CloseRequested()) {
                 return;
             }
             if (result.outcome != AuthOutcome::Success) {
                 owner->setWindowTitle(QStringLiteral("SecureBrowser — Error al consultar el dispositivo"));
+                OpenLoginDialog(*owner, auth_session, policy_manager, device_identifier,
+                    QStringLiteral("No se pudo consultar el dispositivo. Vuelve a iniciar sesión para reintentar."));
                 return;
             }
             if (!device) {
