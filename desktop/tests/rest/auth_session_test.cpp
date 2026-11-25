@@ -1,6 +1,7 @@
 #include "auth_refresh_test.h"
 
 #include "rest/auth_session.h"
+#include "rest/device_page_parser.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -426,6 +427,180 @@ TEST_F(AuthSessionTest, FetchUserIdentityStopsAfterSecond401) {
     EXPECT_EQ(AuthOutcome::HttpError, profileResult->outcome);
     EXPECT_EQ(401, profileResult->statusCode);
     EXPECT_EQ(QStringLiteral("AUTHENTICATION_REQUIRED"), profileResult->problemCode);
+}
+
+// La búsqueda utiliza el mismo login de prueba y el mismo servidor local que la renovación.
+using AuthDeviceTest = AuthRefreshTest;
+
+// Busca el UUID en la segunda página, conserva el estado inactivo y termina antes de pedir la tercera.
+TEST_F(AuthDeviceTest, FetchDeviceIdentityFindsMatchOnSecondPage) {
+    const QString deviceIdentifier = QStringLiteral("b7eacb45-4aba-4a5a-8c0c-633a61294af1");
+    std::optional<AuthResult> deviceResult;
+    std::optional<DeviceIdentity> identity;
+    // Guarda los dos argumentos que entrega la búsqueda al terminar en el hilo Qt de la prueba.
+    session->FetchDeviceIdentity(deviceIdentifier,
+        [&deviceResult, &identity](AuthResult received, std::optional<DeviceIdentity> device) {
+            deviceResult = std::move(received);
+            identity = std::move(device);
+        });
+
+    // La petición 0 fue el login del SetUp. La petición 1 obtiene el propietario del dispositivo.
+    ASSERT_TRUE(ReplyToProfile(1, "fake-access", 200, R"({"id":7,"companyId":3})"));
+    ASSERT_TRUE(WaitForRequest(2, "GET /api/v1/devices?page=0&userId=7"));
+    const QByteArray pageZero = R"({
+        "page":0, "size":1, "totalElements":3, "totalPages":3,
+        "items":[{"id":11,"deviceIdentifier":"a1b2c3d4-1234-4000-8000-000000000011","userId":7,"companyId":3,"active":true}]
+    })";
+    ASSERT_TRUE(server.ReplyToHeldRequest(2, HttpResponse(200, pageZero)));
+
+    ASSERT_TRUE(WaitForRequest(3, "GET /api/v1/devices?page=1&userId=7"));
+    EXPECT_FALSE(deviceResult.has_value());
+    const QByteArray pageOne = R"({
+        "page":1, "size":1, "totalElements":3, "totalPages":3,
+        "items":[{"id":17,"deviceIdentifier":"b7eacb45-4aba-4a5a-8c0c-633a61294af1","userId":7,"companyId":3,"active":false}]
+    })";
+    ASSERT_TRUE(server.ReplyToHeldRequest(3, HttpResponse(200, pageOne)));
+
+    // Espera el resultado y da al servidor ocasión de recibir un GET adicional si la búsqueda continuara.
+    ASSERT_TRUE(WaitFor([&deviceResult] { return deviceResult.has_value(); }));
+    ProcessEventsFor(50);
+    EXPECT_EQ(4u, server.Requests().size());
+    EXPECT_EQ(AuthOutcome::Success, deviceResult->outcome);
+    EXPECT_EQ(200, deviceResult->statusCode);
+    ASSERT_TRUE(identity.has_value());
+    EXPECT_EQ(17, identity->id);
+    EXPECT_EQ(deviceIdentifier, identity->deviceIdentifier);
+    EXPECT_EQ(7, identity->userId);
+    EXPECT_EQ(3, identity->companyId);
+    EXPECT_FALSE(identity->active);
+}
+
+// Una última página válida con otro UUID completa la búsqueda con Success y sin identidad.
+TEST_F(AuthDeviceTest, FetchDeviceIdentityReturnsEmptyAfterLastPage) {
+    const QString deviceIdentifier = QStringLiteral("b7eacb45-4aba-4a5a-8c0c-633a61294af1");
+    std::optional<AuthResult> deviceResult;
+    // Comprueba la identidad que recibe el llamador y guarda el resultado para la espera del test.
+    session->FetchDeviceIdentity(deviceIdentifier,
+        [&deviceResult](AuthResult received, std::optional<DeviceIdentity> device) {
+            EXPECT_FALSE(device.has_value());
+            EXPECT_FALSE(deviceResult.has_value());
+            deviceResult = std::move(received);
+        });
+
+    ASSERT_TRUE(ReplyToProfile(1, "fake-access", 200, R"({"id":7,"companyId":3})"));
+    ASSERT_TRUE(WaitForRequest(2, "GET /api/v1/devices?page=0&userId=7"));
+    const QByteArray lastPage = R"({
+        "page":0, "size":20, "totalElements":1, "totalPages":1,
+        "items":[{"id":11,"deviceIdentifier":"a1b2c3d4-1234-4000-8000-000000000011","userId":7,"companyId":3,"active":true}]
+    })";
+    EXPECT_FALSE(deviceResult.has_value());
+    ASSERT_TRUE(server.ReplyToHeldRequest(2, HttpResponse(200, lastPage)));
+
+    // Espera la entrega y comprueba que el servidor recibió solo el login, el perfil y la página 0.
+    ASSERT_TRUE(WaitFor([&deviceResult] { return deviceResult.has_value(); }));
+    EXPECT_EQ(AuthOutcome::Success, deviceResult->outcome);
+    EXPECT_EQ(200, deviceResult->statusCode);
+    ProcessEventsFor(50);
+    EXPECT_EQ(3u, server.Requests().size());
+}
+
+// Un UUID coincidente solo identifica la instalación si también coinciden el usuario y la empresa del perfil.
+TEST_F(AuthDeviceTest, FetchDeviceIdentityRequiresMatchingUserAndCompany) {
+    const QString deviceIdentifier = QStringLiteral("b7eacb45-4aba-4a5a-8c0c-633a61294af1");
+    // El perfil siempre es el usuario 7 de la empresa 3. Cada respuesta cambia solo uno de esos campos.
+    const UserIdentity otherOwners[] = {{8, 3}, {7, 4}};
+    for (const UserIdentity& owner : otherOwners) {
+        SCOPED_TRACE(::testing::Message() << "userId=" << owner.id << ", companyId=" << owner.companyId);
+        const auto profileIndex = server.Requests().size();
+        auto deviceResult = std::make_shared<std::optional<AuthResult>>();
+        // Cada callback conserva el resultado de su búsqueda y comprueba que recibe la identidad vacía.
+        session->FetchDeviceIdentity(deviceIdentifier,
+            [deviceResult](AuthResult received, std::optional<DeviceIdentity> device) {
+                EXPECT_FALSE(device.has_value());
+                *deviceResult = std::move(received);
+            });
+        ASSERT_TRUE(ReplyToProfile(profileIndex, "fake-access", 200, R"({"id":7,"companyId":3})"));
+        const auto pageIndex = profileIndex + 1;
+        ASSERT_TRUE(WaitForRequest(pageIndex, "GET /api/v1/devices?page=0&userId=7"));
+        const QByteArray page = QStringLiteral(R"({
+            "page":0, "size":20, "totalElements":1, "totalPages":1,
+            "items":[{"id":17,"deviceIdentifier":"%1","userId":%2,"companyId":%3,"active":true}]
+        })").arg(deviceIdentifier).arg(owner.id).arg(owner.companyId).toUtf8();
+        ASSERT_TRUE(server.ReplyToHeldRequest(pageIndex, HttpResponse(200, page)));
+        // Atiende los eventos hasta recibir el resultado de esta búsqueda antes de cambiar el propietario simulado.
+        ASSERT_TRUE(WaitFor([&deviceResult] { return deviceResult->has_value(); }));
+        EXPECT_EQ(AuthOutcome::Success, deviceResult->value().outcome);
+        EXPECT_EQ(200, deviceResult->value().statusCode);
+    }
+}
+
+// Rechaza una página distinta de la solicitada aunque su JSON sea válido y contenga el dispositivo buscado.
+TEST_F(AuthDeviceTest, FetchDeviceIdentityRejectsUnexpectedPage) {
+    const QString deviceIdentifier = QStringLiteral("b7eacb45-4aba-4a5a-8c0c-633a61294af1");
+    std::optional<AuthResult> deviceResult;
+    // La búsqueda debe entregar un error aunque el UUID, el usuario y la empresa coincidan.
+    session->FetchDeviceIdentity(deviceIdentifier,
+        [&deviceResult](AuthResult received, std::optional<DeviceIdentity> device) {
+            EXPECT_FALSE(device.has_value());
+            deviceResult = std::move(received);
+        });
+
+    ASSERT_TRUE(ReplyToProfile(1, "fake-access", 200, R"({"id":7,"companyId":3})"));
+    ASSERT_TRUE(WaitForRequest(2, "GET /api/v1/devices?page=0&userId=7"));
+    const QByteArray wrongPage = R"({
+        "page":1, "size":20, "totalElements":21, "totalPages":2,
+        "items":[{"id":17,"deviceIdentifier":"b7eacb45-4aba-4a5a-8c0c-633a61294af1","userId":7,"companyId":3,"active":true}]
+    })";
+    ASSERT_TRUE(DevicePageParser::Parse(wrongPage).has_value());
+    ASSERT_TRUE(server.ReplyToHeldRequest(2, HttpResponse(200, wrongPage)));
+
+    // La sesión conserva el 200 del servidor y comunica el error al comparar el número de página.
+    ASSERT_TRUE(WaitFor([&deviceResult] { return deviceResult.has_value(); }));
+    EXPECT_EQ(200, deviceResult->statusCode);
+    EXPECT_EQ(AuthOutcome::InvalidResponse, deviceResult->outcome);
+}
+
+// Un 401 en la página 1 renueva los tokens y repite ese GET con el nuevo Bearer antes de entregar el dispositivo.
+TEST_F(AuthDeviceTest, FetchDeviceIdentityRetriesSamePageAfterRefresh) {
+    const QString deviceIdentifier = QStringLiteral("b7eacb45-4aba-4a5a-8c0c-633a61294af1");
+    std::optional<AuthResult> deviceResult;
+    std::optional<DeviceIdentity> identity;
+    // El receptor original espera durante la renovación y recibe una única respuesta al terminar la búsqueda.
+    session->FetchDeviceIdentity(deviceIdentifier,
+        [&deviceResult, &identity](AuthResult received, std::optional<DeviceIdentity> device) {
+            EXPECT_FALSE(deviceResult.has_value());
+            deviceResult = std::move(received);
+            identity = std::move(device);
+        });
+
+    ASSERT_TRUE(ReplyToProfile(1, "fake-access", 200, R"({"id":7,"companyId":3})"));
+    const QByteArray pageZero = R"({
+        "page":0, "size":1, "totalElements":2, "totalPages":2,
+        "items":[{"id":11,"deviceIdentifier":"a1b2c3d4-1234-4000-8000-000000000011","userId":7,"companyId":3,"active":true}]
+    })";
+    ASSERT_TRUE(ReplyToAuthenticatedGet(2, "/api/v1/devices?page=0&userId=7", "fake-access", 200, pageZero));
+
+    // El servidor rechaza el token inicial en la página 1 y comprueba el refreshToken que envía Desktop.
+    const QByteArray pageOnePath = "/api/v1/devices?page=1&userId=7";
+    ASSERT_TRUE(ReplyToAuthenticatedGet(3, pageOnePath, "fake-access", 401, R"({"code":"AUTHENTICATION_REQUIRED"})"));
+    ASSERT_TRUE(ReplyToRefresh(4, HttpResponse(200, ValidRefreshResponse), QStringLiteral("fake-refresh")));
+
+    // Solo la misma página, con el mismo filtro de usuario y el token nuevo, recibe el dispositivo buscado.
+    const QByteArray pageOne = R"({
+        "page":1, "size":1, "totalElements":2, "totalPages":2,
+        "items":[{"id":17,"deviceIdentifier":"b7eacb45-4aba-4a5a-8c0c-633a61294af1","userId":7,"companyId":3,"active":true}]
+    })";
+    EXPECT_FALSE(deviceResult.has_value());
+    ASSERT_TRUE(ReplyToAuthenticatedGet(5, pageOnePath, "new-access", 200, pageOne));
+
+    // Atiende los eventos Qt hasta que la respuesta del reintento llega al receptor de FetchDeviceIdentity.
+    ASSERT_TRUE(WaitFor([&deviceResult] { return deviceResult.has_value(); }));
+    EXPECT_EQ(6u, server.Requests().size());
+    EXPECT_EQ(AuthOutcome::Success, deviceResult->outcome);
+    EXPECT_EQ(200, deviceResult->statusCode);
+    ASSERT_TRUE(identity.has_value());
+    EXPECT_EQ(17, identity->id);
+    EXPECT_EQ(deviceIdentifier, identity->deviceIdentifier);
 }
 
 // El cierre parte del mismo login y del mismo servidor en modo Hold que las pruebas de renovación.

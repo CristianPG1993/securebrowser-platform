@@ -52,9 +52,10 @@ bool AuthRefreshTest::WaitForRequest(std::size_t index, const QByteArray& method
         && server.Requests()[index].startsWith(methodAndPath + " HTTP/1.1\r\n");
 }
 
-// Lee Authorization del GET /users/me retenido y envía la respuesta simulada si coincide el token.
-bool AuthRefreshTest::ReplyToProfile(std::size_t index, const QByteArray& accessToken, int status, const QByteArray& body) {
-    if (!WaitForRequest(index, "GET /api/v1/users/me")) {
+// Lee Authorization del GET retenido y envía la respuesta simulada si coinciden la ruta y el token.
+bool AuthRefreshTest::ReplyToAuthenticatedGet(std::size_t index, const QByteArray& path, const QByteArray& accessToken,
+                                             int status, const QByteArray& body) {
+    if (!WaitForRequest(index, "GET " + path)) {
         return false;
     }
     const QByteArray& request = server.Requests()[index];
@@ -62,6 +63,11 @@ bool AuthRefreshTest::ReplyToProfile(std::size_t index, const QByteArray& access
     const auto start = request.toLower().indexOf(name);
     return start >= 0 && request.sliced(start + name.size()).startsWith(" Bearer " + accessToken + "\r\n")
         && server.ReplyToHeldRequest(index, HttpResponse(status, body));
+}
+
+// Aplica la misma comprobación del Bearer a la ruta fija del perfil.
+bool AuthRefreshTest::ReplyToProfile(std::size_t index, const QByteArray& accessToken, int status, const QByteArray& body) {
+    return ReplyToAuthenticatedGet(index, "/api/v1/users/me", accessToken, status, body);
 }
 
 // Extrae el cuerpo del POST /auth/refresh y comprueba sus campos antes de devolver la respuesta preparada.

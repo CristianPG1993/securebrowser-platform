@@ -33,6 +33,10 @@ protected:
     // Espera la petición indicada por index y comprueba que su método HTTP y su ruta son los esperados.
     [[nodiscard]] bool WaitForRequest(std::size_t index, const QByteArray& methodAndPath);
 
+    // Comprueba la ruta y el Bearer de un GET antes de responder desde el servidor de prueba.
+    [[nodiscard]] bool ReplyToAuthenticatedGet(std::size_t index, const QByteArray& path, const QByteArray& accessToken,
+                                               int status, const QByteArray& body);
+
     // Responde al GET del perfil con status y body si la cabecera Bearer contiene el accessToken esperado.
     [[nodiscard]] bool ReplyToProfile(std::size_t index, const QByteArray& accessToken, int status, const QByteArray& body);
 
