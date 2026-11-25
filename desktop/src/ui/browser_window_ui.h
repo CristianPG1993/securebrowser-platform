@@ -54,6 +54,10 @@ public:
     // Guarda el receptor de solicitudes del desplegable; ambos se ejecutan en el hilo Qt.
     void SetPolicySelectionHandler(std::function<void(int)> on_policy_selected);
 
+    // Conecta el botón una sola vez al arrancar en modo backend. Se habilita tras la primera consulta.
+    void ConfigurePolicyRefresh(std::function<void()> on_refresh);
+    void SetPolicyRefreshEnabled(bool enabled);
+
     // Muestra en Qt el texto de un bloqueo aplicado y ofrece la acción Inicio ya conectada.
     // La sesión prepara el motivo; la interfaz no evalúa políticas ni decide permisos.
     void ShowNavigationBlock(const QString& message);
@@ -170,6 +174,9 @@ private:
 
     // Campo de texto Qt donde el usuario escribe y edita la dirección web.
     QLineEdit address_input_;
+
+    // Permite volver a consultar la política del dispositivo desde la barra.
+    QPushButton policy_refresh_button_;
 
     // Última URL recibida del navegador; permite mostrarla al terminar de editar la barra.
     QString latest_address_;

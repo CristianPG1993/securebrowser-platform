@@ -29,6 +29,7 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
       reload_button_(&window),
       home_button_(&window),
       address_input_(&window),
+      policy_refresh_button_(QStringLiteral("Actualizar política"), &window),
       browser_host_(std::move(host_callbacks), &window),
       status_panel_(&window),
       status_layout_(&status_panel_),
@@ -96,6 +97,8 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     navigation_layout_.addWidget(&reload_button_);
     navigation_layout_.addWidget(&home_button_);
     navigation_layout_.addWidget(&address_input_, 1);
+    policy_refresh_button_.hide();
+    navigation_layout_.addWidget(&policy_refresh_button_);
     ConfigureStatusPanel();
     ConfigureNavigationBlockPanel();
     ConfigureDownloadResultPanel();
@@ -105,6 +108,22 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     window_layout_.addWidget(&block_panel_);
     window_layout_.addWidget(&download_result_message_);
     window_layout_.addWidget(&status_panel_);
+}
+
+void BrowserWindowUi::ConfigurePolicyRefresh(std::function<void()> on_refresh) {
+    const auto* meta = policy_refresh_button_.metaObject();
+    const auto clicked = meta->method(meta->indexOfSignal("clicked(bool)"));
+    if (!QMetaObject::connect(&policy_refresh_button_, clicked, this, std::move(on_refresh))) {
+        std::fputs("Qt policy refresh button could not be connected.\n", stderr);
+        return;
+    }
+    policy_refresh_button_.installEventFilter(this);
+    policy_refresh_button_.setEnabled(false);
+    policy_refresh_button_.show();
+}
+
+void BrowserWindowUi::SetPolicyRefreshEnabled(bool enabled) {
+    policy_refresh_button_.setEnabled(enabled);
 }
 
 void BrowserWindowUi::ConfigureStatusPanel() {
@@ -561,7 +580,8 @@ bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
     }
     // Pasar a otro control Qt termina la edición, también al regresar desde otra aplicación.
     if ((watched == &back_button_ || watched == &forward_button_ || watched == &reload_button_
-         || watched == &home_button_ || watched == &policy_selector_ || watched == &block_home_button_)
+         || watched == &home_button_ || watched == &policy_refresh_button_
+         || watched == &policy_selector_ || watched == &block_home_button_)
         && event->type() == QEvent::FocusIn) {
         FinishAddressEditing();
     }
@@ -569,7 +589,7 @@ bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
     // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.
     if ((watched == &address_input_ || watched == &back_button_ || watched == &forward_button_
          || watched == &reload_button_ || watched == &home_button_ || watched == &policy_selector_
-         || watched == &block_home_button_)
+         || watched == &policy_refresh_button_ || watched == &block_home_button_)
         && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::FocusIn)) {
         QWidget* qt_window = address_input_.window();
         if (qt_window->isActiveWindow()) {

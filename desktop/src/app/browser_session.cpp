@@ -34,27 +34,28 @@ BrowserSession::BrowserSession(const StartupOptions& startup_options)
     : startup_options_(startup_options) {}
 
 void BrowserSession::OpenLoginDialog(BrowserWindow& window, AuthSession& auth_session,
-                                     const QString& device_identifier, const QString& error_message) {
+                                    const std::shared_ptr<PolicyManager>& policy_manager,
+                                    const QString& device_identifier, const QString& error_message) {
     auto* dialog = new LoginDialog(&window, error_message);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
 
-    // El UUID se conserva por valor para la búsqueda o para otro intento si el usuario corrige las credenciales.
-    const auto onCompleted = [this, owner = QPointer<BrowserWindow>(&window), &auth_session, device_identifier]
-                             (AuthResult result) {
+    // Cada intento conserva el UUID y comparte el gestor que Run entregó a los handlers de CEF.
+    const auto onCompleted = [this, owner = QPointer<BrowserWindow>(&window), &auth_session,
+                              policy_manager, device_identifier](AuthResult result) {
         if (!owner || lifecycle_.CloseRequested()) {
             return;
         }
         if (result.outcome == AuthOutcome::Success) {
             owner->setWindowTitle(QStringLiteral("SecureBrowser — Sesión iniciada"));
             std::fputs("Backend login succeeded.\n", stderr);
-            IdentifyDevice(*owner, auth_session, device_identifier);
+            IdentifyDevice(*owner, auth_session, policy_manager, device_identifier);
             return;
         }
 
         const QString message = result.outcome == AuthOutcome::HttpError && result.statusCode == 401
             ? QStringLiteral("Correo o contraseña incorrectos.")
             : QStringLiteral("No se pudo iniciar sesión. Comprueba la conexión con el backend y vuelve a intentarlo.");
-        OpenLoginDialog(*owner, auth_session, device_identifier, message);
+        OpenLoginDialog(*owner, auth_session, policy_manager, device_identifier, message);
     };
 
     // Busca la señal por nombre para mantener la carga diferida de QtWidgets en Windows.
@@ -76,10 +77,13 @@ void BrowserSession::OpenLoginDialog(BrowserWindow& window, AuthSession& auth_se
     dialog->open();
 }
 
-void BrowserSession::IdentifyDevice(BrowserWindow& window, AuthSession& auth_session, const QString& device_identifier) {
+void BrowserSession::IdentifyDevice(BrowserWindow& window, AuthSession& auth_session,
+                                    const std::shared_ptr<PolicyManager>& policy_manager,
+                                    const QString& device_identifier) {
     // La búsqueda puede recorrer varias páginas. Solo se actualiza la ventana si sigue abierta al terminar.
     auth_session.FetchDeviceIdentity(device_identifier,
-        [this, owner = QPointer<BrowserWindow>(&window)](AuthResult result, std::optional<DeviceIdentity> device) {
+        [this, owner = QPointer<BrowserWindow>(&window), &auth_session, policy_manager]
+        (AuthResult result, std::optional<DeviceIdentity> device) {
             if (!owner || lifecycle_.CloseRequested()) {
                 return;
             }
@@ -95,8 +99,62 @@ void BrowserSession::IdentifyDevice(BrowserWindow& window, AuthSession& auth_ses
                 owner->setWindowTitle(QStringLiteral("SecureBrowser — Dispositivo inactivo"));
                 return;
             }
-            owner->setWindowTitle(QStringLiteral("SecureBrowser — Dispositivo identificado"));
             std::fputs("Backend device identified.\n", stderr);
+            // El gestor asocia la instalación y su empresa a una generación nueva. La política sigue pendiente.
+            const auto context = policy_manager->BeginContext(device->id, device->companyId);
+            if (!context) {
+                owner->setWindowTitle(QStringLiteral("SecureBrowser — Error al crear el contexto de seguridad"));
+                return;
+            }
+            owner->setWindowTitle(QStringLiteral("SecureBrowser — Dispositivo identificado"));
+            std::fputs("Backend device context opened.\n", stderr);
+            RequestDevicePolicy(*owner, auth_session, policy_manager, *context);
+        });
+}
+
+void BrowserSession::RequestDevicePolicy(BrowserWindow& window, AuthSession& auth_session,
+                                         const std::shared_ptr<PolicyManager>& policy_manager,
+                                         const SecurityContext& context, CefRefPtr<BrowserClient> browser_client) {
+    // Durante el GET, otro clic no debe iniciar una consulta para el mismo contexto.
+    window_ui_->SetPolicyRefreshEnabled(false);
+    window.setWindowTitle(QStringLiteral("SecureBrowser — Consultando la política…"));
+    // FetchDevicePolicy devuelve el contexto que inició el GET, incluso cuando la consulta falla.
+    auth_session.FetchDevicePolicy(context,
+        [this, owner = QPointer<BrowserWindow>(&window), policy_manager, browser_client]
+        (AuthResult result, SecurityContext request_context, std::optional<PolicySnapshot> policy) {
+            if (!owner || lifecycle_.CloseRequested() || !window_ui_ || !policy_manager->IsCurrentContext(request_context)) {
+                return;
+            }
+            if (result.outcome == AuthOutcome::DeviceAccessDenied || result.outcome == AuthOutcome::NoSession) {
+                if (policy_manager->EndContext(request_context)) {
+                    owner->setWindowTitle(result.outcome == AuthOutcome::NoSession
+                        ? QStringLiteral("SecureBrowser — Sesión finalizada")
+                        : QStringLiteral("SecureBrowser — Acceso al dispositivo denegado"));
+                    RevalidateDocument(browser_client);
+                }
+                return;
+            }
+            window_ui_->SetPolicyRefreshEnabled(true);
+            if (result.outcome != AuthOutcome::Success || !policy) {
+                owner->setWindowTitle(QStringLiteral("SecureBrowser — Error al consultar la política"));
+                return;
+            }
+            std::fputs("Backend device policy received.\n", stderr);
+            // Guardamos el nombre para la ventana antes de mover el snapshot completo al gestor que consulta CEF.
+            const QString name = QString::fromStdString(policy->Name());
+            const auto publication = policy_manager->PublishPolicy(request_context, std::move(*policy));
+            if (publication == PolicyPublicationResult::InvalidContext) {
+                return;
+            }
+            if (publication == PolicyPublicationResult::InvalidPolicy) {
+                owner->setWindowTitle(QStringLiteral("SecureBrowser — La política recibida no es válida"));
+                return;
+            }
+            // El aviso de arranque por falta de política deja de corresponder al estado actual.
+            window_ui_->ClearNavigationBlock();
+            owner->setWindowTitle(QStringLiteral("SecureBrowser — Política aplicada: %1").arg(name));
+            RevalidateDocument(browser_client);
+            std::fputs("Backend device policy published.\n", stderr);
         });
 }
 
@@ -203,10 +261,13 @@ void BrowserSession::ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyMana
     window_ui.ClearNavigationBlock();
     std::fprintf(stderr, "Demo policy changed; source: local-demo; preset: %s; policy_id: %lld; validity: unlimited.\n",
                  index == 0 ? "free" : "restricted", static_cast<long long>(policy.Id()));
-    // La publicación ya terminó. La tarea conserva el cliente y consulta la política vigente al ejecutarse.
-    // Los objetos CefBrowser y CefFrame se obtienen y utilizan únicamente dentro del hilo UI de CEF.
-    if (!CefPostTask(TID_UI, base::BindOnce(&BrowserClient::RevalidateCurrentDocument, browser_client))) {
-        std::fputs("Demo policy changed, but current-document revalidation could not be posted to CEF.\n", stderr);
+    RevalidateDocument(browser_client);
+}
+
+void BrowserSession::RevalidateDocument(const CefRefPtr<BrowserClient>& browser_client) {
+    // La tarea conserva el cliente y comprueba la página en el hilo UI de CEF.
+    if (browser_client && !CefPostTask(TID_UI, base::BindOnce(&BrowserClient::RevalidateCurrentDocument, browser_client))) {
+        std::fputs("Current-document revalidation could not be posted to CEF.\n", stderr);
     }
 }
 
@@ -304,7 +365,14 @@ int BrowserSession::Run(QApplication& qt_app) {
         // OnHostReady guarda ese HWND y solicita crear el navegador cuando el contexto CEF también esté listo.
         lifecycle_.OnHostReady(window_bridge.Show(window, window_ui));
         if (auth_session) {
-            OpenLoginDialog(window, *auth_session, backend_config->deviceIdentifier, {});
+            // El clic en Qt reutiliza la sesión abierta y el contexto del dispositivo identificado.
+            window_ui.ConfigurePolicyRefresh([this, &window, &auth_session, policy_manager, browser_client] {
+                const auto state = policy_manager->ReadState();
+                if (state && !lifecycle_.CloseRequested()) {
+                    RequestDevicePolicy(window, *auth_session, policy_manager, state->context, browser_client);
+                }
+            });
+            OpenLoginDialog(window, *auth_session, policy_manager, backend_config->deviceIdentifier, {});
         }
 
         std::fputs("Qt event loop starting with CEF initialized.\n", stderr);
