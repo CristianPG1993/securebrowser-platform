@@ -14,6 +14,7 @@ class QString;
 
 namespace sbp {
 
+class AuthSession;
 class BrowserWindow;
 class BrowserWindowUi;
 class PolicyManager;
@@ -39,6 +40,24 @@ public:
     int Run(QApplication& qt_app);
 
 private:
+    // Muestra el formulario en Qt. Solo la confirmación del usuario envía las credenciales.
+    void OpenLoginDialog(BrowserWindow& window, AuthSession& auth_session,
+                         const std::shared_ptr<PolicyManager>& policy_manager,
+                         const QString& device_identifier, const QString& error_message);
+
+    // Busca el dispositivo del usuario y abre su contexto en el gestor si la instalación está activa.
+    void IdentifyDevice(BrowserWindow& window, AuthSession& auth_session,
+                        const std::shared_ptr<PolicyManager>& policy_manager, const QString& device_identifier);
+
+    // Consulta la política al identificar el dispositivo y al pulsar Actualizar política.
+    // En una actualización manual, CEF también revisa el documento que ya está abierto.
+    void RequestDevicePolicy(BrowserWindow& window, AuthSession& auth_session,
+                             const std::shared_ptr<PolicyManager>& policy_manager, const SecurityContext& context,
+                             CefRefPtr<BrowserClient> browser_client = nullptr);
+
+    // Encola en el hilo de CEF la comprobación de la página abierta con las reglas vigentes.
+    static void RevalidateDocument(const CefRefPtr<BrowserClient>& browser_client);
+
     // Prepara el gestor que utilizará el handler: en modo demo crea contexto y publica el snapshot.
     // true indica que la preparación permite continuar el arranque; el permiso de navegar lo decide el motor.
     [[nodiscard]] bool PrepareDemoPolicy(PolicyManager& manager) const;

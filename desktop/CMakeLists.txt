@@ -18,8 +18,12 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 option(SBP_BUILD_DESKTOP_APP "Build the Qt and CEF desktop application" ON)
 option(BUILD_TESTING "Build the security core tests" OFF)
 option(SBP_BUILD_CEF_TESTS "Build the isolated CEF adapter tests" OFF)
+option(SBP_BUILD_REST_TESTS "Build the isolated Qt REST transport tests" OFF)
 if(SBP_BUILD_CEF_TESTS AND NOT BUILD_TESTING)
     message(FATAL_ERROR "CEF adapter tests require -DBUILD_TESTING=ON.")
+endif()
+if(SBP_BUILD_REST_TESTS AND NOT BUILD_TESTING)
+    message(FATAL_ERROR "REST transport tests require -DBUILD_TESTING=ON.")
 endif()
 include(CTest)
 
@@ -191,11 +195,11 @@ if(BUILD_TESTING)
 endif()
 
 # Termina la configuración antes de buscar los SDK cuando solo se construye el núcleo.
-if(NOT SBP_BUILD_DESKTOP_APP AND NOT SBP_BUILD_CEF_TESTS)
+if(NOT SBP_BUILD_DESKTOP_APP AND NOT SBP_BUILD_CEF_TESTS AND NOT SBP_BUILD_REST_TESTS)
     return()
 endif()
 
-if(SBP_BUILD_DESKTOP_APP)
+if(SBP_BUILD_DESKTOP_APP OR SBP_BUILD_REST_TESTS)
     set(Qt6_DIR "" CACHE PATH "Directory containing Qt6Config.cmake for the approved Qt kit")
 
     if(NOT Qt6_DIR OR NOT EXISTS "${Qt6_DIR}/Qt6Config.cmake")
@@ -206,7 +210,66 @@ if(SBP_BUILD_DESKTOP_APP)
         )
     endif()
 
-    find_package(Qt6 6.12.0 EXACT REQUIRED CONFIG COMPONENTS Widgets NO_DEFAULT_PATH)
+    set(SBP_QT_COMPONENTS Network)
+    if(SBP_BUILD_DESKTOP_APP)
+        list(APPEND SBP_QT_COMPONENTS Widgets)
+    endif()
+    find_package(Qt6 6.12.0 EXACT REQUIRED CONFIG COMPONENTS ${SBP_QT_COMPONENTS} NO_DEFAULT_PATH)
+endif()
+
+if(SBP_BUILD_REST_TESTS)
+    # Ejecutable independiente con Qt Core/Network y GoogleTest, sin GUI, CEF ni carga diferida de DLL.
+    add_executable(sbp_rest_tests
+        tests/rest/rest_test_main.cpp
+        tests/rest/rest_test_support.h
+        tests/rest/rest_test_support.cpp
+        tests/rest/rest_client_test.cpp
+        tests/rest/auth_session_test.cpp
+        tests/rest/auth_device_policy_test.h
+        tests/rest/auth_device_policy_test.cpp
+        tests/rest/auth_refresh_test.h
+        tests/rest/auth_refresh_test.cpp
+        tests/rest/token_response_parser_test.cpp
+        tests/rest/user_identity_parser_test.cpp
+        tests/rest/device_identity_parser_test.cpp
+        tests/rest/device_page_parser_test.cpp
+        tests/rest/policy_response_parser_test.cpp
+        src/rest/auth_session.h
+        src/rest/auth_session.cpp
+        src/rest/rest_client.h
+        src/rest/rest_client.cpp
+        src/rest/token_response.h
+        src/rest/token_response_parser.h
+        src/rest/token_response_parser.cpp
+        src/rest/user_identity.h
+        src/rest/user_identity_parser.h
+        src/rest/user_identity_parser.cpp
+        src/rest/device_identity.h
+        src/rest/device_identity_parser.h
+        src/rest/device_identity_parser.cpp
+        src/rest/device_page.h
+        src/rest/device_page_parser.h
+        src/rest/device_page_parser.cpp
+        src/rest/policy_response_parser.h
+        src/rest/policy_response_parser.cpp
+    )
+    target_include_directories(sbp_rest_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_definitions(sbp_rest_tests PRIVATE NOMINMAX)
+    target_link_libraries(sbp_rest_tests PRIVATE sbp_security_core Qt6::Network GTest::gtest)
+    # Las pruebas son HTTP loopback; basta con desplegar Core y Network, sin plugins GUI ni TLS.
+    add_custom_command(TARGET sbp_rest_tests POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE:Qt6::Network>"
+            "$<TARGET_FILE_DIR:sbp_rest_tests>"
+        VERBATIM
+    )
+    gtest_discover_tests(sbp_rest_tests DISCOVERY_MODE PRE_TEST
+        TEST_PREFIX "REST." PROPERTIES TIMEOUT 30)
+endif()
+
+# Las pruebas REST ya están preparadas y no necesitan localizar ni configurar CEF.
+if(NOT SBP_BUILD_DESKTOP_APP AND NOT SBP_BUILD_CEF_TESTS)
+    return()
 endif()
 
 # El SDK se prepara con setup-cef.ps1 y se selecciona mediante una ruta local.
@@ -406,6 +469,8 @@ endif()
 # Nuestra DLL implementa la entrada que invoca el bootstrap.
 add_library(SecureBrowser SHARED
     src/app/app_entry_win.cpp
+    src/app/backend_config.h
+    src/app/backend_config.cpp
     src/app/startup_options.h
     src/app/startup_options.cpp
     src/app/browser_session.cpp
@@ -437,12 +502,32 @@ add_library(SecureBrowser SHARED
     src/demo/demo_policy_source.cpp
     src/diagnostics/diagnostics_log.cpp
     src/diagnostics/diagnostics_log.h
+    src/rest/auth_session.h
+    src/rest/auth_session.cpp
+    src/rest/rest_client.h
+    src/rest/rest_client.cpp
+    src/rest/token_response.h
+    src/rest/token_response_parser.h
+    src/rest/token_response_parser.cpp
+    src/rest/user_identity.h
+    src/rest/user_identity_parser.h
+    src/rest/user_identity_parser.cpp
+    src/rest/device_identity.h
+    src/rest/device_identity_parser.h
+    src/rest/device_identity_parser.cpp
+    src/rest/device_page.h
+    src/rest/device_page_parser.h
+    src/rest/device_page_parser.cpp
+    src/rest/policy_response_parser.h
+    src/rest/policy_response_parser.cpp
     src/ui/browser_host.cpp
     src/ui/browser_host.h
     src/ui/browser_window.cpp
     src/ui/browser_window.h
     src/ui/browser_window_ui.cpp
     src/ui/browser_window_ui.h
+    src/ui/login_dialog.cpp
+    src/ui/login_dialog.h
 )
 # La raíz src permite includes como "browser/browser_client.h" desde cualquier fuente del target.
 target_include_directories(SecureBrowser PRIVATE
@@ -465,6 +550,7 @@ target_link_options(SecureBrowser PRIVATE
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Core>"
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Gui>"
     "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Widgets>"
+    "/DELAYLOAD:$<TARGET_FILE_NAME:Qt6::Network>"
 )
 # Carga estas DLL de Windows al usarlas, después de distinguir los subprocesos de CEF.
 # Contienen las funciones para obtener la carpeta del usuario y liberar su resultado.
@@ -474,6 +560,7 @@ target_link_options(SecureBrowser PRIVATE "/DELAYLOAD:$<TARGET_FILE_NAME:sbp_icu
 target_link_libraries(SecureBrowser PRIVATE
     sbp_security_core
     Qt6::Widgets
+    Qt6::Network
     libcef_dll_wrapper
     libcef_lib
     ${CEF_STANDARD_LIBS}

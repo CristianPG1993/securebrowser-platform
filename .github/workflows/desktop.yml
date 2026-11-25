@@ -132,6 +132,35 @@ jobs:
               }
           }
 
+      - name: Configure REST transport tests
+        timeout-minutes: 5
+        run: |
+          $toolchain = Get-Content -LiteralPath desktop/ci/toolchain.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $qt6Directory = (Resolve-Path "desktop/.deps/qt/$($toolchain.qt.version)/$($toolchain.qt.kitDirectory)/lib/cmake/Qt6").Path
+          $cmakeArguments = @(
+              '-S', 'desktop', '-B', 'desktop/build/rest-tests',
+              '-G', $toolchain.generator,
+              '-A', "$($toolchain.architecture),version=$($toolchain.windowsSdk.targetVersion)",
+              '-T', $toolchain.toolset,
+              "-DCMAKE_CONFIGURATION_TYPES:STRING=$($toolchain.configurations -join ';')",
+              '-DSBP_BUILD_DESKTOP_APP=OFF', '-DBUILD_TESTING=ON',
+              '-DSBP_BUILD_REST_TESTS=ON', "-DQt6_DIR=$qt6Directory"
+          )
+          cmake @cmakeArguments
+          if ($LASTEXITCODE -ne 0) { throw 'La configuración de las pruebas REST ha fallado.' }
+
+      - name: Build and run REST transport tests
+        timeout-minutes: 5
+        run: |
+          $toolchain = Get-Content -LiteralPath desktop/ci/toolchain.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $restReportDirectory = (Resolve-Path 'desktop/build/rest-tests').Path
+          foreach ($configuration in $toolchain.configurations) {
+              cmake --build desktop/build/rest-tests --config $configuration --target sbp_rest_tests --parallel 4
+              if ($LASTEXITCODE -ne 0) { throw "La compilación REST $configuration ha fallado." }
+              ctest --test-dir desktop/build/rest-tests -C $configuration -R '^REST\.' --output-on-failure --no-tests=error --output-junit "$restReportDirectory/rest-$configuration.xml"
+              if ($LASTEXITCODE -ne 0) { throw "Las pruebas REST $configuration han fallado." }
+          }
+
       - name: Configure CEF navigation tests
         timeout-minutes: 5
         run: |
@@ -199,6 +228,7 @@ jobs:
               'Debug y Release: compilación, inventario de runtime, ventana hija CEF y cierre normal comprobados.'
               ''
               'Security Engine: pruebas unitarias del núcleo ejecutadas en Debug y Release sin inicializar Qt ni CEF.'
+              'REST: transporte Qt comprobado en Debug y Release contra un servidor HTTP de loopback, sin backend ni CEF.'
               'CEF: adaptador y navegaciones reales comprobados en Debug y Release con perfiles aislados y servidor de loopback.'
               ''
               'Configuración sin Qt rechazada con el diagnóstico esperado.'
@@ -217,6 +247,10 @@ jobs:
                       Write-Host "Diagnóstico: $($_.Name)"
                       Get-Content -LiteralPath $_.FullName -Tail 100
                   }
+          }
+          $restLog = 'desktop/build/rest-tests/Testing/Temporary/LastTest.log'
+          if (Test-Path -LiteralPath $restLog -PathType Leaf) {
+              Get-Content -LiteralPath $restLog -Tail 200
           }
           $cefLog = 'desktop/build/cef-tests/Testing/Temporary/LastTest.log'
           if (Test-Path -LiteralPath $cefLog -PathType Leaf) {

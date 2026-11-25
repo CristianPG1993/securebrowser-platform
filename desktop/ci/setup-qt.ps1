@@ -19,13 +19,14 @@ function Assert-QtKit {
 
     $requiredFiles = @(
         'lib/cmake/Qt6/Qt6Config.cmake',
+        'lib/cmake/Qt6Network/Qt6NetworkConfig.cmake',
         'include/QtCore/qconfig.h',
         'mkspecs/qconfig.pri',
         'bin/windeployqt.exe'
     )
     # Qt entrega las bibliotecas de Debug y Release juntas en el mismo kit.
     foreach ($suffix in @('', 'd')) {
-        foreach ($module in @('Core', 'Gui', 'Widgets', 'Svg')) {
+        foreach ($module in @('Core', 'Gui', 'Widgets', 'Network', 'Svg')) {
             $requiredFiles += "bin/Qt6$module$suffix.dll"
             $requiredFiles += "lib/Qt6$module$suffix.lib"
         }

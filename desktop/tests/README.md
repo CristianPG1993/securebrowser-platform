@@ -20,6 +20,9 @@ renombrado, cancelación, avisos y transferencias en curso con las políticas de
 
 ## Pruebas unitarias del Security Engine
 
+Las pruebas del transporte HTTP tienen su propia [guía REST](rest/README.md),
+con Qt Network y servidor falso de loopback, sin iniciar CEF.
+
 Estas pruebas requieren CMake 3.29 o posterior, MSVC 2022 x64 con el toolset
 v143 y el SDK de Windows 10.0.28000.0 utilizado por los comandos siguientes.
 El núcleo y las pruebas se configuran sin buscar Qt ni CEF.
