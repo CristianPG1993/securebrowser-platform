@@ -67,6 +67,9 @@ public:
     // Ejemplo de base de la demo local: http://127.0.0.1:8081/api/v1/.
     AuthSession(RestClient& client, QUrl apiBaseUrl);
 
+    // Comprueba la dirección tanto al leer la configuración como al preparar una petición.
+    [[nodiscard]] static bool IsValidApiBaseUrl(const QUrl& base);
+
     // Una sesión tiene una única identidad local; no se duplica copiando este objeto.
     AuthSession(const AuthSession&) = delete;
     AuthSession& operator=(const AuthSession&) = delete;

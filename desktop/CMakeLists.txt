@@ -469,6 +469,8 @@ endif()
 # Nuestra DLL implementa la entrada que invoca el bootstrap.
 add_library(SecureBrowser SHARED
     src/app/app_entry_win.cpp
+    src/app/backend_config.h
+    src/app/backend_config.cpp
     src/app/startup_options.h
     src/app/startup_options.cpp
     src/app/browser_session.cpp

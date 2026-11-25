@@ -361,14 +361,18 @@ std::uint64_t AuthSession::ResetSession() {
     return ++state_->generation;
 }
 
-QUrl AuthSession::EndpointUrl(const QString& relativePath) const {
-    QUrl base(apiBaseUrl_);
+bool AuthSession::IsValidApiBaseUrl(const QUrl& base) {
     const QString host = base.host();
     const bool loopback = host == QStringLiteral("localhost")
         || host == QStringLiteral("127.0.0.1") || host == QStringLiteral("::1");
-    if (!base.isValid() || base.isRelative() || host.isEmpty() || base.hasQuery() || base.hasFragment()
-        || base.authority().contains(QLatin1Char('@'))
-        || (base.scheme() != QStringLiteral("https") && !(base.scheme() == QStringLiteral("http") && loopback))) {
+    return base.isValid() && !base.isRelative() && !host.isEmpty() && !base.hasQuery() && !base.hasFragment()
+        && !base.authority().contains(QLatin1Char('@'))
+        && (base.scheme() == QStringLiteral("https") || (base.scheme() == QStringLiteral("http") && loopback));
+}
+
+QUrl AuthSession::EndpointUrl(const QString& relativePath) const {
+    QUrl base(apiBaseUrl_);
+    if (!IsValidApiBaseUrl(base)) {
         throw std::invalid_argument("Auth requires an HTTPS API base or demo loopback HTTP, without credentials, query or fragment.");
     }
     // La barra final conserva /api/v1 al resolver auth/login o users/me.
