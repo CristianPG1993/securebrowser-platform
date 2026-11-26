@@ -1,6 +1,8 @@
 #include "rest/auth_session.h"
 #include "rest/device_page_parser.h"
 #include "rest/policy_response_parser.h"
+#include "rest/security_event_response_parser.h"
+#include "rest/security_event_serializer.h"
 #include "rest/token_response_parser.h"
 #include "rest/user_identity_parser.h"
 
@@ -120,8 +122,8 @@ void AuthSession::FetchUserIdentity(IdentityCallback onCompleted) {
     }
 
     // El GET entrega su resultado en el hilo de la sesión. Solo un perfil válido llega al receptor como Success.
-    SendAuthenticatedGet(QStringLiteral("users/me"),
-        [onCompleted = std::move(onCompleted)](AuthResult result, QByteArray body, GetResultSource) {
+    SendAuthenticated({RestClient::Method::Get, QStringLiteral("users/me"), {}},
+        [onCompleted = std::move(onCompleted)](AuthResult result, QByteArray body, ResultSource) {
             std::optional<UserIdentity> identity;
             if (result.outcome == AuthOutcome::Success) {
                 identity = UserIdentityParser::Parse(body);
@@ -130,7 +132,7 @@ void AuthSession::FetchUserIdentity(IdentityCallback onCompleted) {
                 }
             }
             onCompleted(std::move(result), std::move(identity));
-        }, true);
+        });
 }
 
 void AuthSession::FetchDeviceIdentity(QString deviceIdentifier, DeviceIdentityCallback onCompleted) {
@@ -156,9 +158,9 @@ void AuthSession::FetchDeviceIdentity(QString deviceIdentifier, DeviceIdentityCa
 void AuthSession::FetchDevicePage(QString deviceIdentifier, UserIdentity owner, int page, DeviceIdentityCallback onCompleted) {
     const QString path = QStringLiteral("devices?page=%1&userId=%2").arg(page).arg(owner.id);
     // El GET descarta las respuestas de sesiones retiradas. El UUID y el perfil viajan por valor entre páginas.
-    SendAuthenticatedGet(path,
+    SendAuthenticated({RestClient::Method::Get, path, {}},
         [this, deviceIdentifier = std::move(deviceIdentifier), owner, page, onCompleted = std::move(onCompleted)]
-        (AuthResult result, QByteArray body, GetResultSource) mutable {
+        (AuthResult result, QByteArray body, ResultSource) mutable {
             if (result.outcome != AuthOutcome::Success) {
                 onCompleted(std::move(result), std::nullopt);
                 return;
@@ -183,7 +185,7 @@ void AuthSession::FetchDevicePage(QString deviceIdentifier, UserIdentity owner, 
             }
             // Se leyó la última página y la instalación no figura entre los dispositivos de este usuario.
             onCompleted(std::move(result), std::nullopt);
-        }, true);
+        });
 }
 
 void AuthSession::FetchDevicePolicy(SecurityContext context, DevicePolicyCallback onCompleted) {
@@ -197,8 +199,8 @@ void AuthSession::FetchDevicePolicy(SecurityContext context, DevicePolicyCallbac
 
     const QString path = QStringLiteral("devices/%1/policy").arg(context.DeviceId());
     // El GET entrega en el hilo Qt de la sesión. La copia del contexto vincula tanto la política como el error a su instalación.
-    SendAuthenticatedGet(path,
-        [this, context, onCompleted = std::move(onCompleted)](AuthResult result, QByteArray body, GetResultSource source) {
+    SendAuthenticated({RestClient::Method::Get, path, {}},
+        [this, context, onCompleted = std::move(onCompleted)](AuthResult result, QByteArray body, ResultSource source) {
             std::optional<PolicySnapshot> policy;
             if (result.outcome == AuthOutcome::Success) {
                 policy = PolicyResponseParser::Parse(body);
@@ -206,49 +208,69 @@ void AuthSession::FetchDevicePolicy(SecurityContext context, DevicePolicyCallbac
                     result.outcome = AuthOutcome::InvalidResponse;
                     policy.reset();
                 }
-            } else if (source == GetResultSource::Get && result.outcome == AuthOutcome::HttpError
+            } else if (source == ResultSource::Endpoint && result.outcome == AuthOutcome::HttpError
                        && (result.statusCode == 403 || result.statusCode == 404
                            || (result.statusCode == 409 && result.problemCode == QStringLiteral("DEVICE_INACTIVE")))) {
                 result.outcome = AuthOutcome::DeviceAccessDenied;
-            } else if (source == GetResultSource::Refresh && !state_->tokens) {
+            } else if (source == ResultSource::Refresh && !state_->tokens) {
                 // Refresh ya retiró los tokens al confirmar que la sesión es irrecuperable.
                 result.outcome = AuthOutcome::NoSession;
             }
             onCompleted(std::move(result), context, std::move(policy));
-        }, true);
+        });
 }
 
-void AuthSession::SendAuthenticatedGet(QString relativePath, GetCallback onCompleted, bool allowRefresh) {
+void AuthSession::SendSecurityEvent(SecurityContext origin, const SecurityEvent& event, SecurityEventCallback onCompleted) {
+    RequireOwnerThread();
+    if (!onCompleted || origin.Generation() == 0 || origin.DeviceId() <= 0 || origin.CompanyId() <= 0) {
+        throw std::invalid_argument("Security event delivery requires a completion callback and a valid installation context.");
+    }
+    const QString path = QStringLiteral("devices/%1/events/batch").arg(origin.DeviceId());
+    const QByteArray body = SecurityEventSerializer::Serialize(event);
+    // El evento puede dejar de existir al salir de esta llamada. Guardamos su UUID y contexto hasta la respuesta.
+    SendAuthenticated({RestClient::Method::Post, path, body},
+        [this, origin, uuid = event.eventUuid, onCompleted = std::move(onCompleted)]
+        (AuthResult result, QByteArray responseBody, ResultSource source) {
+            if (result.outcome == AuthOutcome::Success && !SecurityEventResponseParser::ConfirmsEvent(responseBody, uuid)) {
+                result.outcome = AuthOutcome::InvalidResponse;
+            } else if (source == ResultSource::Refresh && !state_->tokens) {
+                result.outcome = AuthOutcome::NoSession;
+            }
+            onCompleted(std::move(result), origin);
+        });
+}
+
+void AuthSession::SendAuthenticated(AuthenticatedRequest operation, RequestCallback onCompleted, bool allowRefresh) {
     if (!state_->tokens) {
         AuthResult result;
         result.outcome = AuthOutcome::NoSession;
-        onCompleted(std::move(result), {}, GetResultSource::Local);
+        onCompleted(std::move(result), {}, ResultSource::Local);
         return;
     }
 
-    // Si el POST de renovación ya salió, esta consulta espera el nuevo par antes de enviar su GET.
+    // Si hay una renovación en curso, esperamos el nuevo par antes de enviar la petición.
     if (allowRefresh && !state_->pendingRefresh.expired()) {
-        SendAuthenticatedGetAfterRefresh(std::move(relativePath), std::move(onCompleted));
+        SendAfterRefresh(std::move(operation), std::move(onCompleted));
         return;
     }
 
-    QNetworkRequest request(EndpointUrl(relativePath));
+    QNetworkRequest request(EndpointUrl(operation.path));
     QHttpHeaders headers;
     const QByteArray bearer = "Bearer " + state_->tokens->accessToken.toUtf8();
     if (!headers.append(QHttpHeaders::WellKnownHeader::Authorization, bearer)) {
         // Si Qt rechaza el valor de la cabecera, la petición termina aquí con InvalidResponse.
-        onCompleted(AuthResult{}, {}, GetResultSource::Local);
+        onCompleted(AuthResult{}, {}, ResultSource::Local);
         return;
     }
     request.setHeaders(std::move(headers));
 
-    // Cada GET protegido pertenece a la generación que abrió Login.
+    // Cada petición protegida pertenece a la generación que abrió Login.
     const auto generation = state_->generation;
     const auto tokenRevision = state_->tokenRevision;
     const std::weak_ptr<State> weakState(state_);
-    // RestClient entrega el GET en el hilo Qt. Antes de usar this, comprobamos que la sesión sigue viva.
-    client_.Send(RestClient::Method::Get, request, {},
-        [this, weakState, generation, tokenRevision, allowRefresh, relativePath = std::move(relativePath),
+    // La lambda conserva una copia de la operación para reintentar con los mismos bytes tras el 401.
+    client_.Send(operation.method, request, operation.body,
+        [this, weakState, generation, tokenRevision, allowRefresh, operation,
          onCompleted = std::move(onCompleted)](RestResult received) mutable {
             if (const auto state = weakState.lock(); !state || state->generation != generation || !state->tokens) {
                 return;
@@ -258,27 +280,27 @@ void AuthSession::SendAuthenticatedGet(QString relativePath, GetCallback onCompl
             if (allowRefresh && result.outcome == AuthOutcome::HttpError && result.statusCode == 401
                 && result.problemCode == QStringLiteral("AUTHENTICATION_REQUIRED")) {
                 if (state_->tokenRevision == tokenRevision) {
-                    SendAuthenticatedGetAfterRefresh(std::move(relativePath), std::move(onCompleted));
+                    SendAfterRefresh(std::move(operation), std::move(onCompleted));
                 } else {
-                    // Otra petición ya renovó el par mientras este GET esperaba su respuesta.
-                    SendAuthenticatedGet(std::move(relativePath), std::move(onCompleted), false);
+                    // Otra petición ya renovó el par mientras esperábamos esta respuesta.
+                    SendAuthenticated(std::move(operation), std::move(onCompleted), false);
                 }
                 return;
             }
             if (result.transportError == RestTransportError::None && result.statusCode == 200) {
                 result.outcome = AuthOutcome::Success;
             }
-            onCompleted(std::move(result), std::move(received.body), GetResultSource::Get);
+            onCompleted(std::move(result), std::move(received.body), ResultSource::Endpoint);
         });
 }
 
-void AuthSession::SendAuthenticatedGetAfterRefresh(QString relativePath, GetCallback onCompleted) {
+void AuthSession::SendAfterRefresh(AuthenticatedRequest operation, RequestCallback onCompleted) {
     // Refresh llama en el hilo Qt y comprueba que la sesión sigue viva y pertenece al mismo login.
-    Refresh([this, relativePath = std::move(relativePath), onCompleted = std::move(onCompleted)](AuthResult result) mutable {
+    Refresh([this, operation = std::move(operation), onCompleted = std::move(onCompleted)](AuthResult result) mutable {
         if (result.outcome == AuthOutcome::Success) {
-            SendAuthenticatedGet(std::move(relativePath), std::move(onCompleted), false);
+            SendAuthenticated(std::move(operation), std::move(onCompleted), false);
         } else {
-            onCompleted(std::move(result), {}, GetResultSource::Refresh);
+            onCompleted(std::move(result), {}, ResultSource::Refresh);
         }
     });
 }
