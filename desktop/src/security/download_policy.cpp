@@ -12,19 +12,19 @@ namespace sbp {
 
 // Coordina las comprobaciones y conserva el primer motivo que impide continuar.
 SecurityDecision DownloadPolicy::Evaluate(
-    const PolicyManager::PolicyReadResult& policy, const std::string& fileName) const {
+    const PolicyManager::PolicyReadResult& policy, const std::string& fileName, std::string* blockedExtension) const {
+    std::string extension;
     SecurityReason reason = CheckPolicyAvailability(policy);
-    if (reason != SecurityReason::Allowed) {
-        return SecurityDecision(reason);
+    if (reason == SecurityReason::Allowed) {
+        reason = CheckFileName(fileName);
     }
-
-    reason = CheckFileName(fileName);
-    if (reason != SecurityReason::Allowed) {
-        return SecurityDecision(reason);
+    if (reason == SecurityReason::Allowed) {
+        reason = EvaluateRules(policy.state->policy->DownloadControl(), fileName, extension);
     }
-
-    // La comprobación inicial garantiza que el estado y la política están presentes.
-    return SecurityDecision(EvaluateRules(policy.state->policy->DownloadControl(), fileName));
+    if (blockedExtension) {
+        *blockedExtension = std::move(extension);
+    }
+    return SecurityDecision(reason);
 }
 
 // Rechaza lecturas sin contexto o política completa antes de evaluar el nombre del archivo.
@@ -261,7 +261,7 @@ bool DownloadPolicy::ReadUtf8CodePoint(
 
 // Aplica las reglas después de comprobar la política y la validez del nombre completo.
 SecurityReason DownloadPolicy::EvaluateRules(
-    const DownloadControlConfig& config, const std::string& fileName) {
+    const DownloadControlConfig& config, const std::string& fileName, std::string& blockedExtension) {
     // Un modo desconocido nunca se interpreta como una configuración permisiva.
     if (config.Mode() != FilterMode::Denylist && config.Mode() != FilterMode::Allowlist) {
         return SecurityReason::PolicyUnavailable;
@@ -304,11 +304,13 @@ SecurityReason DownloadPolicy::EvaluateRules(
     }
 
     // Sin reglas, matched permanece false: DENYLIST permite y ALLOWLIST bloquea.
-    if (config.Mode() == FilterMode::Denylist) {
-        return matched ? SecurityReason::ExtensionDenied : SecurityReason::Allowed;
+    const bool denylist = config.Mode() == FilterMode::Denylist;
+    const bool allowed = denylist ? !matched : matched;
+    if (allowed) {
+        return SecurityReason::Allowed;
     }
-
-    return matched ? SecurityReason::Allowed : SecurityReason::ExtensionNotAllowed;
+    blockedExtension = std::move(normalizedExtension);
+    return denylist ? SecurityReason::ExtensionDenied : SecurityReason::ExtensionNotAllowed;
 }
 
 }  // namespace sbp

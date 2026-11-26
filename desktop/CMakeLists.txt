@@ -115,6 +115,10 @@ add_library(sbp_security_core STATIC
     src/security/security_reason.h
     src/security/security_decision.h
     src/security/security_decision.cpp
+    src/security/security_event.h
+    src/security/security_event_sink.h
+    src/security/security_event_producer.h
+    src/security/security_event_producer.cpp
     src/security/url_filter.h
     src/security/url_filter.cpp
     src/security/url_filtering_config.h
@@ -180,6 +184,7 @@ if(BUILD_TESTING)
         tests/security/policy_snapshot_test.cpp
         tests/security/security_context_test.cpp
         tests/security/security_decision_test.cpp
+        tests/security/security_event_producer_test.cpp
         tests/security/url_filter_test.cpp
         tests/security/url_filtering_config_test.cpp
         tests/security/url_target_test.cpp
@@ -227,6 +232,7 @@ if(SBP_BUILD_REST_TESTS)
         tests/rest/auth_session_test.cpp
         tests/rest/auth_device_policy_test.h
         tests/rest/auth_device_policy_test.cpp
+        tests/rest/auth_security_event_test.cpp
         tests/rest/auth_refresh_test.h
         tests/rest/auth_refresh_test.cpp
         tests/rest/token_response_parser_test.cpp
@@ -234,6 +240,8 @@ if(SBP_BUILD_REST_TESTS)
         tests/rest/device_identity_parser_test.cpp
         tests/rest/device_page_parser_test.cpp
         tests/rest/policy_response_parser_test.cpp
+        tests/rest/security_event_serializer_test.cpp
+        tests/rest/security_event_response_parser_test.cpp
         src/rest/auth_session.h
         src/rest/auth_session.cpp
         src/rest/rest_client.h
@@ -252,6 +260,10 @@ if(SBP_BUILD_REST_TESTS)
         src/rest/device_page_parser.cpp
         src/rest/policy_response_parser.h
         src/rest/policy_response_parser.cpp
+        src/rest/security_event_serializer.h
+        src/rest/security_event_serializer.cpp
+        src/rest/security_event_response_parser.h
+        src/rest/security_event_response_parser.cpp
     )
     target_include_directories(sbp_rest_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(sbp_rest_tests PRIVATE NOMINMAX)
@@ -520,6 +532,10 @@ add_library(SecureBrowser SHARED
     src/rest/device_page_parser.cpp
     src/rest/policy_response_parser.h
     src/rest/policy_response_parser.cpp
+    src/rest/security_event_serializer.h
+    src/rest/security_event_serializer.cpp
+    src/rest/security_event_response_parser.h
+    src/rest/security_event_response_parser.cpp
     src/ui/browser_host.cpp
     src/ui/browser_host.h
     src/ui/browser_window.cpp

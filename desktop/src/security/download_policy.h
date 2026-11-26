@@ -19,9 +19,10 @@ public:
     // Con el control desactivado, omite listas y ausencia de extensión, pero valida el nombre.
     // No corrige el nombre, consulta el reloj ni renueva la política.
     // El resultado no sustituye la comprobación final de contexto y autorización al aplicarlo.
+    // Si se pide, devuelve la extensión normalizada solo cuando una regla la bloquea.
     [[nodiscard]] SecurityDecision Evaluate(
         const PolicyManager::PolicyReadResult& policy,
-        const std::string& fileName) const;
+        const std::string& fileName, std::string* blockedExtension = nullptr) const;
 
 private:
     // Comprueba contexto y disponibilidad en la lectura recibida, sin consultar el reloj.
@@ -60,7 +61,7 @@ private:
     // Con el control activo, comprueba ausencia de extensión y aplica DENYLIST o ALLOWLIST.
     // Con el control desactivado, omite listas y la restricción de ausencia de extensión.
     [[nodiscard]] static SecurityReason EvaluateRules(
-        const DownloadControlConfig& config, const std::string& fileName);
+        const DownloadControlConfig& config, const std::string& fileName, std::string& blockedExtension);
 };
 
 }  // namespace sbp

@@ -143,10 +143,11 @@ bool SecurityDownloadHandler::OnBeforeDownload(CefRefPtr<CefBrowser> browser,
     // También cubre StartDownload, que no pasa por CanDownload, utilizando el evaluador existente.
     const std::string fileName = suggestedName.ToString();
     const auto policy = policyManager_->ReadPolicy(*tracked->context);
-    const SecurityDecision decision = downloadPolicy_.Evaluate(policy, fileName);
+    std::string extension;
+    const SecurityDecision decision = downloadPolicy_.Evaluate(policy, fileName, &extension);
     if (decision.Action() != SecurityAction::Allow) {
         // Cancela y conserva el motivo del evaluador antes de solicitar cualquier diálogo Qt.
-        BlockDownload(key, decision.Reason(), policy.state);
+        BlockDownload(key, decision.Reason(), policy.state, std::move(extension));
         return true;
     }
 
@@ -372,7 +373,7 @@ void SecurityDownloadHandler::QueueCallbackCancellation(
 // Conserva los datos del bloqueo antes de cancelar y comunica un solo aviso por operación seguida.
 void SecurityDownloadHandler::BlockDownload(
     DownloadKey key, SecurityReason reason,
-    const std::shared_ptr<const PolicyManager::State>& state) {
+    const std::shared_ptr<const PolicyManager::State>& state, std::string extension) {
     CEF_REQUIRE_UI_THREAD();
 
     // Un permiso no es un motivo de cancelación ni debe circular por el canal de avisos de bloqueo.
@@ -397,6 +398,7 @@ void SecurityDownloadHandler::BlockDownload(
     notice.downloadId = key.second;
     notice.context = tracked->second.context;
     notice.decision = decision;
+    notice.extension = std::move(extension);
 
     // Una lectura de otro contexto no puede atribuir su política al origen de esta descarga.
     if (state && state->policy && notice.context.has_value() && state->context == *notice.context) {
@@ -569,10 +571,11 @@ void SecurityDownloadHandler::CompleteSaveDialog(DownloadKey key,
 
     // La política puede haber cambiado o caducado mientras el usuario elegía el destino.
     const auto policy = policyManager_->ReadPolicy(pending->second.context);
-    const SecurityDecision decision = downloadPolicy_.Evaluate(policy, *fileName);
+    std::string extension;
+    const SecurityDecision decision = downloadPolicy_.Evaluate(policy, *fileName, &extension);
     if (decision.Action() != SecurityAction::Allow) {
         // Conserva el motivo de la política vigente al confirmar, incluido un nombre definitivo inválido o bloqueado.
-        BlockDownload(key, decision.Reason(), policy.state);
+        BlockDownload(key, decision.Reason(), policy.state, std::move(extension));
         return;
     }
 

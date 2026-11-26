@@ -19,6 +19,8 @@
 
 namespace sbp {
 
+struct SecurityEvent;
+
 // Resultado de la autenticación o de una consulta protegida.
 enum class AuthOutcome {
     Success,
@@ -63,6 +65,9 @@ public:
     // Entrega el resultado y el contexto que inició el GET. Solo un éxito lleva la política recibida.
     using DevicePolicyCallback = std::function<void(AuthResult, SecurityContext, std::optional<PolicySnapshot>)>;
 
+    // Entrega la confirmación o el error junto al contexto que originó el evento.
+    using SecurityEventCallback = std::function<void(AuthResult, SecurityContext)>;
+
     // client debe vivir más que esta sesión; la URL base se conserva por valor.
     // Ejemplo de base de la demo local: http://127.0.0.1:8081/api/v1/.
     AuthSession(RestClient& client, QUrl apiBaseUrl);
@@ -102,12 +107,22 @@ public:
     // Un 403, un 404 o un 409 DEVICE_INACTIVE de este GET entregan DeviceAccessDenied.
     void FetchDevicePolicy(SecurityContext context, DevicePolicyCallback onCompleted);
 
+    // El llamador comprueba en el hilo Qt que origin sigue vigente antes de entregar el evento.
+    // Un 200 debe confirmar su UUID. Si se renueva el token, se reenvían la misma ruta y el mismo cuerpo.
+    void SendSecurityEvent(SecurityContext origin, const SecurityEvent& event, SecurityEventCallback onCompleted);
+
 private:
-    // El receptor de política necesita saber qué operación produjo el error antes de retirar el acceso.
-    enum class GetResultSource { Local, Get, Refresh };
-    using GetCallback = std::function<void(AuthResult, QByteArray, GetResultSource)>;
-    void SendAuthenticatedGet(QString relativePath, GetCallback onCompleted, bool allowRefresh);
-    void SendAuthenticatedGetAfterRefresh(QString relativePath, GetCallback onCompleted);
+    // Los GET y el POST idempotente de eventos conservan estos datos al renovar el Bearer.
+    struct AuthenticatedRequest {
+        RestClient::Method method;
+        QString path;
+        QByteArray body;
+    };
+    // El receptor de política distingue los errores de su endpoint de los de renovación.
+    enum class ResultSource { Local, Endpoint, Refresh };
+    using RequestCallback = std::function<void(AuthResult, QByteArray, ResultSource)>;
+    void SendAuthenticated(AuthenticatedRequest operation, RequestCallback onCompleted, bool allowRefresh = true);
+    void SendAfterRefresh(AuthenticatedRequest operation, RequestCallback onCompleted);
 
     // Conserva el perfil comprobado y el UUID mientras recorre las páginas del mismo usuario.
     void FetchDevicePage(QString deviceIdentifier, UserIdentity owner, int page, DeviceIdentityCallback onCompleted);

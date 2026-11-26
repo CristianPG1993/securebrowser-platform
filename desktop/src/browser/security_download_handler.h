@@ -175,7 +175,7 @@ private:
     // Solo comunica el primer bloqueo de una operación; una cancelación ya solicitada no genera otro aviso.
     // state corresponde a la evaluación aplicada; no se atribuirá la política de otro contexto al bloqueo.
     void BlockDownload(DownloadKey key, SecurityReason reason,
-                       const std::shared_ptr<const PolicyManager::State>& state);
+                       const std::shared_ptr<const PolicyManager::State>& state, std::string extension = {});
 
     // Copia y consume el resultado antes de cancelar o retirar entradas; nunca publica otro contexto.
     [[nodiscard]] std::optional<DownloadResultNotice> TakeResultNotice(DownloadKey key, DownloadOutcome outcome);
