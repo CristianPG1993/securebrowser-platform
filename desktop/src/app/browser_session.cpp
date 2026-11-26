@@ -8,6 +8,7 @@
 #include "rest/auth_session.h"
 #include "rest/rest_client.h"
 #include "security/policy_manager.h"
+#include "security/security_event_producer.h"
 #include "ui/browser_window.h"
 #include "ui/browser_window_ui.h"
 #include "ui/login_dialog.h"
@@ -21,6 +22,7 @@
 #include <QMetaObject>
 #include <QPointer>
 #include <QString>
+#include <QUuid>
 #include <QtCore/qtenvironmentvariables.h>
 
 #include <cstdio>
@@ -284,6 +286,7 @@ int BrowserSession::Run(QApplication& qt_app) {
     // Viven durante Run. Al salir, auth_session se destruye antes que el cliente que utiliza.
     std::optional<RestClient> rest_client;
     std::optional<AuthSession> auth_session;
+    std::optional<SecurityEventProducer> event_producer;
     if (!startup_options_.IsUrlFilteringDemo() && qEnvironmentVariableIsSet("SBP_BACKEND_CONFIG")) {
         const QString file_path = qEnvironmentVariable("SBP_BACKEND_CONFIG");
         backend_config = BackendConfig::FromIniFile(file_path);
@@ -298,6 +301,7 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Con el INI validado, la sesión recibe el cliente y la URL que usará al llamar a Login.
         rest_client.emplace();
         auth_session.emplace(*rest_client, backend_config->apiBaseUrl);
+        event_producer.emplace(MakeEventProducer(*auth_session));
     }
 
     // Paso 2: Preparamos el código que devolverá la sesión; 0 representa una salida correcta.
@@ -319,9 +323,10 @@ int BrowserSession::Run(QApplication& qt_app) {
             return 1;
         }
         // security_handler recibe OnBeforeBrowse, consulta el motor y cancela las navegaciones bloqueadas.
-        // El receptor copia el aviso desde CEF y lo encola para presentarlo únicamente en Qt.
+        // La ventana recibe el aviso en Qt; el productor y la sesión REST sobreviven a la ventana.
         CefRefPtr<SecurityRequestHandler> security_handler = new SecurityRequestHandler(
-            policy_manager, MakeNavigationDecisionHandler(window, policy_manager));
+            policy_manager, MakeNavigationDecisionHandler(window, policy_manager,
+                                                         event_producer ? &*event_producer : nullptr));
         // El handler comparte el gestor y recibe los puentes de diálogo, cierre y aviso de bloqueo hacia Qt.
         // Todavía no se abre ningún diálogo; CEF invocará esta función al solicitar un destino permitido.
         CefRefPtr<SecurityDownloadHandler> download_handler = new SecurityDownloadHandler(
@@ -460,18 +465,45 @@ SecurityDownloadHandler::RequestCloseSaveDialogCallback BrowserSession::MakeSave
     };
 }
 
+SecurityEventProducer BrowserSession::MakeEventProducer(AuthSession& auth_session) {
+    // Qt genera un UUID nuevo para cada bloqueo, incluso si se repite el mismo destino.
+    const auto generate_uuid = [] { return QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(); };
+    // El receptor se ejecuta en Qt y entrega el evento a la sesión REST de Run.
+    const auto sink = [&auth_session](const SecurityContext& origin, const SecurityEvent& event) {
+        // Solo la respuesta del backend puede confirmar el UUID enviado.
+        auth_session.SendSecurityEvent(origin, event, [](AuthResult result, SecurityContext) {
+            if (result.outcome == AuthOutcome::Success) {
+                std::fputs("Backend confirmed security event.\n", stderr);
+            } else if (result.statusCode) {
+                std::fprintf(stderr, "Security event delivery unconfirmed (HTTP %d).\n", *result.statusCode);
+            } else {
+                std::fputs("Security event delivery unconfirmed.\n", stderr);
+            }
+        });
+        return true;
+    };
+    return SecurityEventProducer(generate_uuid, sink);
+}
+
 // Prepara el receptor del bloqueo sin consultar controles Qt desde el hilo de CEF.
 SecurityRequestHandler::DecisionCallback BrowserSession::MakeNavigationDecisionHandler(
-    BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager) {
+    BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager, const SecurityEventProducer* producer) {
     // CEF ejecuta este receptor; window vive hasta la confirmación de cierre y manager se conserva por valor.
-    return [this, &window, manager](const NavigationDecisionNotice& notice) {
+    return [this, &window, manager, producer](const NavigationDecisionNotice& notice) {
         std::fprintf(stderr, "CEF navigation blocked; operation_id: %llu; reason: %d; main_frame: %d.\n",
                      static_cast<unsigned long long>(notice.operationId),
                      static_cast<int>(notice.decision.Reason()), static_cast<int>(notice.mainFrame));
         // Esta lectura no renueva la vigencia; permite detectar cualquier publicación posterior al envío.
         const auto observed_state = manager->ReadState();
         // La tarea posee el aviso y el estado observado; solo aquí se consulta la vida de los controles Qt.
-        return QMetaObject::invokeMethod(&window, [this, manager, notice, observed_state] {
+        return QMetaObject::invokeMethod(&window, [this, manager, producer, notice, observed_state] {
+            // Una política nueva puede ocultar el aviso visual. El bloqueo ocurrió con la política de notice.
+            if (producer && !lifecycle_.CloseRequested() && notice.context && manager->IsCurrentContext(*notice.context)) {
+                if (!producer->ProduceUrlBlocked(*notice.context, notice.occurredAt, notice.decision.Reason(),
+                                                 notice.host, notice.policyId)) {
+                    std::fputs("Could not submit blocked navigation event.\n", stderr);
+                }
+            }
             if (manager->ReadState() != observed_state) {
                 return;
             }

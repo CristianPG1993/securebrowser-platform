@@ -19,6 +19,7 @@ class BrowserWindow;
 class BrowserWindowUi;
 class PolicyManager;
 class SecurityContext;
+class SecurityEventProducer;
 struct NavigationDecisionNotice;
 
 // Compone la ventana, sus controles, el gestor de políticas y los adaptadores Qt/CEF.
@@ -86,9 +87,12 @@ private:
     // Encola el ID en Qt para cerrar solo su diálogo, sin acceder a controles desde el hilo CEF.
     SecurityDownloadHandler::RequestCloseSaveDialogCallback MakeSaveDialogCloseHandler(BrowserWindow& window);
 
-    // Recibe en CEF un bloqueo aplicado y confirma si pudo encolar una copia para Qt.
+    // Conecta el productor con la sesión REST que vive durante Run.
+    static SecurityEventProducer MakeEventProducer(AuthSession& auth_session);
+
+    // Encola el bloqueo de CEF en Qt, donde se entrega el evento y se actualiza el aviso.
     SecurityRequestHandler::DecisionCallback MakeNavigationDecisionHandler(
-        BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager);
+        BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager, const SecurityEventProducer* producer);
 
     // Recibe en CEF un bloqueo aplicado y confirma si pudo encolar una copia para Qt.
     SecurityDownloadHandler::DecisionCallback MakeDownloadDecisionHandler(
