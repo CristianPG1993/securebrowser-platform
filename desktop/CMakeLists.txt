@@ -239,6 +239,7 @@ if(SBP_BUILD_REST_TESTS)
         tests/rest/device_identity_parser_test.cpp
         tests/rest/device_page_parser_test.cpp
         tests/rest/policy_response_parser_test.cpp
+        tests/rest/security_event_serializer_test.cpp
         src/rest/auth_session.h
         src/rest/auth_session.cpp
         src/rest/rest_client.h
@@ -257,6 +258,8 @@ if(SBP_BUILD_REST_TESTS)
         src/rest/device_page_parser.cpp
         src/rest/policy_response_parser.h
         src/rest/policy_response_parser.cpp
+        src/rest/security_event_serializer.h
+        src/rest/security_event_serializer.cpp
     )
     target_include_directories(sbp_rest_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(sbp_rest_tests PRIVATE NOMINMAX)
@@ -525,6 +528,8 @@ add_library(SecureBrowser SHARED
     src/rest/device_page_parser.cpp
     src/rest/policy_response_parser.h
     src/rest/policy_response_parser.cpp
+    src/rest/security_event_serializer.h
+    src/rest/security_event_serializer.cpp
     src/ui/browser_host.cpp
     src/ui/browser_host.h
     src/ui/browser_window.cpp
