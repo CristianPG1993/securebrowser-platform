@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string>
 
 namespace sbp {
 
@@ -24,6 +25,8 @@ struct DownloadDecisionNotice {
     std::optional<SecurityContext> context;
     std::optional<std::int64_t> policyId;
     SecurityDecision decision{SecurityReason::InvalidContext};
+    // Solo las reglas de extensión proporcionan este dato, ya normalizado por DownloadPolicy.
+    std::string extension;
 };
 
 }  // namespace sbp
