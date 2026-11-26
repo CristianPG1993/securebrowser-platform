@@ -96,7 +96,7 @@ private:
 
     // Recibe en CEF un bloqueo aplicado y confirma si pudo encolar una copia para Qt.
     SecurityDownloadHandler::DecisionCallback MakeDownloadDecisionHandler(
-        BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager);
+        BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager, const SecurityEventProducer* producer);
 
     // Encola resultados operativos para Qt sin ligarlos a una versión concreta de la política.
     SecurityDownloadHandler::ResultCallback MakeDownloadResultHandler(

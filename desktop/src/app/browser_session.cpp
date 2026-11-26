@@ -324,14 +324,14 @@ int BrowserSession::Run(QApplication& qt_app) {
         }
         // security_handler recibe OnBeforeBrowse, consulta el motor y cancela las navegaciones bloqueadas.
         // La ventana recibe el aviso en Qt; el productor y la sesión REST sobreviven a la ventana.
+        const auto* producer = event_producer ? &*event_producer : nullptr;
         CefRefPtr<SecurityRequestHandler> security_handler = new SecurityRequestHandler(
-            policy_manager, MakeNavigationDecisionHandler(window, policy_manager,
-                                                         event_producer ? &*event_producer : nullptr));
+            policy_manager, MakeNavigationDecisionHandler(window, policy_manager, producer));
         // El handler comparte el gestor y recibe los puentes de diálogo, cierre y aviso de bloqueo hacia Qt.
         // Todavía no se abre ningún diálogo; CEF invocará esta función al solicitar un destino permitido.
         CefRefPtr<SecurityDownloadHandler> download_handler = new SecurityDownloadHandler(
             policy_manager, MakeSaveDialogRequestHandler(window), MakeSaveDialogCloseHandler(window),
-            MakeDownloadDecisionHandler(window, policy_manager), MakeDownloadResultHandler(window, policy_manager));
+            MakeDownloadDecisionHandler(window, policy_manager, producer), MakeDownloadResultHandler(window, policy_manager));
 
         // Registra el receptor antes de crear el navegador y conserva la suscripción durante esta sesión.
         // El gestor solo guarda una referencia débil; la cancelación se encolará en UI CEF.
@@ -514,9 +514,9 @@ SecurityRequestHandler::DecisionCallback BrowserSession::MakeNavigationDecisionH
 
 // Prepara el receptor del bloqueo sin consultar controles Qt desde el hilo de CEF.
 SecurityDownloadHandler::DecisionCallback BrowserSession::MakeDownloadDecisionHandler(
-    BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager) {
+    BrowserWindow& window, const std::shared_ptr<PolicyManager>& manager, const SecurityEventProducer* producer) {
     // CEF entrega el aviso; conserva el gestor y utiliza la ventana solo como destino de la tarea Qt.
-    return [this, &window, manager](const DownloadDecisionNotice& notice) {
+    return [this, &window, manager, producer](const DownloadDecisionNotice& notice) {
         if (!manager) {
             return false;
         }
@@ -525,7 +525,14 @@ SecurityDownloadHandler::DecisionCallback BrowserSession::MakeDownloadDecisionHa
                      static_cast<int>(notice.decision.Reason()));
         const auto observed_state = manager->ReadState();
         // La tarea posee sus copias; una publicación o retirada posterior descarta la presentación obsoleta.
-        return QMetaObject::invokeMethod(&window, [this, manager, notice, observed_state] {
+        return QMetaObject::invokeMethod(&window, [this, manager, producer, notice, observed_state] {
+            // CEF emite un solo aviso por bloqueo. En Qt solo puede enviarlo el contexto que lo originó.
+            if (producer && !lifecycle_.CloseRequested() && notice.context && manager->IsCurrentContext(*notice.context)) {
+                if (!producer->ProduceDownloadBlocked(*notice.context, notice.occurredAt, notice.decision.Reason(),
+                                                      notice.extension, notice.policyId)) {
+                    std::fputs("Could not submit blocked download event.\n", stderr);
+                }
+            }
             if (manager->ReadState() != observed_state) {
                 return;
             }
