@@ -115,6 +115,10 @@ add_library(sbp_security_core STATIC
     src/security/security_reason.h
     src/security/security_decision.h
     src/security/security_decision.cpp
+    src/security/security_event.h
+    src/security/security_event_sink.h
+    src/security/security_event_producer.h
+    src/security/security_event_producer.cpp
     src/security/url_filter.h
     src/security/url_filter.cpp
     src/security/url_filtering_config.h
@@ -180,6 +184,7 @@ if(BUILD_TESTING)
         tests/security/policy_snapshot_test.cpp
         tests/security/security_context_test.cpp
         tests/security/security_decision_test.cpp
+        tests/security/security_event_producer_test.cpp
         tests/security/url_filter_test.cpp
         tests/security/url_filtering_config_test.cpp
         tests/security/url_target_test.cpp
