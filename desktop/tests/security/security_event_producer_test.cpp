@@ -46,6 +46,51 @@ TEST_F(SecurityEventProducerTest, DeliversUrlBlockedWithOriginalContext) {
     EXPECT_EQ(R"({"schemaVersion":1,"reason":"DOMAIN_DENIED","policyId":7,"host":"blocked.example"})", *event.details);
 }
 
+// El bloqueo conserva la hora, la política y la extensión UTF-8 ya evaluada.
+TEST_F(SecurityEventProducerTest, DeliversDownloadBlockedWithEvaluatedExtension) {
+    const std::chrono::sys_time<std::chrono::microseconds> occurredAt{std::chrono::microseconds{123456}};
+    const SecurityEventProducer producer(generate, record);
+    const std::string extension = "\xC3\xA9xe";
+    ASSERT_TRUE(producer.ProduceDownloadBlocked(validOrigin, occurredAt, SecurityReason::ExtensionDenied, extension, 7));
+    ASSERT_EQ(1u, deliveries.size());
+    const auto& event = deliveries.front();
+    EXPECT_EQ(1, uuidRequests);
+    EXPECT_EQ(nextUuid, event.eventUuid);
+    EXPECT_EQ(occurredAt, event.occurredAt);
+    EXPECT_EQ(SecurityEventType::DownloadBlocked, event.type);
+    EXPECT_EQ(R"({"schemaVersion":1,"reason":"EXTENSION_DENIED","policyId":7,"extension":")" + extension + R"("})",
+              event.details);
+}
+
+// No se incluyen rutas, nombres completos ni datos mal formados aunque lleguen como extensión.
+TEST_F(SecurityEventProducerTest, OmitsUnsafeDownloadExtensionAndKeepsReason) {
+    const SecurityEventProducer producer(generate, record);
+    for (const char* input : {"informe.zip", "carpeta/zip", R"(carpeta\zip)", "a\"b", "\n", "\xFF"}) {
+        ASSERT_TRUE(producer.ProduceDownloadBlocked(validOrigin, {}, SecurityReason::ExtensionNotAllowed, input, {}));
+        EXPECT_EQ(R"({"schemaVersion":1,"reason":"EXTENSION_NOT_ALLOWED"})", deliveries.back().details);
+    }
+    ASSERT_TRUE(producer.ProduceDownloadBlocked(validOrigin, {}, SecurityReason::MissingExtension, "privado", {}));
+    EXPECT_EQ(R"({"schemaVersion":1,"reason":"MISSING_EXTENSION"})", deliveries.back().details);
+    EXPECT_FALSE(producer.ProduceDownloadBlocked(validOrigin, {}, SecurityReason::Allowed, "zip", 7));
+    EXPECT_FALSE(producer.ProduceDownloadBlocked(validOrigin, {}, SecurityReason::DomainDenied, "zip", 7));
+}
+
+// Cuenta puntos de código Unicode, aunque una letra de la extensión ocupe varios bytes.
+TEST_F(SecurityEventProducerTest, BoundsDownloadDetailsByUnicodeCodePoints) {
+    const SecurityEventProducer producer(generate, record);
+    const std::string prefix = R"({"schemaVersion":1,"reason":"EXTENSION_DENIED","extension":")";
+    const std::string suffix = R"("})";
+    std::string extension;
+    for (std::size_t i = 0; i < 2000 - prefix.size() - suffix.size(); ++i) {
+        extension += "\xC3\xA9";
+    }
+    ASSERT_TRUE(producer.ProduceDownloadBlocked(validOrigin, {}, SecurityReason::ExtensionDenied, extension, {}));
+    EXPECT_EQ(prefix + extension + suffix, deliveries.back().details);
+    extension += "\xC3\xA9";
+    ASSERT_TRUE(producer.ProduceDownloadBlocked(validOrigin, {}, SecurityReason::ExtensionDenied, extension, {}));
+    EXPECT_EQ(R"({"schemaVersion":1,"reason":"EXTENSION_DENIED"})", deliveries.back().details);
+}
+
 // Cada intento real contra el mismo dominio conserva su propio UUID.
 TEST_F(SecurityEventProducerTest, DeliversSeparateEventsForTwoBlocksOfTheSameHost) {
     const SecurityEventProducer producer(generate, record);
