@@ -7,7 +7,33 @@ activa expresamente `--demo-url-filtering --demo-policy=free`; la selección
 posterior se realiza desde la ventana. El modo normal conserva el bloqueo
 por defecto mientras no disponga de una política válida.
 
-## Preparación desde el repositorio
+## Instalador para la tutora
+
+Desde la raíz del repositorio, con Inno Setup 7 o Inno Setup 6.3–6.x en
+el equipo de desarrollo, ejecuta estos comandos en PowerShell:
+
+```powershell
+cmake --build desktop/build --config Release --target SecureBrowser --parallel 4
+if ($LASTEXITCODE -ne 0) { throw 'Falló la compilación Release.' }
+.\desktop\distribution\build-installer.ps1
+```
+
+El script ejecuta el empaquetador portátil, comprueba todos los tamaños y
+SHA-256 del manifiesto y entrega `SecureBrowser-Setup.exe` y su
+`.sha256` en una nueva carpeta `*-setup` bajo `desktop/build/packages/`.
+Si ISCC está en una ubicación personalizada, indica `-IsccPath`.
+La [guía de la demo](LEEME-demo.txt) también se instala en el menú Inicio.
+
+El asistente instala para el usuario actual en
+`%LOCALAPPDATA%\Programs\SecureBrowser Demo`. El acceso directo usa
+`Iniciar-demo.cmd` con esa carpeta de trabajo. Antes de abrir el navegador,
+el lanzador aplica el mismo permiso heredable de lectura y ejecución del
+SDK para el SID LPAC `S-1-15-2-2`. Si falla, el arranque se detiene.
+La desinstalación de Windows retira los archivos del instalador y sus accesos
+directos. El perfil de CEF, los diagnósticos y las descargas quedan en la
+cuenta del usuario. El instalador académico se distribuye sin firma digital.
+
+## Preparación del ZIP portátil desde el repositorio
 
 La compilación requiere los SDK y las herramientas del
 [README de Desktop](../README.md). El empaquetado requiere una salida Release
@@ -72,8 +98,8 @@ registra el ZIP del 19 de noviembre, sus hashes y el alcance de esa pasada Windo
 regresión automatizada distinguen una cancelación real de un fallo de red.
 
 El paquete no necesita backend ni Python para ejecutarse. Incluye Download
-Control con las políticas locales Libre y Restrictiva; no incorpora adquisición
-de políticas mediante REST. El servidor Python de las pruebas manuales se utiliza
+Control con las políticas locales Libre y Restrictiva. El lanzador selecciona
+siempre ese modo autónomo. El servidor Python de las pruebas manuales se utiliza
 solo en desarrollo y no se distribuye con la aplicación. Las identidades
 son de demostración y sus políticas no caducan; el modo normal mantiene la
 vigencia de 15 minutos y no utiliza estas políticas como fallback.

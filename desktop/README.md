@@ -8,8 +8,8 @@ Las páginas que solicitan `beforeunload` pueden preguntar antes de salir.
 
 Esta guía corresponde a [#95](https://github.com/CristianPG1993/securebrowser-platform/issues/95).
 Describe cómo preparar un clon, compilar Debug y Release y abrir
-`SecureBrowser.exe` en Windows 11 x64. El backend MVP permanece congelado:
-Foundation todavía no se comunica con él ni implementa sus políticas.
+`SecureBrowser.exe` en Windows 11 x64. El modo conectado permite iniciar
+sesión y aplicar la política del dispositivo desde el backend.
 La preparación incorpora ahora ICU para el núcleo de seguridad de
 [#115](https://github.com/CristianPG1993/securebrowser-platform/issues/115).
 El registro de clon limpio conserva la evidencia de Foundation anterior a esta incorporación;
@@ -17,7 +17,7 @@ el estado posterior del motor y de la demostración se recoge en sus registros e
 
 La implementación actual permite una [demostración autónoma de URL Filtering](distribution/README.md),
 con políticas locales explícitas, selector y avisos Qt. Su
-[guía breve](distribution/LEEME-demo.txt) acompaña al paquete portátil y su
+[guía breve](distribution/LEEME-demo.txt) acompaña al instalador por usuario y al ZIP portátil. El
 [registro de validación](docs/url-filtering-demo-validation.md) recoge los resultados.
 Abrir directamente el EXE sin opciones utiliza el modo normal: la navegación
 permanece bloqueada mientras no exista una política válida.
@@ -469,8 +469,8 @@ try {
 }
 ```
 
-La terminal espera mientras se interactúa con la ventana. Debe mostrarse
-`https://example.com/` dentro de Qt. La barra permite introducir otra URL o
+La terminal espera mientras se interactúa con la ventana. Inicio abre Google
+cuando la política permite esa navegación. La barra permite introducir otra URL o
 un dominio, pulsar Enter y utilizar Atrás, Adelante y Recargar.
 Cerrar con la X; el resultado normal es `0`. También se puede abrir el EXE
 desde el Explorador; los diagnósticos se guardan igualmente.
