@@ -155,6 +155,8 @@ void BrowserSession::RequestDevicePolicy(BrowserWindow& window, AuthSession& aut
                 return;
             }
             owner->setWindowTitle(QStringLiteral("SecureBrowser — Política aplicada: %1").arg(name));
+            // La primera política válida permite abrir Inicio, incluso si llegó en un reintento manual.
+            lifecycle_.StartBrowser();
             RevalidateDocument(browser_client);
             std::fputs("Backend device policy published.\n", stderr);
         });
@@ -365,7 +367,7 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Paso 11: Instalamos la sincronización del foco nativo del marco con los controles y el contenido web.
         window_bridge.Connect(window, window_ui);
         // Paso 12: Show muestra la ventana, prepara el foco y devuelve el HWND del anfitrión.
-        // OnHostReady guarda ese HWND y solicita crear el navegador cuando el contexto CEF también esté listo.
+        // OnHostReady entrega a CEF el área donde se abrirá Inicio al solicitar el arranque.
         lifecycle_.OnHostReady(window_bridge.Show(window, window_ui));
         if (auth_session) {
             // El clic en Qt reutiliza la sesión abierta y el contexto del dispositivo identificado.
@@ -376,6 +378,8 @@ int BrowserSession::Run(QApplication& qt_app) {
                 }
             });
             OpenLoginDialog(window, *auth_session, policy_manager, backend_config->deviceIdentifier, {});
+        } else {
+            lifecycle_.StartBrowser();
         }
 
         std::fputs("Qt event loop starting with CEF initialized.\n", stderr);
