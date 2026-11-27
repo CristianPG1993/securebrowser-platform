@@ -45,6 +45,8 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     window.setWindowTitle("SecureBrowser");
     window.resize(1024, 768);
     window_layout_.setContentsMargins(0, 0, 0, 0);
+    navigation_layout_.setContentsMargins(12, 10, 12, 6);
+    navigation_layout_.setSpacing(8);
 
     // CEF habilitará el botón cuando exista una página anterior en su historial.
     back_button_.setObjectName("back_button");
@@ -92,6 +94,11 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     address_input_.installEventFilter(this);
 
     // Las flechas quedan a la izquierda; el factor 1 reserva el espacio restante a la dirección.
+    for (auto* button : {&back_button_, &forward_button_, &reload_button_, &home_button_}) {
+        button->setMinimumSize(36, 32);
+    }
+    address_input_.setMinimumHeight(32);
+    policy_refresh_button_.setMinimumHeight(32);
     navigation_layout_.addWidget(&back_button_);
     navigation_layout_.addWidget(&forward_button_);
     navigation_layout_.addWidget(&reload_button_);
@@ -128,8 +135,8 @@ void BrowserWindowUi::SetPolicyRefreshEnabled(bool enabled) {
 void BrowserWindowUi::ConfigureStatusPanel() {
     status_panel_.setObjectName("status_panel");
     status_panel_.setAccessibleName(QStringLiteral("Estado de navegación"));
-    status_layout_.setContentsMargins(8, 4, 8, 4);
-    status_layout_.setSpacing(2);
+    status_layout_.setContentsMargins(12, 8, 12, 10);
+    status_layout_.setSpacing(6);
 
     mode_label_.setObjectName("mode_label");
     mode_label_.setTextFormat(Qt::PlainText);
