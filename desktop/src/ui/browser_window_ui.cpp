@@ -36,10 +36,10 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
       mode_label_(&status_panel_),
       policy_label_(&status_panel_),
       policy_selector_(&status_panel_),
-      block_panel_(&window),
-      block_layout_(&block_panel_),
-      block_message_(&block_panel_),
-      block_home_button_(&block_panel_),
+      block_dialog_(&window),
+      block_layout_(&block_dialog_),
+      block_message_(&block_dialog_),
+      block_ok_button_(QStringLiteral("OK"), &block_dialog_),
       download_result_message_(&window) {
     // Aquí se configura el aspecto inicial de la ventana y la distribución de sus controles.
     window.setWindowTitle("SecureBrowser");
@@ -100,12 +100,11 @@ BrowserWindowUi::BrowserWindowUi(BrowserWindow& window, BrowserHostCallbacks hos
     policy_refresh_button_.hide();
     navigation_layout_.addWidget(&policy_refresh_button_);
     ConfigureStatusPanel();
-    ConfigureNavigationBlockPanel();
+    ConfigureBlockDialog();
     ConfigureDownloadResultPanel();
     // El navegador ocupa el espacio restante y el panel queda debajo, sin superponer contenido.
     window_layout_.addLayout(&navigation_layout_);
     window_layout_.addWidget(&browser_host_, 1);
-    window_layout_.addWidget(&block_panel_);
     window_layout_.addWidget(&download_result_message_);
     window_layout_.addWidget(&status_panel_);
 }
@@ -159,27 +158,27 @@ void BrowserWindowUi::ConfigureStatusPanel() {
     status_panel_.hide();
 }
 
-void BrowserWindowUi::ConfigureNavigationBlockPanel() {
-    block_panel_.setObjectName("navigation_block_panel");
-    block_panel_.setAccessibleName(QStringLiteral("Aviso de navegación bloqueada"));
-    block_layout_.setContentsMargins(8, 6, 8, 6);
-    block_layout_.setSpacing(8);
-
-    block_message_.setObjectName("navigation_block_message");
-    // El texto puede incluir un host; nunca se interpreta como HTML ni como un enlace.
+void BrowserWindowUi::ConfigureBlockDialog() {
+    block_dialog_.setObjectName("security_block_dialog");
+    block_dialog_.setWindowTitle(QStringLiteral("Bloqueo de seguridad"));
+    block_dialog_.setMinimumWidth(360);
     block_message_.setTextFormat(Qt::PlainText);
     block_message_.setWordWrap(true);
+    block_layout_.addWidget(&block_message_);
+    block_ok_button_.setDefault(true);
+    block_layout_.addWidget(&block_ok_button_, 0, Qt::AlignRight);
 
-    block_home_button_.setObjectName("navigation_block_home_button");
-    block_home_button_.setText(QStringLiteral("Ir a inicio"));
-    block_home_button_.setAccessibleName(QStringLiteral("Ir a inicio desde el aviso de bloqueo"));
-    block_home_button_.setEnabled(false);
-    block_home_button_.installEventFilter(this);
-    ConnectBlockHomeButton();
-
-    block_layout_.addWidget(&block_message_, 1);
-    block_layout_.addWidget(&block_home_button_);
-    block_panel_.hide();
+    const auto* meta = block_ok_button_.metaObject();
+    const auto clicked = meta->method(meta->indexOfSignal("clicked(bool)"));
+    // El botón confirma el aviso en Qt y usa el mismo receptor que Inicio en la barra.
+    if (!QMetaObject::connect(&block_ok_button_, clicked, this, [this] {
+            block_dialog_.accept();
+            if (!blocked_home_page_) {
+                RequestHome();
+            }
+        })) {
+        std::fputs("Qt block dialog confirmation could not be connected.\n", stderr);
+    }
 }
 
 void BrowserWindowUi::ConfigureDownloadResultPanel() {
@@ -201,23 +200,26 @@ void BrowserWindowUi::ClearDownloadResult() {
     download_result_message_.hide();
 }
 
-void BrowserWindowUi::ShowNavigationBlock(const QString& message) {
-    // La sesión solo llama desde Qt, después de recibir el aviso de bloqueo aplicado por CEF.
-    block_message_.setText(message);
-    block_panel_.show();
+void BrowserWindowUi::ShowBlockDialog(const QString& message, bool blocked_home_page) {
+    blocked_home_page_ = blocked_home_page;
+    block_message_.setText(message + (blocked_home_page
+        ? QStringLiteral("\n\nLa página de inicio también está bloqueada.")
+        : QStringLiteral("\n\nPulsa OK para volver a Inicio.")));
+    block_dialog_.adjustSize();
+    if (!block_dialog_.isVisible()) {
+        // open mantiene activo el bucle de Qt mientras CEF y el backend procesan sus avisos.
+        block_dialog_.open();
+    }
 }
 
-void BrowserWindowUi::ClearNavigationBlock() {
-    // Retirar el aviso no cambia la política ni inicia una navegación.
-    block_message_.clear();
-    block_panel_.hide();
+void BrowserWindowUi::ShowNavigationBlock(const QString& message, bool blocked_home_page) {
+    ShowBlockDialog(message, blocked_home_page);
 }
 
 void BrowserWindowUi::ShowDownloadBlock(const QString& message) {
     // La sesión solo llama desde Qt, después de recibir el aviso de bloqueo de descarga aplicado por CEF.
     ClearDownloadResult();
-    block_message_.setText(message);
-    block_panel_.show();
+    ShowBlockDialog(message, false);
 }
 
 void BrowserWindowUi::SetPolicyName(const QString& policy_name) {
@@ -468,7 +470,6 @@ void BrowserWindowUi::SetHomeRequestHandler(std::function<void()> on_home_reques
     // Ambos botones ejecutan el mismo receptor; no se conserva una segunda función para el aviso.
     on_home_requested_ = std::move(on_home_requested);
     home_button_.setEnabled(static_cast<bool>(on_home_requested_));
-    block_home_button_.setEnabled(static_cast<bool>(on_home_requested_));
 }
 
 void BrowserWindowUi::SetForwardAvailable(bool available) {
@@ -536,18 +537,6 @@ void BrowserWindowUi::ConnectHomeButton() {
     }
 }
 
-void BrowserWindowUi::ConnectBlockHomeButton() {
-    // La conexión por metadatos conserva la carga diferida de Qt del bootstrap.
-    const QMetaObject* button_meta = block_home_button_.metaObject();
-    const int clicked_index = button_meta->indexOfSignal("clicked(bool)");
-    // Este botón reutiliza RequestHome en el hilo Qt y no introduce una segunda ruta de navegación.
-    const auto connection = QMetaObject::connect(&block_home_button_, button_meta->method(clicked_index),
-                                                this, [this] { RequestHome(); });
-    if (!connection) {
-        std::fputs("Qt blocked navigation home action could not be connected.\n", stderr);
-    }
-}
-
 void BrowserWindowUi::RequestHome() {
     if (on_home_requested_) {
         on_home_requested_();
@@ -581,7 +570,7 @@ bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
     // Pasar a otro control Qt termina la edición, también al regresar desde otra aplicación.
     if ((watched == &back_button_ || watched == &forward_button_ || watched == &reload_button_
          || watched == &home_button_ || watched == &policy_refresh_button_
-         || watched == &policy_selector_ || watched == &block_home_button_)
+         || watched == &policy_selector_)
         && event->type() == QEvent::FocusIn) {
         FinishAddressEditing();
     }
@@ -589,7 +578,7 @@ bool BrowserWindowUi::eventFilter(QObject* watched, QEvent* event) {
     // Al entrar con ratón o teclado, devolvemos los mensajes de Windows a la ventana Qt.
     if ((watched == &address_input_ || watched == &back_button_ || watched == &forward_button_
          || watched == &reload_button_ || watched == &home_button_ || watched == &policy_selector_
-         || watched == &policy_refresh_button_ || watched == &block_home_button_)
+         || watched == &policy_refresh_button_)
         && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::FocusIn)) {
         QWidget* qt_window = address_input_.window();
         if (qt_window->isActiveWindow()) {
