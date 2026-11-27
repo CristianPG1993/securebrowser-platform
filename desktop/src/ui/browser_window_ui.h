@@ -3,6 +3,7 @@
 #include "ui/browser_host.h"
 
 #include <QComboBox>
+#include <QDialog>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -60,18 +61,15 @@ public:
 
     // Muestra en Qt el texto de un bloqueo aplicado y ofrece la acción Inicio ya conectada.
     // La sesión prepara el motivo; la interfaz no evalúa políticas ni decide permisos.
-    void ShowNavigationBlock(const QString& message);
+    void ShowNavigationBlock(const QString& message, bool blocked_home_page);
 
     // Muestra en Qt un aviso de descarga bloqueada con el texto preparado por la sesión.
     // Solo presenta el motivo; no evalúa reglas ni ofrece reanudar la descarga cancelada.
     void ShowDownloadBlock(const QString& message);
 
-    // Resultado no modal, independiente del panel de bloqueos; no decide permisos ni reintenta la descarga.
+    // Muestra el resultado operativo de la descarga en la ventana principal.
     void ShowDownloadResult(const QString& message);
     void ClearDownloadResult();
-
-    // Retira el aviso cuando la sesión determina que ya no corresponde al estado mostrado.
-    void ClearNavigationBlock();
 
     // Retira el foco lógico y el caret de la barra cuando el teclado ya pertenece a CEF.
     void ClearAddressFocus();
@@ -110,7 +108,7 @@ public:
     // Guarda la acción Recargar; la sesión la proporcionará al conectar este control con CEF.
     void SetReloadRequestHandler(std::function<void()> on_reload_requested);
 
-    // Guarda una única acción Inicio y habilita sus botones de la barra y del aviso si existe receptor.
+    // Comparte la acción Inicio entre la barra y el botón OK del diálogo de bloqueo.
     void SetHomeRequestHandler(std::function<void()> on_home_requested);
 
     // Actualiza en Qt si se puede recargar la página actual.
@@ -127,10 +125,9 @@ private:
     // Prepara el panel inferior, oculto hasta que la sesión confirma el modo demo.
     void ConfigureStatusPanel();
 
-    // Prepara un aviso no modal, separado del indicador exclusivo del modo demo.
-    void ConfigureNavigationBlockPanel();
-    // Conecta «Ir a inicio» con RequestHome, igual que el botón de la barra.
-    void ConnectBlockHomeButton();
+    // El diálogo pertenece a la ventana y se abre de forma asíncrona en el hilo Qt.
+    void ConfigureBlockDialog();
+    void ShowBlockDialog(const QString& message, bool blocked_home_page);
 
     // Prepara un mensaje de resultado que no sustituye los avisos de navegación o descarga bloqueadas.
     void ConfigureDownloadResultPanel();
@@ -197,12 +194,12 @@ private:
     // Última selección confirmada; -1 significa que todavía no se ha confirmado ninguna.
     int selected_policy_index_ = -1;
 
-    // El aviso tiene su propio panel: mostrar un bloqueo no debe activar los controles de demo.
-    // El orden conserva la destrucción de los controles antes que su layout y su contenedor.
-    QWidget block_panel_;
-    QHBoxLayout block_layout_;
+    // Se reutiliza un solo diálogo aunque varios marcos comuniquen bloqueos seguidos.
+    QDialog block_dialog_;
+    QVBoxLayout block_layout_;
     QLabel block_message_;
-    QPushButton block_home_button_;
+    QPushButton block_ok_button_;
+    bool blocked_home_page_ = false;
 
     // Último resultado operativo; solo se modifica desde Qt y se limpia al solicitar un destino nuevo.
     QLabel download_result_message_;

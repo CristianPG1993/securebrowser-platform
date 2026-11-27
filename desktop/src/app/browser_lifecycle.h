@@ -16,6 +16,8 @@ public:
 
     void OnContextInitialized();
     void OnHostReady(HWND host_handle);
+    // Solicita una única creación. El navegador abre Inicio cuando CEF y el anfitrión están listos.
+    void StartBrowser();
 
     // Añade los avisos de vida al bloque de callbacks que prepara el módulo de navegación.
     BrowserClientCallbacks MakeClientCallbacks(
@@ -34,6 +36,7 @@ private:
     void PrepareBrowserWindowInfo();
 
     bool cef_context_ready_ = false;
+    bool start_requested_ = false;
     HWND host_handle_ = nullptr;
     CefWindowInfo window_info_;
     bool window_info_ready_ = false;

@@ -23,6 +23,8 @@ struct NavigationDecisionNotice {
     std::optional<std::int64_t> policyId;
     std::string host;
     SecurityDecision decision{SecurityReason::InvalidContext};
+    // Un bloqueo de Inicio o de su cadena de redirecciones se confirma sin volver a solicitar Inicio.
+    bool blockedHomePage = false;
 };
 
 }  // namespace sbp

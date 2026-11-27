@@ -226,8 +226,7 @@ std::function<void()> BrowserNavigation::MakeMainDocumentStartedHandler(
             if (close_requested || window_ui == nullptr) {
                 return;
             }
-            window_ui->ClearNavigationBlock();
-            // Una página nueva o recargada retira también el resultado de la descarga anterior.
+            // Una carga nueva retira el resultado operativo. El usuario confirma los bloqueos en su diálogo.
             window_ui->ClearDownloadResult();
         }, Qt::QueuedConnection);
         if (!queued) {

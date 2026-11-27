@@ -154,9 +154,6 @@ private:
     // La última referencia libera el cliente; su vida se gestiona mediante CefRefPtr.
     ~BrowserClient() override;
 
-    // Único destino compartido por el arranque y el botón Inicio; no implica permiso para cargarlo.
-    [[nodiscard]] static const char* HomeUrl() noexcept;
-
     // Publica una sola confirmación después de que termine el callback CEF actual.
     void NotifyClosed();
 

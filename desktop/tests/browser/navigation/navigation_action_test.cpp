@@ -73,7 +73,7 @@ TEST_P(NavigationActionTest, EnforcesPolicyAndPublishesOnlyAppliedBlocks) {
                 throw std::runtime_error("Controlled receiver failure");
             }
             return receiverMode == NoticeReceiverMode::Accept;
-        });
+        }, parentUrl);
     CefRefPtr<NavigationActionTestClient> client = new NavigationActionTestClient(
         handler, parentUrl, targetUrl, testCase.action, testCase.attempts);
     const auto result = client->Run();
@@ -103,6 +103,8 @@ TEST_P(NavigationActionTest, EnforcesPolicyAndPublishesOnlyAppliedBlocks) {
     ASSERT_EQ(testCase.blocked ? static_cast<std::size_t>(testCase.attempts) : 0U, notices->size());
     std::uint64_t previousId = 0;
     for (const auto& notice : *notices) {
+        // Una acción nueva en la página de inicio abre su propia navegación.
+        EXPECT_FALSE(notice.blockedHomePage);
         EXPECT_GT(notice.operationId, previousId);
         EXPECT_GT(notice.occurredAt.time_since_epoch().count(), 0);
         previousId = notice.operationId;

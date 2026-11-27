@@ -26,9 +26,14 @@ void BrowserLifecycle::OnHostReady(HWND host_handle) {
     PrepareBrowserWindowInfo();
 }
 
+void BrowserLifecycle::StartBrowser() {
+    start_requested_ = true;
+    PrepareBrowserWindowInfo();
+}
+
 void BrowserLifecycle::PrepareBrowserWindowInfo() {
-    // Los avisos de contexto y de anfitrión pueden llegar en cualquier orden.
-    if (!cef_context_ready_ || host_handle_ == nullptr || window_info_ready_ || close_requested_) {
+    // La sesión autoriza el arranque; los avisos de CEF y Qt pueden llegar antes o después.
+    if (!start_requested_ || !cef_context_ready_ || host_handle_ == nullptr || window_info_ready_ || close_requested_) {
         return;
     }
     RECT host_bounds{};
@@ -129,6 +134,7 @@ void BrowserLifecycle::Connect(BrowserWindow& window, CefRefPtr<BrowserClient> b
 
 void BrowserLifecycle::Detach() {
     request_browser_creation_ = {};
+    start_requested_ = false;
     host_handle_ = nullptr;
     window_info_ = CefWindowInfo();
     window_info_ready_ = false;

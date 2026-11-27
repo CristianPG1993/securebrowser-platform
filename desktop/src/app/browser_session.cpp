@@ -154,9 +154,9 @@ void BrowserSession::RequestDevicePolicy(BrowserWindow& window, AuthSession& aut
                 owner->setWindowTitle(QStringLiteral("SecureBrowser — La política recibida no es válida"));
                 return;
             }
-            // El aviso de arranque por falta de política deja de corresponder al estado actual.
-            window_ui_->ClearNavigationBlock();
             owner->setWindowTitle(QStringLiteral("SecureBrowser — Política aplicada: %1").arg(name));
+            // La primera política válida permite abrir Inicio, incluso si llegó en un reintento manual.
+            lifecycle_.StartBrowser();
             RevalidateDocument(browser_client);
             std::fputs("Backend device policy published.\n", stderr);
         });
@@ -261,8 +261,6 @@ void BrowserSession::ApplyPolicySelection(BrowserWindowUi& window_ui, PolicyMana
 
     window_ui.SetPolicyName(QString::fromUtf8(policy.Name().c_str()));
     window_ui.SetSelectedPolicy(index);
-    // El mensaje de la política anterior ya no corresponde al estado que acaba de publicarse.
-    window_ui.ClearNavigationBlock();
     std::fprintf(stderr, "Demo policy changed; source: local-demo; preset: %s; policy_id: %lld; validity: unlimited.\n",
                  index == 0 ? "free" : "restricted", static_cast<long long>(policy.Id()));
     RevalidateDocument(browser_client);
@@ -369,7 +367,7 @@ int BrowserSession::Run(QApplication& qt_app) {
         // Paso 11: Instalamos la sincronización del foco nativo del marco con los controles y el contenido web.
         window_bridge.Connect(window, window_ui);
         // Paso 12: Show muestra la ventana, prepara el foco y devuelve el HWND del anfitrión.
-        // OnHostReady guarda ese HWND y solicita crear el navegador cuando el contexto CEF también esté listo.
+        // OnHostReady entrega a CEF el área donde se abrirá Inicio al solicitar el arranque.
         lifecycle_.OnHostReady(window_bridge.Show(window, window_ui));
         if (auth_session) {
             // El clic en Qt reutiliza la sesión abierta y el contexto del dispositivo identificado.
@@ -380,6 +378,8 @@ int BrowserSession::Run(QApplication& qt_app) {
                 }
             });
             OpenLoginDialog(window, *auth_session, policy_manager, backend_config->deviceIdentifier, {});
+        } else {
+            lifecycle_.StartBrowser();
         }
 
         std::fputs("Qt event loop starting with CEF initialized.\n", stderr);
@@ -588,7 +588,7 @@ void BrowserSession::OnNavigationDecision(const NavigationDecisionNotice& notice
 
     const QString policy_name = state && state->policy
         ? QString::fromUtf8(state->policy->Name().c_str()) : QString{};
-    window_ui_->ShowNavigationBlock(NavigationBlockMessage(notice, policy_name));
+    window_ui_->ShowNavigationBlock(NavigationBlockMessage(notice, policy_name), notice.blockedHomePage);
     std::fprintf(stderr, "Qt navigation block notice shown; operation_id: %llu.\n",
                  static_cast<unsigned long long>(notice.operationId));
 }

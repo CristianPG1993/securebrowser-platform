@@ -853,7 +853,10 @@ foreach ($configuration in @('Debug', 'Release')) {
 }
 ```
 
-`check-startup.ps1` abre una ventana y solicita su cierre automáticamente.
+`check-startup.ps1` arranca en modo normal sin configuración de backend. Al
+intentar abrir Inicio sin política, Qt muestra «Bloqueo de seguridad». El script
+espera la ventana hija de CEF, cierra ese aviso y solicita el cierre normal de la
+ventana principal. Después comprueba el código de salida y las marcas de apagado.
 El plazo predeterminado es de 30 segundos para detectar la ventana CEF y
 otros 30 para finalizar. Se puede ajustar mediante `-StartupTimeoutSeconds`
 y `-CloseTimeoutSeconds`. El log se lee después de terminar el proceso,

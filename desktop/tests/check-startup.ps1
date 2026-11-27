@@ -42,6 +42,40 @@ namespace Sbp {
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern int GetClassName(IntPtr window, StringBuilder className, int capacity);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr window);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr window, StringBuilder title, int capacity);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PostMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        public static bool TryCloseStartupNotice(IntPtr parent, int processId) {
+            const uint GW_ENABLEDPOPUP = 6;
+            const uint WM_CLOSE = 0x0010;
+            IntPtr popup = GetWindow(parent, GW_ENABLEDPOPUP);
+            if (popup == IntPtr.Zero || popup == parent || !IsWindowVisible(popup)) return false;
+
+            uint ownerProcessId;
+            GetWindowThreadProcessId(popup, out ownerProcessId);
+            var title = new StringBuilder(128);
+            GetWindowText(popup, title, title.Capacity);
+            if (ownerProcessId != processId || title.ToString() != "Bloqueo de seguridad") return false;
+
+            // Equivale a cerrar con la X el aviso de esta ventana. Qt vuelve a habilitar su propietaria.
+            if (!PostMessageW(popup, WM_CLOSE, IntPtr.Zero, IntPtr.Zero)) {
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return true;
+        }
+
         public static bool HasBrowserWindow(IntPtr parent) {
             bool found = false;
             // Esta lambda solo consulta las ventanas descendientes de la instancia que estamos probando.
@@ -64,8 +98,12 @@ namespace Sbp {
     $logDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'SecureBrowser/Logs'
     $startedAt = [DateTime]::UtcNow
 
-    # Se inicia una ventana real; el script enviará el cierre normal a esta instancia concreta.
-    $process = Start-Process -FilePath $executablePath -WorkingDirectory $runtimeDirectory -PassThru
+    # El proceso de prueba arranca sin backend. La configuración local del usuario sigue en su terminal.
+    $startInfo = [Diagnostics.ProcessStartInfo]::new($executablePath)
+    $startInfo.WorkingDirectory = $runtimeDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.EnvironmentVariables.Remove('SBP_BACKEND_CONFIG')
+    $process = [Diagnostics.Process]::Start($startInfo)
     $null = $process.Handle
     $testProcessId = $process.Id
     Write-Host "Comprobando $Configuration; PID: $testProcessId."
@@ -73,14 +111,21 @@ namespace Sbp {
     # Esperamos la ventana hija nativa, sin depender de la red ni acreditar su contenido visual.
     $startupTimer = [Diagnostics.Stopwatch]::StartNew()
     $browserWindowReady = $false
+    $noticeCloseSent = $false
     while ($startupTimer.Elapsed.TotalSeconds -lt $StartupTimeoutSeconds) {
         $process.Refresh()
         if ($process.HasExited) {
             throw "La aplicación terminó antes de completar el arranque; código: $($process.ExitCode)."
         }
-        if ($process.MainWindowHandle -ne [IntPtr]::Zero -and
-            [Sbp.StartupWindowProbe]::HasBrowserWindow($process.MainWindowHandle)) {
+        $window = $process.MainWindowHandle
+        if (-not $browserWindowReady -and $window -ne [IntPtr]::Zero -and
+            [Sbp.StartupWindowProbe]::HasBrowserWindow($window)) {
             $browserWindowReady = $true
+            Write-Host 'Ventana hija CEF detectada.'
+        }
+        if ($browserWindowReady -and $window -ne [IntPtr]::Zero -and
+            [Sbp.StartupWindowProbe]::TryCloseStartupNotice($window, $testProcessId)) {
+            $noticeCloseSent = $true
             break
         }
         Start-Sleep -Milliseconds 200
@@ -88,13 +133,22 @@ namespace Sbp {
     if (-not $browserWindowReady) {
         throw "El arranque ha superado $StartupTimeoutSeconds segundos."
     }
-    Write-Host 'Ventana hija CEF detectada. Solicitando cierre normal.'
-
-    # CloseMainWindow envía el cierre a la ventana del proceso; conserva el recorrido Qt -> CEF -> Qt.
-    if (-not $process.CloseMainWindow()) {
-        throw 'No se ha podido enviar el cierre a la ventana de esta prueba.'
+    if (-not $noticeCloseSent) {
+        throw 'No se encontró el aviso de bloqueo de Inicio esperado en el arranque sin backend.'
     }
-    if (-not $process.WaitForExit($CloseTimeoutSeconds * 1000)) {
+    Write-Host 'Cierre solicitado al aviso de bloqueo. Esperando el cierre normal de la ventana principal.'
+
+    # Hasta que Qt procese el cierre del diálogo, CloseMainWindow devuelve false sin enviar la solicitud.
+    $closeTimer = [Diagnostics.Stopwatch]::StartNew()
+    while (-not $process.CloseMainWindow()) {
+        if ($process.HasExited -or $closeTimer.Elapsed.TotalSeconds -ge $CloseTimeoutSeconds) {
+            throw 'No se ha podido enviar el cierre a la ventana principal tras cerrar el aviso.'
+        }
+        Start-Sleep -Milliseconds 100
+        $process.Refresh()
+    }
+    $remainingMs = [Math]::Max(0, $CloseTimeoutSeconds * 1000 - $closeTimer.ElapsedMilliseconds)
+    if (-not $process.WaitForExit([int]$remainingMs)) {
         throw "El cierre ha superado $CloseTimeoutSeconds segundos."
     }
     if ($process.ExitCode -ne 0) {

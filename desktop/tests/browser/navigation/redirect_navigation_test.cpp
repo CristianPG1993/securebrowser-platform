@@ -14,7 +14,7 @@
 namespace sbp {
 
 enum class RedirectBlockStage { None, Middle, Target };
-using RedirectNavigationCase = std::tuple<int, RedirectBlockStage>;
+using RedirectNavigationCase = std::tuple<int, RedirectBlockStage, bool>;
 
 class RedirectNavigationTest : public ::testing::TestWithParam<RedirectNavigationCase> {
 public:
@@ -28,10 +28,10 @@ protected:
 
 std::string RedirectNavigationTest::CaseName(
     const ::testing::TestParamInfo<RedirectNavigationCase>& info) {
-    const auto [status, stage] = info.param;
+    const auto [status, stage, fromHome] = info.param;
     const std::string suffix = stage == RedirectBlockStage::None ? "Allowed"
         : stage == RedirectBlockStage::Middle ? "BlockedAtMiddle" : "BlockedAtTarget";
-    return "Http" + std::to_string(status) + suffix;
+    return "Http" + std::to_string(status) + suffix + (fromHome ? "FromHome" : "");
 }
 
 void RedirectNavigationTest::SetUp() {
@@ -46,7 +46,7 @@ void RedirectNavigationTest::TearDown() {
 
 // Cada código se prueba con permiso completo y con un bloqueo en cada destino de la cadena.
 TEST_P(RedirectNavigationTest, ChecksEachRedirectBeforeContactingItsDestination) {
-    const auto [status, stage] = GetParam();
+    const auto [status, stage, fromHome] = GetParam();
     const bool blockedAtMiddle = stage == RedirectBlockStage::Middle;
     const bool blockedAtTarget = stage == RedirectBlockStage::Target;
     const bool allowed = stage == RedirectBlockStage::None;
@@ -54,6 +54,8 @@ TEST_P(RedirectNavigationTest, ChecksEachRedirectBeforeContactingItsDestination)
     ASSERT_TRUE(CefParseURL(server_->Origin(), endpoint));
     const std::string port = CefString(&endpoint.port).ToString();
     ASSERT_FALSE(port.empty());
+    const std::string prefix = "/redirect/" + std::to_string(status);
+    const std::string homeUrl = fromHome ? "http://start.sbp.test:" + port + prefix + "/first" : kBrowserHomeUrl;
 
     const auto manager = std::make_shared<PolicyManager>();
     const auto context = manager->BeginContext(10, 20);
@@ -74,7 +76,7 @@ TEST_P(RedirectNavigationTest, ChecksEachRedirectBeforeContactingItsDestination)
         [notices](const NavigationDecisionNotice& notice) {
             notices->push_back(notice);
             return true;
-        });
+        }, homeUrl);
     CefRefPtr<RedirectNavigationTestClient> client = new RedirectNavigationTestClient(handler, port, status);
     const auto result = client->Run();
     server_->Stop();
@@ -93,7 +95,6 @@ TEST_P(RedirectNavigationTest, ChecksEachRedirectBeforeContactingItsDestination)
     RecordProperty("target_blocked", static_cast<int>(result.targetBlocked));
     RecordProperty("target_loaded", static_cast<int>(result.targetLoaded));
     RecordProperty("notice_count", static_cast<int>(notices->size()));
-    const std::string prefix = "/redirect/" + std::to_string(status);
     RecordProperty("first_requests", static_cast<int>(server_->RequestCount(prefix + "/first")));
     RecordProperty("middle_requests", static_cast<int>(server_->RequestCount(prefix + "/second")));
     RecordProperty("target_requests", static_cast<int>(server_->RequestCount("/redirect-target")));
@@ -120,6 +121,7 @@ TEST_P(RedirectNavigationTest, ChecksEachRedirectBeforeContactingItsDestination)
         EXPECT_GT(notice.operationId, 0U);
         EXPECT_TRUE(notice.mainFrame);
         EXPECT_TRUE(notice.redirect);
+        EXPECT_EQ(fromHome, notice.blockedHomePage);
         ASSERT_TRUE(notice.context.has_value());
         EXPECT_EQ(*context, *notice.context);
         EXPECT_EQ(blockedAtMiddle ? "middle.sbp.test" : "target.sbp.test", notice.host);
@@ -132,7 +134,16 @@ INSTANTIATE_TEST_SUITE_P(
     RedirectNavigationTest,
     ::testing::Combine(
         ::testing::Values(301, 302, 303, 307, 308),
-        ::testing::Values(RedirectBlockStage::None, RedirectBlockStage::Middle, RedirectBlockStage::Target)),
+        ::testing::Values(RedirectBlockStage::None, RedirectBlockStage::Middle, RedirectBlockStage::Target),
+        ::testing::Values(false)),
+    RedirectNavigationTest::CaseName);
+
+// Al bloquear el primer o el segundo salto desde Inicio, OK debe cerrar el aviso sin volver a navegar.
+INSTANTIATE_TEST_SUITE_P(
+    HomeChain,
+    RedirectNavigationTest,
+    ::testing::Values(RedirectNavigationCase{302, RedirectBlockStage::Middle, true},
+                      RedirectNavigationCase{302, RedirectBlockStage::Target, true}),
     RedirectNavigationTest::CaseName);
 
 }  // namespace sbp
