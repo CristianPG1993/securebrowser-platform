@@ -1,52 +1,43 @@
-SECUREBROWSER — DEMOSTRACIÓN DE FILTRADO DE NAVEGACIÓN Y DESCARGAS
+SECUREBROWSER DEMO
+Guía para probar las dos políticas locales en Windows 11 x64
 
-Requisitos
-Windows de 64 bits. La comprobación manual de esta versión se realiza en
-Windows 11. Se necesita conexión a Internet para abrir las páginas públicas
-de los ejemplos. No se requiere instalar Java, PostgreSQL, Docker ni Python.
+Instalación e inicio
+1. Abre SecureBrowser-Setup.exe y pulsa «Instalar». La instalación es para tu
+   cuenta de Windows. El asistente incluye los componentes de Qt y Chromium.
+2. Abre el menú Inicio de Windows, busca «SecureBrowser Demo» y pulsa Abrir.
+   Encontrarás también esta guía buscando «SecureBrowser Demo - Guía».
+3. En el panel inferior del navegador debe aparecer «Modo demostración» con
+   «Navegación libre». Puedes cambiar de política en ese mismo selector.
 
-Inicio
-1. Extraer el ZIP completo en una carpeta local del usuario, por ejemplo
-   en el Escritorio. Conservar juntos el EXE,
-   las DLL, las subcarpetas y los avisos de terceros.
-2. Abrir Iniciar-demo.cmd con doble clic. El lanzador activa explícitamente
-   la demostración y selecciona «Navegación libre».
-3. Comprobar que el panel inferior indica «Modo demostración» y el nombre
-   de la política. El selector permite cambiarla sin cerrar la aplicación.
+Prueba 1. Ver cómo cambia el acceso a una página
+Con «Navegación libre», abre https://www.youtube.com/ y espera a ver la página.
+Selecciona «Restricción de redes sociales y entretenimiento». Intenta abrir
+YouTube de nuevo. Verás un diálogo de navegación bloqueada con el nombre de la
+política. Pulsa OK para ir a Inicio (Google). Con esa misma política, abre
+https://www.wikipedia.org/ y comprueba que carga. Vuelve a «Navegación libre»
+y comprueba que puedes abrir YouTube otra vez.
 
-Comprobación del filtrado
-1. Con «Navegación libre», abrir https://www.youtube.com/ y comprobar
-   que carga. Un fallo de red por sí solo no demuestra un bloqueo.
-2. Seleccionar «Restricción de redes sociales y entretenimiento». La página
-   de YouTube abierta debe retirarse y debe aparecer el aviso de bloqueo.
-3. Volver a escribir https://www.youtube.com/ y pulsar Intro. La navegación
-   sigue bloqueada. Atrás y Adelante tampoco deben recuperar el vídeo.
-4. Con la misma política restrictiva, abrir https://www.wikipedia.org/.
-   Este dominio está permitido.
-5. Volver a «Navegación libre» y repetir la dirección de YouTube.
-   La navegación vuelve a estar permitida.
+Prueba 2. Guardar una descarga permitida y bloquear una extensión
+Selecciona la política restrictiva. Abre https://samplelib.com/es/sample-pdf.html
+y pulsa la flecha de descarga del PDF de una página. En «Guardar como», elige
+Documentos y guarda el archivo con el nombre prueba.pdf. Espera al aviso de
+descarga completada. El PDF está permitido por las dos políticas.
+Repite la descarga. Esta vez sustituye el nombre completo por prueba.exe y
+pulsa Guardar. Debe aparecer el diálogo «Descarga bloqueada» y en Documentos
+solo debe estar el PDF de la primera prueba. Pulsa OK para volver a Google.
 
-Políticas incluidas
-Libre: filtrado de URL y control de extensiones de descarga desactivados.
-Restrictiva: lista de denegación para facebook.com, instagram.com,
-tiktok.com, x.com, youtube.com, twitch.tv y netflix.com, con sus subdominios.
-También activa el control de descargas y bloquea las extensiones exe y msi.
-El nombre sugerido bloqueado impide abrir Guardar como. Si se elige un nombre
-definitivo bloqueado en el diálogo, la descarga también se cancela con un aviso.
-El botón de inicio solicita https://example.com/ mediante el mismo filtro.
+Qué cambia entre las dos políticas
+«Navegación libre» desactiva los filtros de dominios y extensiones.
+La política restrictiva bloquea Facebook, Instagram, TikTok, X, YouTube,
+Twitch y Netflix, incluidos sus subdominios, y las extensiones EXE y MSI.
+También comprueba el nombre definitivo elegido en «Guardar como».
 
-Alcance
-Las políticas y las identidades de esta demostración son locales y no
-representan una sesión autenticada del backend. La demo utiliza políticas
-sin caducidad. El modo conectado conserva su vigencia de 15 minutos y no
-obtiene automáticamente estas políticas locales.
-En ambos modos se valida el nombre del archivo y se exige una política válida.
-Cancelar Guardar como termina la solicitud sin mostrar un bloqueo de política.
-La ventana muestra un aviso no modal cuando la descarga se completa o falla.
-Una cancelación voluntaria no se presenta como un error.
+Requisitos y cierre
+Las páginas de los ejemplos necesitan Internet. Las políticas están incluidas
+en la demo y funcionan sin cuenta, Android, Docker ni conexión al backend.
+Cierra la ventana con la X. Para desinstalar, abre Configuración de Windows →
+Aplicaciones → Aplicaciones instaladas → SecureBrowser Demo → Desinstalar.
+Tus descargas y el perfil local de navegación permanecen en tu cuenta.
 
-Diagnóstico y cierre
-Los registros se conservan en %LOCALAPPDATA%\SecureBrowser\Logs.
-Cerrar mediante la X de la ventana. Abrir directamente SecureBrowser.exe
-sin argumentos inicia el modo normal, que bloquea la navegación mientras
-no exista una política válida.
+Si has recibido el ZIP portátil, extrae la carpeta completa en tu Escritorio
+y abre Iniciar-demo.cmd. Desde ese punto puedes seguir las mismas pruebas.

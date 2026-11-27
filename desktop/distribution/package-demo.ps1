@@ -2,7 +2,8 @@
 param(
     [string]$InventoryPath = (Join-Path $PSScriptRoot '../build/runtime-inventory-Release.json'),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '../build/packages'),
-    [string]$CompilerRuntimeDirectory
+    [string]$CompilerRuntimeDirectory,
+    [switch]$PassThru
 )
 
 $ErrorActionPreference = 'Stop'
@@ -145,6 +146,7 @@ try {
     Write-Host "ZIP preparado: $archivePath"
     Write-Host "SHA-256 del ZIP: $archiveHash"
     Write-Host "Archivos registrados: $($manifestFiles.Count). Pendiente de comprobación manual antes de distribuir."
+    if ($PassThru) { Write-Output $packageRoot }
     exit 0
 } catch {
     # Si falla una copia, su carpeta parcial se conserva para diagnóstico y no se considera entregable.
