@@ -12,14 +12,16 @@ if (-not $IsccPath) {
     $onPath = Get-Command ISCC.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     $candidates = @(
         $onPath.Source
-        (Join-Path $env:LOCALAPPDATA 'Programs/Inno Setup 6/ISCC.exe')
-        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe')
-        (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe')
+        foreach ($version in 7, 6) {
+            Join-Path $env:LOCALAPPDATA "Programs/Inno Setup $version/ISCC.exe"
+            Join-Path $env:ProgramFiles "Inno Setup $version/ISCC.exe"
+            Join-Path ${env:ProgramFiles(x86)} "Inno Setup $version/ISCC.exe"
+        }
     )
     $IsccPath = $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
 }
 if (-not $IsccPath -or -not (Test-Path -LiteralPath $IsccPath -PathType Leaf)) {
-    throw 'Instala Inno Setup 6 o indica la ruta de ISCC.exe con -IsccPath.'
+    throw 'Instala Inno Setup o indica la ruta de ISCC.exe con -IsccPath.'
 }
 
 # El empaquetador portátil valida el inventario Release y selecciona las dependencias.

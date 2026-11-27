@@ -9,7 +9,7 @@ por defecto mientras no disponga de una política válida.
 
 ## Instalador para la tutora
 
-Desde la raíz del repositorio, con Inno Setup 6.3 o posterior de la serie 6 en
+Desde la raíz del repositorio, con Inno Setup 7 o Inno Setup 6.3–6.x en
 el equipo de desarrollo, ejecuta estos comandos en PowerShell:
 
 ```powershell
