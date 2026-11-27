@@ -7,6 +7,7 @@
 #include "include/cef_sandbox_win.h"
 
 #include <QApplication>
+#include <QIcon>
 #include <QMetaObject>
 
 #include <windows.h>
@@ -85,6 +86,7 @@ CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE hInstance,
     char* qt_argv[] = {qt_program_name, nullptr};
     // Solo el proceso principal crea Qt, antes de inicializar CEF y cualquier ventana.
     QApplication qt_app(qt_argc, qt_argv);
+    qt_app.setWindowIcon(QIcon(QApplication::applicationDirPath() + QStringLiteral("/securebrowser-desktop.svg")));
     std::fputs("Qt application created in the main process.\n", stderr);
 
     // La sesión coordina la interfaz y permanece viva hasta después de CefShutdown.

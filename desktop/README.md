@@ -414,7 +414,7 @@ ejecutable; `locales/` se copia completo.
 
 | Elemento | Procedencia y función |
 | --- | --- |
-| `SecureBrowser.exe` | Bootstrap oficial de CEF renombrado, correspondiente a Debug o Release. |
+| `SecureBrowser.exe` | Copia del bootstrap oficial de CEF de Debug o Release con el icono de SecureBrowser integrado para Windows. |
 | `SecureBrowser.dll` | Código propio compilado; exporta `RunWinMain`, que invoca el bootstrap. |
 | `libcef.dll` y otros binarios CEF | Motor y auxiliares precompilados del SDK fijado. |
 | `libcef_dll_wrapper` | Adaptador oficial compilado y enlazado con la DLL de SecureBrowser. |
@@ -488,6 +488,8 @@ El segundo comando debe terminar sin listar procesos.
 que CEF haya creado o renderizado el navegador.
 
 ### Bootstrap, sandbox y cierre
+
+Qt carga [el SVG de Desktop](../assets/securebrowser-desktop.svg) para la ventana. El Explorador de Windows lee el icono del propio EXE. Al compilar, se incorpora [la exportación ICO del mismo diseño](../assets/securebrowser-desktop.ico) a una copia del bootstrap. Al cambiar el diseño, actualiza ambos archivos en `assets`.
 
 El mismo EXE inicia el principal y los subprocesos de CEF. El bootstrap
 proporciona el contexto de sandbox y carga `SecureBrowser.dll`. La entrada

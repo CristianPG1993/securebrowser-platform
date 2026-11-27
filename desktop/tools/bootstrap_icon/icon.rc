@@ -1,0 +1,5 @@
+#include <winresrc.h>
+
+// Mismo identificador de grupo e idioma que el icono del bootstrap del SDK CEF.
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+32512 ICON "securebrowser-desktop.ico"

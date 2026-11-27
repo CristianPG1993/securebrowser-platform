@@ -583,11 +583,17 @@ target_link_libraries(SecureBrowser PRIVATE
 )
 sbp_deploy_icu(SecureBrowser)
 
-# Copia el bootstrap de la configuración elegida junto a nuestra DLL y lo renombra.
-COPY_SINGLE_FILE(SecureBrowser
-    "${CEF_BINARY_DIR}/bootstrap.exe"
-    "$<TARGET_FILE_DIR:SecureBrowser>/SecureBrowser.exe"
+# El icono se carga en el proceso principal, sin inicializar recursos Qt en los subprocesos CEF.
+file(GENERATE
+    OUTPUT "$<TARGET_FILE_DIR:SecureBrowser>/securebrowser-desktop.svg"
+    INPUT "${CMAKE_CURRENT_SOURCE_DIR}/../assets/securebrowser-desktop.svg"
+    TARGET SecureBrowser
+    NEWLINE_STYLE LF
 )
+
+# Windows obtiene el icono del archivo EXE antes de que el proceso principal cree QApplication.
+add_subdirectory(tools/bootstrap_icon)
+add_dependencies(SecureBrowser sbp_deploy_bootstrap)
 
 # Las listas y carpetas proceden de cef_variables.cmake; COPY_FILES, de cef_macros.cmake.
 # Copia los binarios de Debug/Release y los recursos comunes junto a nuestra DLL.
