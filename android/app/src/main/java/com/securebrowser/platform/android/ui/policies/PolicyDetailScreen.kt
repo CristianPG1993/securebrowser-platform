@@ -4,11 +4,14 @@ import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -23,6 +26,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +38,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.securebrowser.platform.android.R
 import com.securebrowser.platform.android.data.remote.FilterMode
@@ -69,7 +76,13 @@ internal fun PolicyDetailScreen(
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item { Text(stringResource(R.string.policy_detail_title), style = MaterialTheme.typography.headlineMedium) }
+        item {
+            Text(
+                stringResource(R.string.policy_detail_title),
+                style = if (ready == null) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         when (state) {
             PolicyDetailState.Loading -> item { CircularProgressIndicator() }
             PolicyDetailState.Forbidden -> item { Text(stringResource(R.string.policy_detail_forbidden)) }
@@ -83,7 +96,7 @@ internal fun PolicyDetailScreen(
             is PolicyDetailState.Ready -> {
                 val policy = state.policy
                 val editing = draft.takeIf { original?.id == policy.id && original?.updatedAt == policy.updatedAt }
-                item { Text(policy.name, style = MaterialTheme.typography.headlineSmall) }
+                item { Text(policy.name, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall) }
                 if (busy) {
                     item { CircularProgressIndicator() }
                     item { Text(stringResource(if (status == PolicySaveStatus.Saving) R.string.policy_saving else R.string.policy_confirming)) }
@@ -163,8 +176,8 @@ internal fun PolicyDetailScreen(
                             }
                         }
                     }
-                    filterSection(R.string.policy_url_filter, policy.urlFilteringEnabled, policy.urlFilteringMode, policy.urlRules)
-                    filterSection(R.string.policy_download_control, policy.downloadControlEnabled, policy.downloadControlMode, policy.downloadRules)
+                    filterSection(R.string.policy_url_filter, R.string.policy_domains, policy.urlFilteringEnabled, policy.urlFilteringMode, policy.urlRules)
+                    filterSection(R.string.policy_download_control, R.string.policy_extensions, policy.downloadControlEnabled, policy.downloadControlMode, policy.downloadRules)
                 }
             }
         }
@@ -193,6 +206,7 @@ private fun FilterControls(
             Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
             Switch(checked = enabled, onCheckedChange = null)
         }
+        Text(stringResource(R.string.policy_filter_mode), style = MaterialTheme.typography.labelLarge)
         Column(Modifier.selectableGroup()) {
             FilterMode.entries.forEach { option ->
                 Row(
@@ -216,11 +230,62 @@ private fun FilterMode.label(): Int = when (this) {
     FilterMode.DENYLIST -> R.string.policy_mode_denylist
 }
 
-/** Separa el estado del filtro de su configuración, que también puede consultarse si está desactivado. */
-private fun LazyListScope.filterSection(@StringRes title: Int, enabled: Boolean, mode: FilterMode, rules: List<String>) {
-    item { Text(stringResource(title), style = MaterialTheme.typography.titleMedium) }
-    item { Text(stringResource(if (enabled) R.string.policy_filter_enabled else R.string.policy_filter_disabled)) }
-    item { Text(stringResource(mode.label())) }
-    if (rules.isEmpty()) item { Text(stringResource(R.string.policy_no_rules)) }
-    items(rules) { rule -> Text(rule) }
+/** Agrupa estado y modo en la cabecera. Las reglas se componen a medida que se desplaza la lista. */
+private fun LazyListScope.filterSection(
+    @StringRes title: Int,
+    @StringRes rulesTitle: Int,
+    enabled: Boolean,
+    mode: FilterMode,
+    rules: List<String>,
+) {
+    item {
+        val colors = MaterialTheme.colorScheme
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            shape = MaterialTheme.shapes.medium,
+            color = colors.surfaceContainer,
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(title), Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+                    Surface(
+                        shape = CircleShape,
+                        color = if (enabled) colors.primaryContainer else colors.surfaceVariant,
+                        contentColor = if (enabled) colors.onPrimaryContainer else colors.onSurfaceVariant,
+                    ) {
+                        Text(
+                            stringResource(if (enabled) R.string.policy_filter_enabled else R.string.policy_filter_disabled),
+                            Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.policy_filter_mode),
+                        Modifier.alignByBaseline(),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.onSurfaceVariant,
+                    )
+                    Text(stringResource(mode.label()), Modifier.alignByBaseline(), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+    item {
+        Text(stringResource(rulesTitle), Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelLarge)
+    }
+    if (rules.isEmpty()) {
+        item {
+            Text(stringResource(R.string.policy_no_rules), Modifier.padding(start = 16.dp),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    items(rules) { rule ->
+        Text(rule, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+    }
 }

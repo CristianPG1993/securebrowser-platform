@@ -3,6 +3,8 @@
 function(sbp_generate_runtime_inventory SBP_TARGET)
     set(SBP_RUNTIME_FILES
         "SecureBrowser.exe"
+        "securebrowser-desktop.svg"
+        "iconengines/qsvgicon$<$<CONFIG:Debug>:d>.dll"
         "$<TARGET_FILE_NAME:${SBP_TARGET}>"
         "$<TARGET_FILE_NAME:Qt6::Core>"
         "$<TARGET_FILE_NAME:Qt6::Gui>"

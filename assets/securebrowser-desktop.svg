@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>SecureBrowser Desktop</title>
+  <desc>Escudo geométrico cian con un globo de navegación sobre fondo azul noche.</desc>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="#0C1729"/>
+  <path d="M256 76L400 132V248C400 331 349 390 256 436C163 390 112 331 112 248V132Z" fill="#162C45" stroke="#49D5F5" stroke-width="20" stroke-linejoin="round"/>
+  <g fill="none" stroke="#F0FAFF" stroke-width="17" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="252" r="86"/>
+    <ellipse cx="256" cy="252" rx="38" ry="86"/>
+    <path d="M170 252H342"/>
+  </g>
+</svg>
