@@ -1,11 +1,13 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$InventoryPath = (Join-Path $PSScriptRoot '../build/runtime-inventory-Release.json'),
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '../build/packages'),
+    [string]$InventoryPath,
+    [string]$OutputDirectory,
     [string]$IsccPath
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $InventoryPath) { $InventoryPath = Join-Path $PSScriptRoot '../build/runtime-inventory-Release.json' }
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $PSScriptRoot '../build/packages' }
 if (-not $IsccPath) {
     $onPath = Get-Command ISCC.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     $candidates = @(
