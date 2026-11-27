@@ -100,7 +100,7 @@ TEST_P(SubframeNavigationTest, AppliesPolicyToChildWithoutReplacingParentDocumen
         [notices](const NavigationDecisionNotice& notice) {
             notices->push_back(notice);
             return true;
-        });
+        }, parentUrl);
     CefRefPtr<SubframeNavigationTestClient> client = new SubframeNavigationTestClient(
         handler, parentUrl, childUrl, expectedChildUrl, marker);
     const auto result = client->Run();
@@ -159,6 +159,7 @@ TEST_P(SubframeNavigationTest, AppliesPolicyToChildWithoutReplacingParentDocumen
     if (testCase.blockChild) {
         const auto& notice = notices->front();
         EXPECT_FALSE(notice.mainFrame);
+        EXPECT_FALSE(notice.blockedHomePage);
         EXPECT_EQ(redirect, notice.redirect);
         ASSERT_TRUE(notice.context.has_value());
         EXPECT_EQ(*context, *notice.context);

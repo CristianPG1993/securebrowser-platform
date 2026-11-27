@@ -1,7 +1,5 @@
 #include "browser/security_request_handler.h"
 
-#include "browser/browser_home.h"
-
 #include "include/cef_parser.h"
 #include "include/wrapper/cef_helpers.h"
 
@@ -16,8 +14,8 @@ std::uint64_t SecurityRequestHandler::lastOperationId_ = 0;
 
 // Conserva la propiedad compartida del gestor y rechaza una dependencia inexistente.
 SecurityRequestHandler::SecurityRequestHandler(std::shared_ptr<PolicyManager> policyManager,
-                                               DecisionCallback onDecision)
-    : policyManager_(std::move(policyManager)), onDecision_(std::move(onDecision)) {
+                                               DecisionCallback onDecision, CefString homeUrl)
+    : policyManager_(std::move(policyManager)), onDecision_(std::move(onDecision)), homeUrl_(std::move(homeUrl)) {
     if (!policyManager_) {
         throw std::invalid_argument("SecurityRequestHandler requires a policy manager.");
     }
@@ -30,27 +28,38 @@ bool SecurityRequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                           bool /*user_gesture*/,
                                           bool is_redirect) {
     CEF_REQUIRE_UI_THREAD();
-    if (!request) {
+    if (!browser || !frame || !request) {
         return true;
     }
-    return ShouldBlockUrl(browser, frame, request->GetURL(), is_redirect);
+    const auto url = request->GetURL();
+    const bool isHomeUrl = url == homeUrl_;
+    const bool mainFrame = frame->IsMain();
+    if (mainFrame && !is_redirect) {
+        mainNavigationFromHome_ = isHomeUrl;
+    }
+    // Cada salto pasa por la política con su URL real. El origen solo determina la acción del aviso.
+    return ShouldBlockUrl(browser, frame, url, is_redirect, mainFrame && (isHomeUrl || mainNavigationFromHome_));
 }
 
 bool SecurityRequestHandler::ShouldBlockDocument(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) {
     CEF_REQUIRE_UI_THREAD();
-    if (!frame) {
-        return true;
-    }
-    // No simula OnBeforeBrowse: consulta la dirección del documento que CEF ya mantiene abierto.
-    return ShouldBlockUrl(browser, frame, frame->GetURL(), false);
-}
-
-bool SecurityRequestHandler::ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                                          const CefString& url, bool isRedirect) {
-    CEF_REQUIRE_UI_THREAD();
     if (!browser || !frame) {
         return true;
     }
+    // El documento visible puede ser anterior a una navegación pendiente o cancelada.
+    const auto url = frame->GetURL();
+    bool fromHome = false;
+    if (frame->IsMain()) {
+        const auto entry = browser->GetHost()->GetVisibleNavigationEntry();
+        fromHome = url == homeUrl_ || (entry && entry->IsValid() && entry->GetURL() == url
+                                       && entry->GetOriginalURL() == homeUrl_);
+    }
+    return ShouldBlockUrl(browser, frame, url, false, fromHome);
+}
+
+bool SecurityRequestHandler::ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                          const CefString& url, bool isRedirect, bool fromHome) {
+    CEF_REQUIRE_UI_THREAD();
     if (IsAllowedInternalNavigation(url, frame->IsMain())) {
         return false;
     }
@@ -59,7 +68,7 @@ bool SecurityRequestHandler::ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRe
     const auto state = policyManager_->ReadState();
     const UrlTarget target = urlAdapter_.Parse(url);
     if (!state) {
-        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, url, nullptr);
+        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, fromHome, nullptr);
         return true;
     }
 
@@ -68,13 +77,13 @@ bool SecurityRequestHandler::ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRe
     const auto evaluatedState = policy.state && policy.state->context == state->context
         ? policy.state : state;
     if (decision.Action() == SecurityAction::Block) {
-        NotifyBlocked(browser, frame, target, decision.Reason(), isRedirect, url, evaluatedState);
+        NotifyBlocked(browser, frame, target, decision.Reason(), isRedirect, fromHome, evaluatedState);
         return true;
     }
 
     // Un cambio de sesión o instalación durante la evaluación impide aplicar el permiso anterior.
     if (!policyManager_->IsCurrentContext(state->context)) {
-        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, url, evaluatedState);
+        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, fromHome, evaluatedState);
         return true;
     }
     return false;
@@ -82,7 +91,7 @@ bool SecurityRequestHandler::ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRe
 
 void SecurityRequestHandler::NotifyBlocked(
     CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const UrlTarget& target,
-    SecurityReason reason, bool isRedirect, const CefString& url, const std::shared_ptr<const PolicyManager::State>& state) {
+    SecurityReason reason, bool isRedirect, bool fromHome, const std::shared_ptr<const PolicyManager::State>& state) {
     CEF_REQUIRE_UI_THREAD();
     if (lastOperationId_ == std::numeric_limits<std::uint64_t>::max()) {
         std::fputs("CEF navigation blocked; decision correlation counter exhausted.\n", stderr);
@@ -95,7 +104,7 @@ void SecurityRequestHandler::NotifyBlocked(
     notice.browserId = browser->GetIdentifier();
     notice.frameId = frame->GetIdentifier().ToString();
     notice.mainFrame = frame->IsMain();
-    notice.blockedHomePage = notice.mainFrame && url == kBrowserHomeUrl;
+    notice.blockedHomePage = fromHome;
     notice.redirect = isRedirect;
     notice.host = target.Host();
     notice.decision = SecurityDecision(reason);

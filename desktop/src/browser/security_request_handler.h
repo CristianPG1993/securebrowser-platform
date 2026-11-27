@@ -1,5 +1,6 @@
 #pragma once
 
+#include "browser/browser_home.h"
 #include "browser/cef_url_adapter.h"
 #include "browser/navigation_decision_notice.h"
 #include "security/policy_manager.h"
@@ -21,7 +22,7 @@ public:
     // El receptor se ejecuta en UI CEF, debe ser breve y comunicar si acepta el aviso.
     using DecisionCallback = std::function<bool(const NavigationDecisionNotice&)>;
     explicit SecurityRequestHandler(std::shared_ptr<PolicyManager> policyManager,
-                                    DecisionCallback onDecision = {});
+                                    DecisionCallback onDecision = {}, CefString homeUrl = kBrowserHomeUrl);
 
     // Prohíbe crear un handler copiando otro. Sí permite construir otros handlers independientes.
     SecurityRequestHandler(const SecurityRequestHandler&) = delete;
@@ -52,15 +53,18 @@ private:
     // Comparte las mismas guardas para una petición nueva y para un documento ya existente.
     // true indica bloqueo; la decisión continúa perteneciendo a PolicyManager y UrlFilter.
     [[nodiscard]] bool ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                                      const CefString& url, bool isRedirect);
+                                      const CefString& url, bool isRedirect, bool fromHome);
 
     // La entrega fallida se diagnostica y nunca convierte una cancelación en permiso.
     void NotifyBlocked(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                       const UrlTarget& target, SecurityReason reason, bool isRedirect, const CefString& url,
+                       const UrlTarget& target, SecurityReason reason, bool isRedirect, bool fromHome,
                        const std::shared_ptr<const PolicyManager::State>& state);
 
     const std::shared_ptr<PolicyManager> policyManager_;
     const DecisionCallback onDecision_;
+    const CefString homeUrl_;
+    // Un handler por navegador. Solo una navegación nueva del marco principal cambia este origen en UI CEF.
+    bool mainNavigationFromHome_ = false;
     // Solo se incrementa en el hilo UI de CEF y no depende de la URL ni del tiempo.
     static std::uint64_t lastOperationId_;
     CefUrlAdapter urlAdapter_;
