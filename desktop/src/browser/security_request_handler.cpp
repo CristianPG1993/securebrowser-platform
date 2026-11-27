@@ -1,5 +1,7 @@
 #include "browser/security_request_handler.h"
 
+#include "browser/browser_home.h"
+
 #include "include/cef_parser.h"
 #include "include/wrapper/cef_helpers.h"
 
@@ -57,7 +59,7 @@ bool SecurityRequestHandler::ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRe
     const auto state = policyManager_->ReadState();
     const UrlTarget target = urlAdapter_.Parse(url);
     if (!state) {
-        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, nullptr);
+        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, url, nullptr);
         return true;
     }
 
@@ -66,13 +68,13 @@ bool SecurityRequestHandler::ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRe
     const auto evaluatedState = policy.state && policy.state->context == state->context
         ? policy.state : state;
     if (decision.Action() == SecurityAction::Block) {
-        NotifyBlocked(browser, frame, target, decision.Reason(), isRedirect, evaluatedState);
+        NotifyBlocked(browser, frame, target, decision.Reason(), isRedirect, url, evaluatedState);
         return true;
     }
 
     // Un cambio de sesión o instalación durante la evaluación impide aplicar el permiso anterior.
     if (!policyManager_->IsCurrentContext(state->context)) {
-        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, evaluatedState);
+        NotifyBlocked(browser, frame, target, SecurityReason::InvalidContext, isRedirect, url, evaluatedState);
         return true;
     }
     return false;
@@ -80,7 +82,7 @@ bool SecurityRequestHandler::ShouldBlockUrl(CefRefPtr<CefBrowser> browser, CefRe
 
 void SecurityRequestHandler::NotifyBlocked(
     CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const UrlTarget& target,
-    SecurityReason reason, bool isRedirect, const std::shared_ptr<const PolicyManager::State>& state) {
+    SecurityReason reason, bool isRedirect, const CefString& url, const std::shared_ptr<const PolicyManager::State>& state) {
     CEF_REQUIRE_UI_THREAD();
     if (lastOperationId_ == std::numeric_limits<std::uint64_t>::max()) {
         std::fputs("CEF navigation blocked; decision correlation counter exhausted.\n", stderr);
@@ -93,6 +95,7 @@ void SecurityRequestHandler::NotifyBlocked(
     notice.browserId = browser->GetIdentifier();
     notice.frameId = frame->GetIdentifier().ToString();
     notice.mainFrame = frame->IsMain();
+    notice.blockedHomePage = notice.mainFrame && url == kBrowserHomeUrl;
     notice.redirect = isRedirect;
     notice.host = target.Host();
     notice.decision = SecurityDecision(reason);

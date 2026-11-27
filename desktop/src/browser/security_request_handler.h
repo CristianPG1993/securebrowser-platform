@@ -56,7 +56,7 @@ private:
 
     // La entrega fallida se diagnostica y nunca convierte una cancelación en permiso.
     void NotifyBlocked(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                       const UrlTarget& target, SecurityReason reason, bool isRedirect,
+                       const UrlTarget& target, SecurityReason reason, bool isRedirect, const CefString& url,
                        const std::shared_ptr<const PolicyManager::State>& state);
 
     const std::shared_ptr<PolicyManager> policyManager_;

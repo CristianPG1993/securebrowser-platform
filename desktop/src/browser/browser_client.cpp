@@ -1,6 +1,7 @@
 #include "browser_client.h"
 
 #include "browser/browser_history_visitor.h"
+#include "browser/browser_home.h"
 
 #include "include/base/cef_callback.h"
 #include "include/cef_frame.h"
@@ -31,11 +32,6 @@ BrowserClient::BrowserClient(BrowserClientCallbacks callbacks,
 }
 
 BrowserClient::~BrowserClient() = default;
-
-const char* BrowserClient::HomeUrl() noexcept {
-    // Conserva el destino de arranque existente, sin excepciones por tratarse de Inicio.
-    return "https://example.com/";
-}
 
 CefRefPtr<CefLifeSpanHandler> BrowserClient::GetLifeSpanHandler() {
     // CEF recibe una referencia al mismo cliente, visto como receptor del ciclo de vida.
@@ -76,7 +72,7 @@ void BrowserClient::CreateBrowser(CefWindowInfo window_info) {
     CefBrowserSettings settings;
     // CEF copia los parámetros y conserva su referencia al cliente mientras crea el navegador.
     const bool accepted = CefBrowserHost::CreateBrowser(
-        window_info, this, HomeUrl(), settings, nullptr, nullptr);
+        window_info, this, kBrowserHomeUrl, settings, nullptr, nullptr);
     std::fprintf(stderr, "CEF browser creation requested; accepted: %d; CEF UI thread: %d.\n",
                  accepted, CefCurrentlyOn(TID_UI));
     if (!accepted) {
@@ -117,7 +113,7 @@ void BrowserClient::Navigate(std::string url) {
 void BrowserClient::GoHome() {
     CEF_REQUIRE_UI_THREAD();
     // Navigate descarta tareas tardías y LoadURL vuelve a pasar por el handler de seguridad.
-    Navigate(HomeUrl());
+    Navigate(kBrowserHomeUrl);
 }
 
 void BrowserClient::GoBack() {

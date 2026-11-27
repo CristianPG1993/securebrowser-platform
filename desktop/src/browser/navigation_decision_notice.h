@@ -23,6 +23,8 @@ struct NavigationDecisionNotice {
     std::optional<std::int64_t> policyId;
     std::string host;
     SecurityDecision decision{SecurityReason::InvalidContext};
+    // Permite cerrar el aviso sin reintentar si la política ha bloqueado el propio Inicio.
+    bool blockedHomePage = false;
 };
 
 }  // namespace sbp
