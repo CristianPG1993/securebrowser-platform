@@ -583,15 +583,7 @@ target_link_libraries(SecureBrowser PRIVATE
 )
 sbp_deploy_icu(SecureBrowser)
 
-# El icono se carga en el proceso principal, sin inicializar recursos Qt en los subprocesos CEF.
-file(GENERATE
-    OUTPUT "$<TARGET_FILE_DIR:SecureBrowser>/securebrowser-desktop.svg"
-    INPUT "${CMAKE_CURRENT_SOURCE_DIR}/../assets/securebrowser-desktop.svg"
-    TARGET SecureBrowser
-    NEWLINE_STYLE LF
-)
-
-# Windows obtiene el icono del archivo EXE antes de que el proceso principal cree QApplication.
+# Windows lee el icono del EXE y Qt carga el SVG que se despliega junto a él.
 add_subdirectory(tools/bootstrap_icon)
 add_dependencies(SecureBrowser sbp_deploy_bootstrap)
 

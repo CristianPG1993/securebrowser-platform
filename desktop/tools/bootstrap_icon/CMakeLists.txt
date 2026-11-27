@@ -1,7 +1,8 @@
 enable_language(RC)
 add_executable(sbp_bootstrap_icon main.cpp icon.rc)
 target_compile_definitions(sbp_bootstrap_icon PRIVATE UNICODE _UNICODE)
-target_include_directories(sbp_bootstrap_icon PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../assets")
+set(icon_assets_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../assets")
+target_include_directories(sbp_bootstrap_icon PRIVATE "${icon_assets_dir}")
 
 # Se trabaja sobre una copia privada. La salida se publica solo tras actualizar los recursos.
 set(bootstrap_dir "${CMAKE_CURRENT_BINARY_DIR}/branded/$<CONFIG>")
@@ -16,9 +17,11 @@ add_custom_command(
     COMMENT "Embedding the SecureBrowser icon in the CEF bootstrap copy"
     VERBATIM
 )
+# Esta dependencia repone también el SVG si falta, incluso cuando la DLL ya está compilada.
 add_custom_target(sbp_deploy_bootstrap
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:SecureBrowser>"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${bootstrap_exe}" "$<TARGET_FILE_DIR:SecureBrowser>/SecureBrowser.exe"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${bootstrap_exe}" "${icon_assets_dir}/securebrowser-desktop.svg" "$<TARGET_FILE_DIR:SecureBrowser>"
     DEPENDS "${bootstrap_exe}"
     VERBATIM
 )
