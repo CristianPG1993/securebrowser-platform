@@ -1,5 +1,12 @@
 # SecureBrowser Platform para Android
 
+## Icono del lanzador
+
+El diseño original está en [securebrowser-android.svg](../assets/securebrowser-android.svg).
+Al cambiarlo, vuelve a exportar los WebP de `app/src/main/res/mipmap-*` y la máscara
+monocroma de `drawable-xxxhdpi`. El manifiesto usa `@mipmap/ic_launcher` y
+`@mipmap/ic_launcher_round`; Android elige la densidad correspondiente.
+
 ## Entorno de compilación
 
 Versiones previstas para la primera compilación del módulo `app`, según el
