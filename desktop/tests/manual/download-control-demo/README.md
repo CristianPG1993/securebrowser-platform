@@ -8,6 +8,27 @@ La herramienta utiliza Python solo en el equipo de desarrollo. No forma parte
 del runtime ni es una dependencia del ZIP de demostración. Todos los archivos
 servidos contienen texto inerte; sus nombres permiten comprobar las reglas.
 
+## Defensa con Android y el backend
+
+En Android, entra como administrador y abre la política asignada al dispositivo.
+Activa el filtrado de URL y el control de descargas en modo lista de bloqueo.
+Deja permitidos inicialmente el dominio que vas a mostrar (por ejemplo, `as.com`),
+Samplelib, la página de Inicio y la extensión `pdf`. En Desktop, inicia sesión
+con el usuario del dispositivo y comprueba que aparece **Política aplicada**.
+
+1. **Bloqueo de una página.** Abre [la portada de AS](https://as.com/) en Desktop
+   y muéstrala cargada. En Android, añade `as.com` a los dominios bloqueados y
+   `pdf` a las extensiones bloqueadas. Guarda ambos cambios y pulsa **Actualizar
+   política** en Desktop. La portada abierta debe quedar bloqueada. Enseña el
+   dominio y el nombre de la política en el aviso y pulsa **OK** para volver a Inicio.
+2. **Bloqueo de una extensión.** Abre la [página de PDF de Samplelib](https://samplelib.com/es/sample-pdf.html)
+   en Desktop y pulsa **↓** junto a «Documento PDF con texto, 1 página».
+   La página debe abrirse y el intento de descargar `sample1.pdf` debe mostrar
+   **Descarga bloqueada** antes del diálogo de guardado. Pulsa **OK**.
+
+Para cerrar la demostración, abre el historial del dispositivo en Android y
+muestra **URL bloqueada** y **Descarga bloqueada** con la hora de los intentos.
+
 ## Preparación
 
 Desde la raíz del repositorio, iniciar el servidor en una terminal:
