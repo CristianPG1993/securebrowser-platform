@@ -1,5 +1,12 @@
-SECUREBROWSER DEMO
-Guía para probar las dos políticas locales en Windows 11 x64
+SecureBrowser Desktop — Guía de la demo autónoma sin backend
+
+En esta demo probarás dos políticas que vienen incluidas en el navegador.
+Primero comprobarás cómo cambia el acceso a YouTube al cambiar de política.
+Después guardarás un PDF y verás qué ocurre al elegir una extensión bloqueada.
+
+Para empezar necesitas Windows 11 x64, el instalador SecureBrowser-Setup.exe
+y conexión a Internet para abrir las páginas de ejemplo. Puedes hacer las
+dos pruebas sin cuenta, sin Android y con el backend apagado.
 
 Instalación e inicio
 1. Abre SecureBrowser-Setup.exe y pulsa «Instalar». La instalación es para tu
@@ -32,12 +39,7 @@ La política restrictiva bloquea Facebook, Instagram, TikTok, X, YouTube,
 Twitch y Netflix, incluidos sus subdominios, y las extensiones EXE y MSI.
 También comprueba el nombre definitivo elegido en «Guardar como».
 
-Requisitos y cierre
-Las páginas de los ejemplos necesitan Internet. Las políticas están incluidas
-en la demo y funcionan sin cuenta, Android, Docker ni conexión al backend.
+Cierre y desinstalación
 Cierra la ventana con la X. Para desinstalar, abre Configuración de Windows →
 Aplicaciones → Aplicaciones instaladas → SecureBrowser Demo → Desinstalar.
 Tus descargas y el perfil local de navegación permanecen en tu cuenta.
-
-Si has recibido el ZIP portátil, extrae la carpeta completa en tu Escritorio
-y abre Iniciar-demo.cmd. Desde ese punto puedes seguir las mismas pruebas.
