@@ -55,11 +55,9 @@ desde código y arrancarlo junto a PostgreSQL 17, con datos persistentes y API e
 La [guía rápida de pruebas](backend/README.md#guía-rápida-de-pruebas) incluye la
 configuración, el arranque y las 28 comprobaciones Postman.
 
-La entrega del bloque 5 cierra el backend MVP: su alcance queda congelado en
+La entrega del bloque 5 cerró el backend MVP. Su alcance abarca
 autenticación y datos demo, Policy, consultas de Device, SecurityEvent y entrega
-reproducible. El desarrollo continúa en Desktop C++/CEF. No se incorporan CRUDs
-adicionales ni nuevas funcionalidades backend; las funcionalidades aplazadas
-quedan fuera del alcance implementado.
+reproducible.
 
 Los requisitos y comandos de ejecución están disponibles en el
 [README del backend](backend/README.md).
@@ -74,8 +72,9 @@ la revisión probada, los resultados y sus límites.
 
 El [README de Desktop](desktop/README.md) reúne requisitos y versiones,
 preparación de dependencias, compilación, ejecución, sandbox, runtime, logs
-y problemas conocidos. Foundation todavía no se comunica con el backend ni
-implementa REST, login, políticas, Security Engine, SQLite o pestañas completas.
+y problemas conocidos. Desde la entrega de Foundation, Desktop ha incorporado el
+motor de políticas, el login, la consulta de la política asignada y el envío de
+eventos de bloqueo.
 
 ## Integración continua
 
@@ -106,6 +105,9 @@ reintentos; el renderizado, navegación, foco y tamaño requieren las
 
 ## Documentación
 
+- [Guía visual de la demo autónoma de Desktop](docs/entrega/GUIA_EVALUACION_DEMO_AUTONOMA.md). Instalar el navegador en Windows y probar sus dos políticas locales. [Guía breve incluida en el instalador](desktop/distribution/LEEME-demo.txt).
+- [Evaluación con backend, Android y Desktop](docs/entrega/GUIA_EVALUACION_COMPLETA.md). Cambiar las reglas desde Android, aplicarlas en Desktop y consultar los eventos.
+- [Matriz de evidencias del TFG](docs/MATRIZ_EVIDENCIAS_TFG.md). Revisiones probadas, resultados, límites y correspondencia con la memoria.
 - [Compilar y ejecutar Desktop Foundation](desktop/README.md).
 - [Validación de la guía desde un clon limpio](desktop/docs/clean-clone-validation.md).
 - [Arquitectura general](docs/architecture/overview.md).
